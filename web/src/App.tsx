@@ -95,7 +95,7 @@ const App: React.FC = () => {
         <Paper sx={{ p: 4, textAlign: 'center', width: '100%', maxWidth: 420 }}>
           <CircularProgress />
           <Typography variant="h6" sx={{ mt: 2, fontWeight: 700 }}>
-            Loading Power Wallet Intelligence…
+            Loading Coin Strat…
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
             Fetching BTC + macro series and recomputing signals in-browser.
@@ -151,7 +151,7 @@ const App: React.FC = () => {
               PW
             </Box>
             <Typography variant="h6" sx={{ fontWeight: 900, letterSpacing: -0.4 }}>
-              Power Wallet <Box component="span" sx={{ color: 'primary.main' }}>2026</Box>
+              Coin Strat <Box component="span" sx={{ color: 'primary.main' }}>2026</Box>
             </Typography>
           </Box>
 

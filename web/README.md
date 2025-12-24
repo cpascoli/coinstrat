@@ -1,6 +1,6 @@
-# Power Wallet 2026 Web Dashboard
+# Coin Strat 2026 Web Dashboard
 
-This is a React/TypeScript translation of the Power Wallet Pre-Accumulation Model, running live in the browser.
+This is a React/TypeScript translation of the Coin Strat Pre-Accumulation Model, running live in the browser.
 
 ## Features
 - **Live Data Fetching**: Fetches data from FRED (Macro), Binance (BTC Price Tail), and Blockchain.info (MVRV).

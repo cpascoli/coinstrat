@@ -9,7 +9,7 @@ const Documentation: React.FC = () => {
           <BookOpen className="h-8 w-8" />
         </div>
         <h1 className="text-4xl font-black text-slate-900 tracking-tight">Model Methodology</h1>
-        <p className="text-lg text-slate-500">The Power Wallet Pre-Accumulation Framework (2026 Edition)</p>
+        <p className="text-lg text-slate-500">The Coin Strat Pre-Accumulation Framework (2026 Edition)</p>
       </div>
 
       <section className="space-y-6">
@@ -18,7 +18,7 @@ const Documentation: React.FC = () => {
           <h2 className="text-2xl font-bold text-slate-800">System Architecture</h2>
         </div>
         <p className="text-slate-600 leading-relaxed">
-          The Power Wallet model is a multi-factor regime-switching engine designed to navigate the highly volatile Bitcoin market. 
+          The Coin Strat model is a multi-factor regime-switching engine designed to navigate the highly volatile Bitcoin market. 
           Unlike traditional "Buy and Hold" strategies, this system dynamically adjusts capital exposure based on the confluence 
           of global liquidity, macroeconomic health, and crypto-native valuation metrics.
         </p>
