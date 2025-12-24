@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-  Legend, AreaChart, Area, ReferenceArea 
+  AreaChart, Area, ReferenceArea 
 } from 'recharts';
 import { SignalData } from '../App';
 import { format } from 'date-fns';
@@ -67,44 +67,6 @@ function regimeColor(key: RegimeKey, v: 0 | 1 | 2) {
   return palette[v];
 }
 
-function inPlotLegendItem(color: string, label: string) {
-  return (
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-      <Box sx={{ width: 10, height: 10, borderRadius: 0.5, bgcolor: color, flex: '0 0 auto' }} />
-      <Typography variant="caption" sx={{ color: '#e5e7eb', lineHeight: 1.1 }}>
-        {label}
-      </Typography>
-    </Box>
-  );
-}
-
-function InPlotLegend(props: { items: Array<{ color: string; label: string }> }) {
-  return (
-    <Box
-      sx={{
-        position: 'absolute',
-        top: 10,
-        left: 10,
-        zIndex: 2,
-        border: '1px solid',
-        borderColor: 'rgba(148,163,184,0.35)',
-        bgcolor: 'rgba(2,6,23,0.75)',
-        backdropFilter: 'blur(6px)',
-        borderRadius: 2,
-        px: 1.25,
-        py: 1,
-        display: 'grid',
-        gap: 0.75,
-        minWidth: 160,
-      }}
-    >
-      {props.items.map((it) => (
-        <React.Fragment key={`${it.label}-${it.color}`}>{inPlotLegendItem(it.color, it.label)}</React.Fragment>
-      ))}
-    </Box>
-  );
-}
-
 const ChartsView: React.FC<Props> = ({ data }) => {
   const [range, setRange] = useState<RangeKey>('all');
 
@@ -162,6 +124,27 @@ const ChartsView: React.FC<Props> = ({ data }) => {
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
+      const fmt = (name: string, value: any) => {
+        const v = Number(value);
+        if (!Number.isFinite(v)) return String(value);
+
+        // Prices
+        if (name.includes('BTC')) return `$${v.toLocaleString()}`;
+
+        // Liquidity levels (WALCL, TGA, RRP, US_LIQ) are in "millions" -> show trillions
+        const trillionsKeys = new Set(['WALCL', 'WTREGEN', 'RRPONTSYD', 'US_LIQ']);
+        if (trillionsKeys.has(name)) return `$${(v / 1e6).toFixed(2)}T`;
+
+        // Percent series
+        if (name.includes('YOY') || name.includes('ROC') || name.includes('%')) return `${v.toFixed(2)}%`;
+
+        // Yield curve (can be negative; keep 2dp)
+        if (name.toLowerCase().includes('yield') || name.includes('YC')) return v.toFixed(2);
+
+        // Default
+        return v.toFixed(3);
+      };
+
       return (
         <div className="rounded-lg border border-slate-700/60 bg-slate-950/90 p-4 shadow-xl">
           <p className="mb-2 font-bold text-slate-100">{payload[0].payload.fullDate}</p>
@@ -170,9 +153,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               <div key={i} className="flex items-center justify-between gap-8">
                 <span className="text-xs text-slate-300" style={{ color: p.color }}>{p.name}:</span>
                 <span className="text-xs font-mono font-bold text-slate-100">
-                  {p.name.includes('BTC') ? `$${p.value.toLocaleString()}` : 
-                   p.name.includes('LIQ') && !p.name.includes('SCORE') ? `$${(p.value / 1e6).toFixed(2)}T` : 
-                   p.value}
+                  {fmt(p.name, p.value)}
                 </span>
               </div>
             ))}
@@ -252,16 +233,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
         </Stack>
         
         {/* IMPORTANT: set an explicit height so Recharts never renders into a 0px container in production */}
-        <Box sx={{ height: { xs: 360, sm: 460, md: 520 }, width: '100%', minWidth: 0, position: 'relative' }}>
-          <InPlotLegend
-            items={[
-              { color: '#e5e7eb', label: 'BTCUSD' },
-              { color: '#60a5fa', label: 'US_LIQ' },
-              { color: 'rgba(239,68,68,0.55)', label: 'LIQ 0' },
-              { color: 'rgba(148,163,184,0.55)', label: 'LIQ 1' },
-              { color: 'rgba(34,197,94,0.55)', label: 'LIQ 2' },
-            ]}
-          />
+        <Box sx={{ height: { xs: 360, sm: 460, md: 520 }, width: '100%', minWidth: 0 }}>
           <ResponsiveContainer width="100%" height="100%">
             <LineChart key={range} data={chartData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
               {liqSpans.map((s, i) => {
@@ -320,7 +292,6 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                 }}
               />
               <Tooltip content={<CustomTooltip />} />
-              <Legend verticalAlign="top" height={36} iconType="circle" />
               
               <Line 
                 yAxisId="btc"
@@ -349,44 +320,73 @@ const ChartsView: React.FC<Props> = ({ data }) => {
         </Box>
       </Paper>
 
-      {/* Business Cycle: inputs */}
+      {/* US Net Liquidity Inputs */}
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
-            Business Cycle Inputs
+            US Net Liquidity Inputs
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            SAHM, Yield Curve (10Y-3M) and New Orders proxies
+            Components used to compute US_LIQ = WALCL − WTREGEN − RRPONTSYD
           </Typography>
         </Box>
 
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="WALCL (Fed assets)" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
+          <Chip size="small" variant="outlined" label="WTREGEN (TGA)" sx={{ borderColor: '#fbbf24', color: '#fde68a' }} />
+          <Chip size="small" variant="outlined" label="RRPONTSYD (RRP)" sx={{ borderColor: '#a78bfa', color: '#ddd6fe' }} />
+          <Chip size="small" variant="outlined" label="US_LIQ" sx={{ borderColor: '#60a5fa', color: '#bfdbfe' }} />
+        </Stack>
+
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 2.5 }}>
+          {/* Components */}
           <Box sx={{ height: 320, width: '100%', minWidth: 0 }}>
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart key={`cycle-inputs-1-${range}`} data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              <LineChart key={`liq-inputs-1-${range}`} data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
                 <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                <YAxis yAxisId="sahm" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                <YAxis yAxisId="yc" orientation="right" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                <YAxis
+                  yAxisId="lvl"
+                  domain={['auto', 'auto']}
+                  tick={{ fontSize: 10, fill: '#94a3b8' }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(v) => (typeof v === 'number' ? `$${(v / 1e6).toFixed(1)}T` : '')}
+                />
                 <Tooltip content={<CustomTooltip />} />
-                <Legend verticalAlign="top" height={36} iconType="circle" />
-                <Line yAxisId="sahm" type="monotone" dataKey="SAHM" name="SAHM" stroke="#a78bfa" strokeWidth={2} dot={false} isAnimationActive={false} />
-                <Line yAxisId="yc" type="monotone" dataKey="YC_M" name="Yield Curve (10Y-3M)" stroke="#34d399" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line yAxisId="lvl" type="monotone" dataKey="WALCL" name="WALCL" stroke="#e5e7eb" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line yAxisId="lvl" type="monotone" dataKey="WTREGEN" name="WTREGEN" stroke="#fbbf24" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line yAxisId="lvl" type="monotone" dataKey="RRPONTSYD" name="RRPONTSYD" stroke="#a78bfa" strokeWidth={2} dot={false} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           </Box>
 
+          {/* Derived US_LIQ + YoY */}
           <Box sx={{ height: 320, width: '100%', minWidth: 0 }}>
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart key={`cycle-inputs-2-${range}`} data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              <LineChart key={`liq-inputs-2-${range}`} data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
                 <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                <YAxis yAxisId="no" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                <YAxis yAxisId="noy" orientation="right" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => (typeof v === 'number' ? `${v.toFixed(0)}%` : '')} />
+                <YAxis
+                  yAxisId="liq"
+                  domain={['auto', 'auto']}
+                  tick={{ fontSize: 10, fill: '#94a3b8' }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(v) => (typeof v === 'number' ? `$${(v / 1e6).toFixed(1)}T` : '')}
+                />
+                <YAxis
+                  yAxisId="yoy"
+                  orientation="right"
+                  domain={['auto', 'auto']}
+                  tick={{ fontSize: 10, fill: '#94a3b8' }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(v) => (typeof v === 'number' ? `${v.toFixed(0)}%` : '')}
+                />
                 <Tooltip content={<CustomTooltip />} />
-                <Legend verticalAlign="top" height={36} iconType="circle" />
-                <Line yAxisId="no" type="monotone" dataKey="NO" name="New Orders (level)" stroke="#60a5fa" strokeWidth={2} dot={false} isAnimationActive={false} />
-                <Line yAxisId="noy" type="monotone" dataKey="NO_YOY" name="New Orders YoY (%)" stroke="#fbbf24" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line yAxisId="liq" type="monotone" dataKey="US_LIQ" name="US_LIQ" stroke="#60a5fa" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line yAxisId="yoy" type="monotone" dataKey="US_LIQ_YOY" name="US_LIQ_YOY" stroke="#34d399" strokeWidth={2} dot={false} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           </Box>
@@ -410,15 +410,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           <Chip size="small" variant="outlined" label="Cycle 2: expansion" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
         </Stack>
 
-        <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0, position: 'relative' }}>
-          <InPlotLegend
-            items={[
-              { color: '#e5e7eb', label: 'BTCUSD' },
-              { color: 'rgba(239,68,68,0.55)', label: 'Cycle 0' },
-              { color: 'rgba(148,163,184,0.55)', label: 'Cycle 1' },
-              { color: 'rgba(34,197,94,0.55)', label: 'Cycle 2' },
-            ]}
-          />
+        <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
           <ResponsiveContainer width="100%" height="100%">
             <LineChart key={`btc-cycle-${range}`} data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
               {cycleSpans.map((s, i) => {
@@ -442,51 +434,53 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
               <YAxis yAxisId="btc" scale="log" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
               <Tooltip content={<CustomTooltip />} />
-              <Legend verticalAlign="top" height={36} iconType="circle" />
               <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTC Price" stroke="#e5e7eb" strokeWidth={2} dot={false} isAnimationActive={false} />
             </LineChart>
           </ResponsiveContainer>
         </Box>
       </Paper>
 
-      {/* Supporting timelines */}
-      <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' } }}>
-        <Paper sx={{ p: { xs: 2, sm: 3 } }}>
-          <Typography variant="h6" sx={{ fontWeight: 800, mb: 2 }}>
-            Liquidity & Cycle Scores (Timeline)
+      {/* Business Cycle: inputs (moved below BTC + cycle shading) */}
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Box sx={{ mb: 2.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            Business Cycle Inputs
           </Typography>
-          <Box sx={{ height: 280, width: '100%', minWidth: 0 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart key={`scores-${range}`} data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
-                <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} />
-                <YAxis domain={[0, 2]} ticks={[0, 1, 2]} tick={{ fontSize: 10, fill: '#94a3b8' }} />
-                <Tooltip content={<CustomTooltip />} />
-                <Area type="stepAfter" dataKey="LIQ_SCORE" name="LIQ_SCORE" stroke="#60a5fa" fill="#60a5fa" fillOpacity={0.12} isAnimationActive={false} />
-                <Area type="stepAfter" dataKey="CYCLE_SCORE_V2" name="CYCLE_SCORE" stroke="#34d399" fill="#34d399" fillOpacity={0.12} isAnimationActive={false} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </Box>
-        </Paper>
+          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            SAHM, Yield Curve (10Y-3M) and New Orders proxies
+          </Typography>
+        </Box>
 
-        <Paper sx={{ p: { xs: 2, sm: 3 } }}>
-          <Typography variant="h6" sx={{ fontWeight: 800, mb: 2 }}>
-            Permission Logic History
-          </Typography>
-          <Box sx={{ height: 280, width: '100%', minWidth: 0 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 2.5 }}>
+          <Box sx={{ height: 320, width: '100%', minWidth: 0 }}>
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart key={`perm-${range}`} data={chartData}>
+              <LineChart key={`cycle-inputs-1-${range}`} data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
-                <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} />
-                <YAxis domain={[0, 1]} ticks={[0, 1]} tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                <YAxis yAxisId="sahm" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                <YAxis yAxisId="yc" orientation="right" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
                 <Tooltip content={<CustomTooltip />} />
-                <Area type="stepAfter" dataKey="CORE_ON" name="CORE_ON" stroke="#60a5fa" fill="#60a5fa" fillOpacity={0.18} isAnimationActive={false} />
-                <Area type="stepAfter" dataKey="MACRO_ON" name="MACRO_ON" stroke="#fbbf24" fill="#fbbf24" fillOpacity={0.18} isAnimationActive={false} />
-              </AreaChart>
+                <Line yAxisId="sahm" type="monotone" dataKey="SAHM" name="SAHM" stroke="#a78bfa" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line yAxisId="yc" type="monotone" dataKey="YC_M" name="Yield Curve (10Y-3M)" stroke="#34d399" strokeWidth={2} dot={false} isAnimationActive={false} />
+              </LineChart>
             </ResponsiveContainer>
           </Box>
-        </Paper>
-      </Box>
+
+          <Box sx={{ height: 320, width: '100%', minWidth: 0 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart key={`cycle-inputs-2-${range}`} data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+                <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                <YAxis yAxisId="no" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                <YAxis yAxisId="noy" orientation="right" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => (typeof v === 'number' ? `${v.toFixed(0)}%` : '')} />
+                <Tooltip content={<CustomTooltip />} />
+                <Line yAxisId="no" type="monotone" dataKey="NO" name="New Orders (level)" stroke="#60a5fa" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line yAxisId="noy" type="monotone" dataKey="NO_YOY" name="New Orders YoY (%)" stroke="#fbbf24" strokeWidth={2} dot={false} isAnimationActive={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </Box>
+        </Box>
+      </Paper>
     </Box>
   );
 };
