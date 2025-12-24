@@ -1,6 +1,23 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { SignalData } from '../App';
-import { AlertTriangle, CheckCircle2, PlayCircle, PauseCircle, TrendingUp, Info, Activity } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, PauseCircle, PlayCircle, TrendingUp, Info, Activity } from 'lucide-react';
+import {
+  Box,
+  Card,
+  CardContent,
+  CardHeader,
+  Chip,
+  Divider,
+  Grid,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Typography,
+} from '@mui/material';
 
 interface Props {
   current: SignalData;
@@ -43,131 +60,218 @@ const Dashboard: React.FC<Props> = ({ current, history }) => {
   };
 
   const rec = getRecommendation();
+  const trendOk = current.PRICE_REGIME_ON === 1;
+
+  const actionTone = rec.action === 'PAUSE' ? 'error' : rec.action === 'ACCEL' ? 'success' : 'primary';
+  const actionIcon =
+    rec.action === 'PAUSE'
+      ? <PauseCircle className="h-8 w-8 text-red-300" />
+      : rec.action === 'ACCEL'
+        ? <TrendingUp className="h-8 w-8 text-green-300" />
+        : <PlayCircle className="h-8 w-8 text-blue-300" />;
+
+  const statCards = useMemo(
+    () => [
+      { title: 'Liquidity', value: current.LIQ_SCORE, max: 2, icon: <Activity className="text-blue-300" /> },
+      { title: 'Cycle', value: current.CYCLE_SCORE_V2, max: 2, icon: <TrendingUp className="text-emerald-300" /> },
+      { title: 'USD', value: current.DXY_SCORE, max: 2, icon: <Activity className="text-amber-300" /> },
+      { title: 'Valuation', value: current.VAL_SCORE, max: 2, icon: <Info className="text-violet-300" /> },
+    ],
+    [current]
+  );
 
   return (
-    <div className="space-y-6">
-      {/* Hero Recommendation */}
-      <div className={`rounded-2xl border-2 p-8 shadow-sm transition-all ${
-        rec.action === 'PAUSE' ? 'border-red-100 bg-red-50/50' : 
-        rec.action === 'ACCEL' ? 'border-green-100 bg-green-50/50' : 
-        'border-blue-100 bg-blue-50/50'
-      }`}>
-        <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-          <div>
-            <span className="text-sm font-bold uppercase tracking-wider text-slate-500">Current Action</span>
-            <div className="mt-1 flex items-center gap-3">
-              {rec.action === 'PAUSE' && <PauseCircle className="h-10 w-10 text-red-500" />}
-              {rec.action === 'ACCEL' && <TrendingUp className="h-10 w-10 text-green-500" />}
-              {rec.action === 'BASE' && <PlayCircle className="h-10 w-10 text-blue-500" />}
-              <h1 className={`text-5xl font-black ${
-                rec.action === 'PAUSE' ? 'text-red-600' : 
-                rec.action === 'ACCEL' ? 'text-green-600' : 
-                'text-blue-600'
-              }`}>{rec.action}</h1>
-            </div>
-            <p className="mt-4 text-lg font-medium text-slate-700">{rec.reason}</p>
-          </div>
-          
-          <div className="flex flex-col items-center gap-2 rounded-xl bg-white p-6 shadow-sm border border-slate-100">
-            <span className="text-sm font-medium text-slate-500">BTC Price</span>
-            <span className="text-3xl font-bold">${current.BTCUSD.toLocaleString()}</span>
-            <div className={`flex items-center gap-1 text-sm font-bold ${current.PRICE_REGIME_ON ? 'text-green-600' : 'text-red-600'}`}>
-              {current.PRICE_REGIME_ON ? <CheckCircle2 className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
-              Trend {current.PRICE_REGIME_ON ? 'Positive' : 'Negative'}
-            </div>
-          </div>
-        </div>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      {/* Hero: Action */}
+      <Card
+        sx={{
+          borderWidth: 2,
+          borderStyle: 'solid',
+          borderColor: rec.action === 'PAUSE' ? 'error.main' : rec.action === 'ACCEL' ? 'success.main' : 'primary.main',
+          backgroundImage:
+            rec.action === 'PAUSE'
+              ? 'radial-gradient(700px circle at 15% 0%, rgba(239,68,68,0.12), transparent 55%)'
+              : rec.action === 'ACCEL'
+                ? 'radial-gradient(700px circle at 15% 0%, rgba(34,197,94,0.12), transparent 55%)'
+                : 'radial-gradient(700px circle at 15% 0%, rgba(96,165,250,0.12), transparent 55%)',
+        }}
+      >
+        <CardHeader
+          avatar={actionIcon}
+          title={<Typography sx={{ fontWeight: 950, letterSpacing: -0.4 }}>ACTION: {rec.action}</Typography>}
+          subheader={rec.reason}
+          action={<Chip label={rec.action} color={actionTone as any} variant="filled" />}
+        />
+        <Divider />
+        <CardContent>
+          <Grid container spacing={2.5} alignItems="stretch">
+            <Grid item xs={12} md={4}>
+              <Card variant="outlined" sx={{ height: '100%' }}>
+                <CardContent>
+                  <Typography variant="overline" color="text.secondary">
+                    BTC Price
+                  </Typography>
+                  <Typography variant="h5" sx={{ fontWeight: 950, mt: 0.5 }}>
+                    ${current.BTCUSD.toLocaleString()}
+                  </Typography>
+                  <Stack direction="row" alignItems="center" gap={1} sx={{ mt: 1 }}>
+                    {trendOk ? <CheckCircle2 className="h-4 w-4 text-green-300" /> : <AlertTriangle className="h-4 w-4 text-red-300" />}
+                    <Typography variant="body2" color={trendOk ? 'success.main' : 'error.main'} sx={{ fontWeight: 800 }}>
+                      Trend {trendOk ? 'Positive' : 'Negative'}
+                    </Typography>
+                  </Stack>
+                </CardContent>
+              </Card>
+            </Grid>
 
-        {rec.blockers.length > 0 && (
-          <div className="mt-8 rounded-lg bg-white/50 p-4 border border-slate-200">
-            <div className="flex items-center gap-2 text-sm font-bold text-slate-600 mb-2">
-              <Info className="h-4 w-4" /> ACTIVE BLOCKERS & RISKS
-            </div>
-            <ul className="grid gap-2 sm:grid-cols-2">
-              {rec.blockers.map((b, i) => (
-                <li key={i} className="flex items-start gap-2 text-sm text-slate-600">
-                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" />
-                  {b}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
+            <Grid item xs={12} md={8}>
+              <Card variant="outlined" sx={{ height: '100%' }}>
+                <CardContent>
+                  <Stack direction="row" alignItems="center" justifyContent="space-between" gap={2}>
+                    <Typography variant="overline" color="text.secondary">
+                      Active blockers / risks
+                    </Typography>
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      color={rec.blockers.length ? 'warning' : 'success'}
+                      label={rec.blockers.length ? `${rec.blockers.length} items` : 'None detected'}
+                    />
+                  </Stack>
+                  <Divider sx={{ my: 1.5 }} />
 
-      {/* Quick Stats Grid */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard title="Liquidity Score" value={current.LIQ_SCORE} max={2} icon={<Activity className="text-blue-500" />} />
-        <StatCard title="Business Cycle" value={current.CYCLE_SCORE_V2} max={2} icon={<TrendingUp className="text-emerald-500" />} />
-        <StatCard title="USD Regime" value={current.DXY_SCORE} max={2} icon={<Activity className="text-orange-500" />} />
-        <StatCard title="Valuation" value={current.VAL_SCORE} max={2} icon={<Info className="text-purple-500" />} />
-      </div>
+                  {rec.blockers.length ? (
+                    <Grid container spacing={1.25}>
+                      {rec.blockers.map((b, i) => (
+                        <Grid item xs={12} sm={6} key={i}>
+                          <Box
+                            sx={{
+                              border: '1px solid',
+                              borderColor: 'divider',
+                              borderRadius: 2,
+                              px: 2,
+                              py: 1.25,
+                              bgcolor: 'rgba(2,6,23,0.10)',
+                              height: '100%',
+                            }}
+                          >
+                            <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                              {b}
+                            </Typography>
+                          </Box>
+                        </Grid>
+                      ))}
+                    </Grid>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">
+                      No blockers detected.
+                    </Typography>
+                  )}
+                </CardContent>
+              </Card>
+            </Grid>
+          </Grid>
+        </CardContent>
+      </Card>
 
-      {/* Raw Data Table Snapshot */}
-      <div className="rounded-xl border bg-white overflow-hidden shadow-sm">
-        <div className="border-b bg-slate-50 px-6 py-4">
-          <h3 className="font-bold text-slate-700">Snapshot Metrics</h3>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b bg-slate-50/50 text-xs uppercase text-slate-500">
-              <tr>
-                <th className="px-6 py-3 font-bold">Metric</th>
-                <th className="px-6 py-3 font-bold text-right">Value</th>
-                <th className="px-6 py-3 font-bold text-right">Regime</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              <MetricRow label="US Net Liquidity" value={`$${(current.US_LIQ / 1e6).toFixed(2)}T`} score={current.LIQ_SCORE} />
-              <MetricRow label="Liquidity YoY" value={`${current.US_LIQ_YOY.toFixed(1)}%`} score={current.LIQ_SCORE} />
-              <MetricRow label="Sahm Rule (Unemployment)" value={current.SAHM?.toFixed(2) ?? 'N/A'} score={current.CYCLE_SCORE_V2} />
-              <MetricRow label="Yield Curve (10Y-3M)" value={current.YC_M?.toFixed(2) ?? 'N/A'} score={current.CYCLE_SCORE_V2} />
-              <MetricRow label="MVRV Ratio" value={current.MVRV?.toFixed(2) ?? 'N/A'} score={current.VAL_SCORE} />
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+      {/* Quick Stats */}
+      <Grid container spacing={2.5}>
+        {statCards.map((s) => (
+          <Grid item xs={12} sm={6} lg={3} key={s.title}>
+            <ScoreMiniCard title={s.title} value={s.value} max={s.max} icon={s.icon} />
+          </Grid>
+        ))}
+      </Grid>
+
+      {/* Snapshot */}
+      <Card>
+        <CardHeader title={<Typography sx={{ fontWeight: 900 }}>Snapshot Metrics</Typography>} />
+        <Divider />
+        <CardContent>
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ color: 'text.secondary', fontWeight: 900 }}>Metric</TableCell>
+                  <TableCell sx={{ color: 'text.secondary', fontWeight: 900 }} align="right">
+                    Value
+                  </TableCell>
+                  <TableCell sx={{ color: 'text.secondary', fontWeight: 900 }} align="right">
+                    Regime
+                  </TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                <SnapshotRow label="US Net Liquidity" value={fmtTrillions(current.US_LIQ)} score={current.LIQ_SCORE} />
+                <SnapshotRow label="Liquidity YoY" value={fmtPct(current.US_LIQ_YOY)} score={current.LIQ_SCORE} />
+                <SnapshotRow label="Sahm Rule" value={fmtNum(current.SAHM, 2)} score={current.CYCLE_SCORE_V2} />
+                <SnapshotRow label="Yield Curve (10Y-3M)" value={fmtNum(current.YC_M, 2)} score={current.CYCLE_SCORE_V2} />
+                <SnapshotRow label="MVRV" value={fmtNum(current.MVRV, 2)} score={current.VAL_SCORE} />
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </CardContent>
+      </Card>
+    </Box>
   );
 };
 
-const StatCard = ({ title, value, max, icon }: any) => (
-  <div className="rounded-xl border bg-white p-6 shadow-sm">
-    <div className="flex items-center justify-between mb-4">
-      <span className="text-sm font-bold text-slate-500 uppercase">{title}</span>
-      {icon}
-    </div>
-    <div className="flex items-baseline gap-2">
-      <span className="text-3xl font-bold">{value}</span>
-      <span className="text-slate-400">/ {max}</span>
-    </div>
-    <div className="mt-4 h-2 w-full rounded-full bg-slate-100">
-      <div 
-        className={`h-full rounded-full transition-all ${
-          value === 0 ? 'bg-red-400 w-1/4' : 
-          value === 1 ? 'bg-blue-400 w-2/4' : 
-          'bg-green-400 w-full'
-        }`}
-      />
-    </div>
-  </div>
-);
+function ScoreMiniCard(props: { title: string; value: number; max: number; icon: React.ReactNode }) {
+  const { title, value, max, icon } = props;
+  const color = value === 0 ? 'error' : value === 1 ? 'primary' : 'success';
+  return (
+    <Card>
+      <CardContent>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" gap={2}>
+          <Typography variant="overline" color="text.secondary">
+            {title}
+          </Typography>
+          {icon}
+        </Stack>
+        <Stack direction="row" alignItems="baseline" justifyContent="space-between" gap={2} sx={{ mt: 0.5 }}>
+          <Typography variant="h4" sx={{ fontWeight: 950 }}>
+            {value}
+            <Typography component="span" variant="body2" color="text.secondary" sx={{ ml: 0.75 }}>
+              / {max}
+            </Typography>
+          </Typography>
+          <Chip size="small" label={value === 0 ? 'RISK' : value === 1 ? 'NEUTRAL' : 'OPTIMAL'} color={color as any} variant="outlined" />
+        </Stack>
+      </CardContent>
+    </Card>
+  );
+}
 
-const MetricRow = ({ label, value, score }: any) => (
-  <tr>
-    <td className="px-6 py-4 font-medium text-slate-700">{label}</td>
-    <td className="px-6 py-4 text-right font-mono text-slate-600">{value}</td>
-    <td className="px-6 py-4 text-right">
-      <span className={`inline-block rounded-full px-3 py-1 text-xs font-bold ${
-        score === 0 ? 'bg-red-100 text-red-700' :
-        score === 1 ? 'bg-blue-100 text-blue-700' :
-        'bg-green-100 text-green-700'
-      }`}>
-        {score === 0 ? 'RISK' : score === 1 ? 'NEUTRAL' : 'OPTIMAL'}
-      </span>
-    </td>
-  </tr>
-);
+function SnapshotRow(props: { label: string; value: string; score: number }) {
+  const { label, value, score } = props;
+  const color = score === 0 ? 'error' : score === 1 ? 'primary' : 'success';
+  return (
+    <TableRow hover>
+      <TableCell sx={{ fontWeight: 700 }}>{label}</TableCell>
+      <TableCell align="right" sx={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace', fontWeight: 800 }}>
+        {value}
+      </TableCell>
+      <TableCell align="right">
+        <Chip size="small" label={score} color={color as any} variant="outlined" />
+      </TableCell>
+    </TableRow>
+  );
+}
+
+function fmtNum(x: any, digits = 2): string {
+  if (typeof x !== 'number' || !isFinite(x)) return 'n/a';
+  return x.toFixed(digits);
+}
+
+function fmtPct(x: any): string {
+  if (typeof x !== 'number' || !isFinite(x)) return 'n/a';
+  return `${x.toFixed(2)}%`;
+}
+
+function fmtTrillions(x: any): string {
+  if (typeof x !== 'number' || !isFinite(x)) return 'n/a';
+  return `$${(x / 1e6).toFixed(2)}T`;
+}
 
 export default Dashboard;
 

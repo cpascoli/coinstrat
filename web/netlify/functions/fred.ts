@@ -6,7 +6,20 @@ import fetch from 'node-fetch';
  * This bypasses CORS and keeps the API Key secure on the server.
  */
 export const handler: Handler = async (event) => {
-  const seriesId = event.queryStringParameters?.series_id;
+  // Support both:
+  // - /.netlify/functions/fred?series_id=WALCL
+  // - /.netlify/functions/fred/WALCL  (used by /api/fred/* redirect)
+  const seriesIdFromQuery = event.queryStringParameters?.series_id;
+  const seriesIdFromPath = (() => {
+    const p = (event.path || '').split('?')[0];
+    const parts = p.split('/').filter(Boolean);
+    const last = parts[parts.length - 1];
+    // If the last segment is literally "fred", there is no series id in the path.
+    if (!last || last.toLowerCase() === 'fred') return undefined;
+    return last;
+  })();
+
+  const seriesId = seriesIdFromQuery || seriesIdFromPath;
   const apiKey = process.env.FRED_API_KEY;
 
   if (!seriesId) {

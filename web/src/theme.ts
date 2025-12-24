@@ -3,11 +3,16 @@ import { alpha } from '@mui/material/styles';
 
 export const theme = createTheme({
   palette: {
-    mode: 'light',
-    primary: { main: '#2563eb' }, // blue-600-ish
+    mode: 'dark',
+    primary: { main: '#60a5fa' }, // blue-400-ish (pops on dark)
+    secondary: { main: '#a78bfa' }, // violet-400-ish
     background: {
-      default: '#f8fafc', // slate-50-ish
-      paper: '#ffffff',
+      default: '#0b1220', // deep slate/navy
+      paper: '#0f172a', // slate-900-ish
+    },
+    text: {
+      primary: '#e5e7eb', // gray-200
+      secondary: '#94a3b8', // slate-400
     },
   },
   shape: { borderRadius: 14 },
@@ -20,7 +25,7 @@ export const theme = createTheme({
     MuiPaper: {
       styleOverrides: {
         root: {
-          border: `1px solid ${alpha('#0f172a', 0.08)}`,
+          border: `1px solid ${alpha('#e5e7eb', 0.10)}`,
         },
       },
     },
@@ -28,7 +33,14 @@ export const theme = createTheme({
       styleOverrides: {
         root: {
           boxShadow: 'none',
-          borderBottom: `1px solid ${alpha('#0f172a', 0.08)}`,
+          borderBottom: `1px solid ${alpha('#e5e7eb', 0.10)}`,
+        },
+      },
+    },
+    MuiCssBaseline: {
+      styleOverrides: {
+        body: {
+          backgroundColor: '#0b1220',
         },
       },
     },

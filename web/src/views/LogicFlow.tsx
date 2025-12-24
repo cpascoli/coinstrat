@@ -1,164 +1,282 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { SignalData } from '../App';
-import { Binary, ShieldCheck, Zap, ToggleRight, CheckSquare, XCircle, ArrowDown } from 'lucide-react';
+import { Binary, ShieldCheck, Zap, ToggleRight } from 'lucide-react';
+import {
+  Box,
+  Card,
+  CardContent,
+  CardHeader,
+  Chip,
+  Divider,
+  Grid,
+  Stack,
+  Typography,
+} from '@mui/material';
 
 interface Props {
   current: SignalData;
 }
 
 const LogicFlow: React.FC<Props> = ({ current }) => {
+  const coreStatus = current.CORE_ON === 1;
+  const macroStatus = current.MACRO_ON === 1;
+  const accumStatus = current.ACCUM_ON === 1;
+
+  const macroScoreSum = useMemo(() => current.LIQ_SCORE + current.CYCLE_SCORE_V2, [current.LIQ_SCORE, current.CYCLE_SCORE_V2]);
+
   return (
-    <div className="space-y-8">
-      <div className="flex items-center gap-3 border-b pb-4">
-        <Binary className="h-8 w-8 text-blue-600" />
-        <h2 className="text-3xl font-black text-slate-800 tracking-tight">Signal Synthesis Logic</h2>
-      </div>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, pb: 1.5, borderBottom: '1px solid', borderColor: 'divider' }}>
+        <Binary className="h-8 w-8 text-blue-400" />
+        <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: -0.5 }}>
+          Signal Synthesis Logic
+        </Typography>
+      </Box>
 
-      <div className="grid gap-8 lg:grid-cols-2">
-        {/* Core Logic Section */}
-        <div className="space-y-6">
-          <SectionHeader 
-            icon={<ShieldCheck className="text-blue-500" />} 
-            title="CORE_ON: The Strategic Engine" 
-            status={current.CORE_ON === 1}
-          />
-          
-          <div className="rounded-xl border bg-white p-6 shadow-sm space-y-4">
-            <p className="text-sm text-slate-600 leading-relaxed">
-              The <strong>CORE_ON</strong> signal is a state-machine that manages "Value-led" accumulation. 
-              It allows entry when BTC is objectively cheap, or when price momentum confirms a bottom in fair-value.
-            </p>
-            
-            <div className="space-y-3">
-              <LogicStep 
-                title="Entry Condition" 
-                logic="(VAL=2) OR (VAL=1 AND PRICE_REGIME=1)" 
-                active={current.CORE_ON === 1} 
-              />
-              <ArrowDown className="mx-auto h-4 w-4 text-slate-300" />
-              <LogicStep 
-                title="Risk Filter" 
-                logic="DXY_SCORE ≥ 1" 
-                active={current.DXY_SCORE >= 1} 
-              />
-              <ArrowDown className="mx-auto h-4 w-4 text-slate-300" />
-              <LogicStep 
-                title="Exit Condition" 
-                logic="DXY_SCORE = 0 AND PRICE_REGIME = 0" 
-                active={current.DXY_SCORE === 0 && current.PRICE_REGIME_ON === 0} 
-                isExit
-              />
-            </div>
-          </div>
-        </div>
+      <Grid container spacing={2.5}>
+        <Grid item xs={12} lg={6}>
+          <Card>
+            <CardHeader
+              avatar={<ShieldCheck className="h-6 w-6 text-blue-300" />}
+              title={<Typography sx={{ fontWeight: 900 }}>CORE_ON · Core Engine</Typography>}
+              subheader="State-machine for value-led accumulation (entry/hold/exit)."
+              action={
+                <Chip
+                  label={coreStatus ? 'ACTIVE' : 'IDLE'}
+                  color={coreStatus ? 'success' : 'default'}
+                  variant={coreStatus ? 'filled' : 'outlined'}
+                  size="small"
+                />
+              }
+            />
+            <Divider />
+            <CardContent>
+              <Stack spacing={1.25}>
+                <LogicRule
+                  title="Entry condition"
+                  formula="(VAL=2) OR (VAL=1 AND PRICE_REGIME=1)"
+                  active={coreStatus}
+                />
+                <LogicRule
+                  title="Risk filter"
+                  formula="DXY_SCORE ≥ 1"
+                  active={current.DXY_SCORE >= 1}
+                />
+                <LogicRule
+                  title="Exit condition"
+                  formula="DXY_SCORE = 0 AND PRICE_REGIME = 0"
+                  active={current.DXY_SCORE === 0 && current.PRICE_REGIME_ON === 0}
+                  tone="danger"
+                />
 
-        {/* Macro Accelerator Section */}
-        <div className="space-y-6">
-          <SectionHeader 
-            icon={<Zap className="text-amber-500" />} 
-            title="MACRO_ON: The Tactical Accelerator" 
-            status={current.MACRO_ON === 1}
-          />
+                <Divider sx={{ my: 1 }} />
 
-          <div className="rounded-xl border bg-white p-6 shadow-sm space-y-4">
-            <p className="text-sm text-slate-600 leading-relaxed">
-              The <strong>MACRO_ON</strong> signal is a high-conviction "Throttle" that activates when 
-              liquidity and the business cycle are perfectly aligned for risk assets.
-            </p>
+                <Grid container spacing={1.25}>
+                  <Grid item xs={6}>
+                    <MetricChip label="VAL_SCORE" value={current.VAL_SCORE} />
+                  </Grid>
+                  <Grid item xs={6}>
+                    <MetricChip label="PRICE_REGIME" value={current.PRICE_REGIME_ON} />
+                  </Grid>
+                  <Grid item xs={12}>
+                    <MetricChip label="DXY_SCORE" value={current.DXY_SCORE} />
+                  </Grid>
+                </Grid>
+              </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
 
-            <div className="space-y-4">
-              <div className="p-4 rounded-lg bg-slate-50 border border-slate-100">
-                <div className="text-xs font-bold text-slate-400 mb-2 uppercase">Accelerator Formula</div>
-                <div className="text-lg font-mono font-bold text-slate-800">
-                  (LIQ + CYCLE ≥ 3) AND (DXY ≥ 1)
-                </div>
-              </div>
+        <Grid item xs={12} lg={6}>
+          <Card>
+            <CardHeader
+              avatar={<Zap className="h-6 w-6 text-amber-300" />}
+              title={<Typography sx={{ fontWeight: 900 }}>MACRO_ON · Macro Accelerator</Typography>}
+              subheader="High conviction throttle when liquidity + cycle align and USD is not risk-off."
+              action={
+                <Chip
+                  label={macroStatus ? 'ACTIVE' : 'IDLE'}
+                  color={macroStatus ? 'success' : 'default'}
+                  variant={macroStatus ? 'filled' : 'outlined'}
+                  size="small"
+                />
+              }
+            />
+            <Divider />
+            <CardContent>
+              <Stack spacing={1.25}>
+                <LogicRule
+                  title="Accelerator formula"
+                  formula="(LIQ + CYCLE ≥ 3) AND (DXY ≥ 1)"
+                  active={macroStatus}
+                />
 
-              <div className="grid grid-cols-2 gap-4">
-                <StatusLight label="LIQ_SCORE" value={current.LIQ_SCORE} />
-                <StatusLight label="CYCLE_SCORE" value={current.CYCLE_SCORE_V2} />
-                <StatusLight label="DXY_SCORE" value={current.DXY_SCORE} />
-                <StatusLight label="RESULT" value={current.MACRO_ON === 1 ? 'ON' : 'OFF'} isResult />
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+                <Grid container spacing={1.25}>
+                  <Grid item xs={6}>
+                    <MetricChip label="LIQ_SCORE" value={current.LIQ_SCORE} />
+                  </Grid>
+                  <Grid item xs={6}>
+                    <MetricChip label="CYCLE_SCORE" value={current.CYCLE_SCORE_V2} />
+                  </Grid>
+                  <Grid item xs={6}>
+                    <MetricChip label="LIQ+CYCLE" value={macroScoreSum} />
+                  </Grid>
+                  <Grid item xs={6}>
+                    <MetricChip label="DXY_SCORE" value={current.DXY_SCORE} />
+                  </Grid>
+                </Grid>
+              </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
 
-      {/* Final Aggregate Section */}
-      <div className="rounded-2xl border bg-slate-900 p-8 text-white shadow-xl">
-        <div className="flex items-center gap-4 mb-6">
-          <ToggleRight className="h-10 w-10 text-blue-400" />
-          <div>
-            <h2 className="text-2xl font-bold">ACCUM_ON: Final Permission</h2>
-            <p className="text-slate-400 text-sm italic">"The definitive binary switch for capital deployment"</p>
-          </div>
-        </div>
+        <Grid item xs={12}>
+          <Card
+            sx={{
+              borderColor: accumStatus ? 'success.main' : 'error.main',
+              borderWidth: 2,
+              borderStyle: 'solid',
+              backgroundImage: accumStatus
+                ? 'radial-gradient(700px circle at 20% 0%, rgba(34,197,94,0.10), transparent 50%)'
+                : 'radial-gradient(700px circle at 20% 0%, rgba(239,68,68,0.10), transparent 50%)',
+            }}
+          >
+            <CardHeader
+              avatar={<ToggleRight className="h-7 w-7 text-blue-300" />}
+              title={<Typography sx={{ fontWeight: 900 }}>ACCUM_ON · Final Permission</Typography>}
+              subheader="Final permission to deploy capital (CORE_ON OR MACRO_ON)."
+              action={
+                <Chip
+                  label={accumStatus ? 'ON' : 'OFF'}
+                  color={accumStatus ? 'success' : 'error'}
+                  variant="filled"
+                  size="small"
+                />
+              }
+            />
+            <Divider />
+            <CardContent>
+              <Grid container spacing={1.25} alignItems="stretch">
+                <Grid item xs={12} md={4}>
+                  <Card variant="outlined" sx={{ height: '100%' }}>
+                    <CardContent>
+                      <Typography variant="overline" color="text.secondary">
+                        CORE ENGINE
+                      </Typography>
+                      <Typography variant="h6" sx={{ fontWeight: 900, mt: 0.5 }}>
+                        {coreStatus ? 'ENABLED' : 'DISABLED'}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                        Valuation/regime-led baseline accumulation.
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                </Grid>
 
-        <div className="flex flex-col md:flex-row items-center justify-center gap-8 py-4">
-          <FinalBadge label="CORE ENGINE" active={current.CORE_ON === 1} />
-          <div className="text-3xl font-black text-slate-700">OR</div>
-          <FinalBadge label="MACRO ACCELERATOR" active={current.MACRO_ON === 1} />
-          <div className="text-3xl font-black text-slate-700 md:rotate-0 rotate-90">=</div>
-          <div className={`rounded-2xl px-12 py-6 text-center border-4 ${
-            current.ACCUM_ON === 1 ? 'border-green-500/50 bg-green-500/10' : 'border-red-500/50 bg-red-500/10'
-          }`}>
-            <div className="text-sm font-bold uppercase tracking-widest mb-1">Final Signal</div>
-            <div className={`text-5xl font-black ${current.ACCUM_ON === 1 ? 'text-green-400' : 'text-red-400'}`}>
-              {current.ACCUM_ON === 1 ? 'ON' : 'OFF'}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+                <Grid item xs={12} md={4}>
+                  <Card variant="outlined" sx={{ height: '100%' }}>
+                    <CardContent>
+                      <Typography variant="overline" color="text.secondary">
+                        MACRO ACCELERATOR
+                      </Typography>
+                      <Typography variant="h6" sx={{ fontWeight: 900, mt: 0.5 }}>
+                        {macroStatus ? 'ENABLED' : 'DISABLED'}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                        Liquidity + cycle tailwind with USD filter.
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                </Grid>
+
+                <Grid item xs={12} md={4}>
+                  <Card
+                    variant="outlined"
+                    sx={{
+                      height: '100%',
+                      borderColor: accumStatus ? 'success.main' : 'error.main',
+                      backgroundColor: accumStatus ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)',
+                    }}
+                  >
+                    <CardContent>
+                      <Typography variant="overline" color="text.secondary">
+                        RESULT
+                      </Typography>
+                      <Typography variant="h4" sx={{ fontWeight: 950, mt: 0.5 }}>
+                        {accumStatus ? 'ON' : 'OFF'}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                        {accumStatus ? 'Permission granted to accumulate.' : 'Capital protection: pause buys.'}
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              </Grid>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+    </Box>
   );
 };
 
-const SectionHeader = ({ icon, title, status }: any) => (
-  <div className="flex items-center justify-between">
-    <div className="flex items-center gap-3">
-      {icon}
-      <h3 className="text-xl font-bold text-slate-800">{title}</h3>
-    </div>
-    <div className={`flex items-center gap-1 rounded-full px-3 py-1 text-xs font-black uppercase tracking-widest ${
-      status ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'
-    }`}>
-      {status ? <CheckSquare className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
-      {status ? 'Active' : 'Idle'}
-    </div>
-  </div>
-);
+function LogicRule(props: { title: string; formula: string; active: boolean; tone?: 'default' | 'danger' }) {
+  const { title, formula, active, tone = 'default' } = props;
 
-const LogicStep = ({ title, logic, active, isExit }: any) => (
-  <div className={`rounded-lg border-2 p-3 text-center transition-all ${
-    active ? (isExit ? 'border-red-200 bg-red-50' : 'border-blue-200 bg-blue-50') : 'border-slate-100 bg-white opacity-60'
-  }`}>
-    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">{title}</div>
-    <div className={`text-sm font-mono font-bold ${active ? 'text-slate-800' : 'text-slate-500'}`}>{logic}</div>
-  </div>
-);
+  const borderColor = tone === 'danger' ? (active ? 'rgba(239,68,68,0.6)' : 'rgba(148,163,184,0.25)') : active ? 'rgba(96,165,250,0.6)' : 'rgba(148,163,184,0.25)';
+  const bgColor = tone === 'danger' ? (active ? 'rgba(239,68,68,0.10)' : 'rgba(2,6,23,0.20)') : active ? 'rgba(96,165,250,0.10)' : 'rgba(2,6,23,0.20)';
 
-const StatusLight = ({ label, value, isResult }: any) => (
-  <div className="flex flex-col items-center justify-center p-3 rounded-lg bg-slate-50 border border-slate-100">
-    <div className="text-[10px] font-bold text-slate-400 mb-1">{label}</div>
-    <div className={`text-lg font-black ${
-      isResult 
-        ? (value === 'ON' ? 'text-green-600' : 'text-slate-400')
-        : (value === 0 ? 'text-red-500' : value === 1 ? 'text-blue-500' : 'text-green-600')
-    }`}>
-      {value}
-    </div>
-  </div>
-);
+  return (
+    <Box sx={{ border: `1px solid ${borderColor}`, backgroundColor: bgColor, borderRadius: 2, px: 2, py: 1.25 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1.5 }}>
+        <Typography variant="overline" color="text.secondary">
+          {title}
+        </Typography>
+        <Chip
+          size="small"
+          variant={active ? 'filled' : 'outlined'}
+          color={tone === 'danger' ? (active ? 'error' : 'default') : active ? 'primary' : 'default'}
+          label={active ? 'TRUE' : 'FALSE'}
+        />
+      </Box>
+      <Typography
+        variant="body2"
+        sx={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace', fontWeight: 800 }}
+      >
+        {formula}
+      </Typography>
+    </Box>
+  );
+}
 
-const FinalBadge = ({ label, active }: any) => (
-  <div className={`rounded-xl px-6 py-4 text-center border-2 transition-all ${
-    active ? 'border-blue-500/50 bg-blue-500/10 text-white' : 'border-slate-700 bg-slate-800 text-slate-500'
-  }`}>
-    <div className="text-[10px] font-bold uppercase tracking-widest mb-1 opacity-70">{label}</div>
-    <div className="text-lg font-black">{active ? 'ENABLED' : 'DISABLED'}</div>
-  </div>
-);
+function MetricChip(props: { label: string; value: number | string }) {
+  const { label, value } = props;
+  const v = typeof value === 'number' ? value : value;
+  const color =
+    typeof v === 'number'
+      ? v === 0
+        ? 'error'
+        : v === 1
+          ? 'primary'
+          : 'success'
+      : v === 'ON'
+        ? 'success'
+        : 'default';
+
+  return (
+    <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, px: 2, py: 1.25, bgcolor: 'rgba(2,6,23,0.15)' }}>
+      <Typography variant="overline" color="text.secondary">
+        {label}
+      </Typography>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1}>
+        <Typography variant="h6" sx={{ fontWeight: 900 }}>
+          {String(value)}
+        </Typography>
+        <Chip size="small" label={label} color={color as any} variant="outlined" />
+      </Stack>
+    </Box>
+  );
+}
 
 export default LogicFlow;
 

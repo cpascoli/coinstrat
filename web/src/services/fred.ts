@@ -20,13 +20,17 @@ export async function fetchFredSeries(seriesId: string): Promise<FredObservation
 
   // Development: try Netlify Dev function path first (works when running `netlify dev`)
   const localNetlifyFnUrl = `/.netlify/functions/fred?series_id=${encodeURIComponent(seriesId)}`;
+  // Development alt path style (if redirects are used locally)
+  const localNetlifyFnPathUrl = `/.netlify/functions/fred/${encodeURIComponent(seriesId)}`;
 
   // Development fallback (only if you *really* want to try direct calls; many browsers will block due to CORS)
   const directUrl = import.meta.env.VITE_FRED_API_KEY
     ? `https://api.stlouisfed.org/fred/series/observations?series_id=${encodeURIComponent(seriesId)}&api_key=${encodeURIComponent(import.meta.env.VITE_FRED_API_KEY)}&file_type=json`
     : null;
 
-  const candidates = isDev ? [localNetlifyFnUrl, netlifyProxyUrl, directUrl].filter(Boolean) : [netlifyProxyUrl];
+  const candidates = isDev
+    ? [localNetlifyFnUrl, localNetlifyFnPathUrl, netlifyProxyUrl, directUrl].filter(Boolean)
+    : [netlifyProxyUrl];
 
   try {
     let lastErr: Error | null = null;

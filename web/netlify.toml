@@ -6,7 +6,7 @@
 # Proxy for FRED API to handle CORS and hide API key
 [[redirects]]
   from = "/api/fred/*"
-  to = "/.netlify/functions/fred?series_id=:splat"
+  to = "/.netlify/functions/fred/:splat"
   status = 200
 
 # Redirects for Single Page Application (SPA) routing

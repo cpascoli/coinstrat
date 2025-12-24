@@ -151,6 +151,11 @@ export async function computeAllSignals(): Promise<SignalData[]> {
   const dxyROC20 = pctChange(dxyVals, 20);
 
   dailyData.forEach((d, i) => {
+    // Expose inputs for UI diagnostics / rule verification
+    d.DXY_MA50 = dxyMA50[i];
+    d.DXY_MA200 = dxyMA200[i];
+    d.DXY_ROC20 = dxyROC20[i]; // fraction (e.g. 0.01 = +1%)
+
     let score = 1; // neutral
     const roc = dxyROC20[i];
     if (roc > 0.005) score = 0;
@@ -170,6 +175,7 @@ export async function computeAllSignals(): Promise<SignalData[]> {
     const isExpansion = (d.SAHM < 0.35) && (d.YC_M >= 0.75) && (noYoY[i] >= 0);
     
     d.NO_YOY = noYoY[i] * 100;
+    d.NO_MOM3 = noMom3[i];
     d.CYCLE_SCORE_V2 = isRecessionRisk ? 0 : (isExpansion ? 2 : 1);
   });
 

@@ -8,16 +8,16 @@ const Documentation: React.FC = () => {
         <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg">
           <BookOpen className="h-8 w-8" />
         </div>
-        <h1 className="text-4xl font-black text-slate-900 tracking-tight">Model Methodology</h1>
-        <p className="text-lg text-slate-500">The Coin Strat Pre-Accumulation Framework (2026 Edition)</p>
+        <h1 className="text-4xl font-black text-slate-100 tracking-tight">Model Methodology</h1>
+        <p className="text-lg text-slate-400">The Coin Strat Pre-Accumulation Framework (2026 Edition)</p>
       </div>
 
       <section className="space-y-6">
         <div className="flex items-center gap-3 border-b pb-2">
-          <Layers className="h-6 w-6 text-blue-600" />
-          <h2 className="text-2xl font-bold text-slate-800">System Architecture</h2>
+          <Layers className="h-6 w-6 text-blue-400" />
+          <h2 className="text-2xl font-bold text-slate-100">System Architecture</h2>
         </div>
-        <p className="text-slate-600 leading-relaxed">
+        <p className="text-slate-300 leading-relaxed">
           The Coin Strat model is a multi-factor regime-switching engine designed to navigate the highly volatile Bitcoin market. 
           Unlike traditional "Buy and Hold" strategies, this system dynamically adjusts capital exposure based on the confluence 
           of global liquidity, macroeconomic health, and crypto-native valuation metrics.
@@ -40,18 +40,18 @@ const Documentation: React.FC = () => {
 
       <section className="space-y-6">
         <div className="flex items-center gap-3 border-b pb-2">
-          <RefreshCw className="h-6 w-6 text-blue-600" />
-          <h2 className="text-2xl font-bold text-slate-800">The Accumulation Hierarchy</h2>
+          <RefreshCw className="h-6 w-6 text-blue-400" />
+          <h2 className="text-2xl font-bold text-slate-100">The Accumulation Hierarchy</h2>
         </div>
         
-        <div className="rounded-2xl bg-slate-100 p-8 space-y-8">
+        <div className="rounded-2xl bg-slate-900 border border-slate-700/60 p-8 space-y-8">
           <div className="flex gap-6">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white shadow-sm">
-              <ShieldCheck className="h-6 w-6 text-blue-500" />
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-950/40 border border-slate-700/60 shadow-sm">
+              <ShieldCheck className="h-6 w-6 text-blue-300" />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-slate-900 mb-2">Tier 1: Core Accumulation (CORE_ON)</h3>
-              <p className="text-sm text-slate-600 leading-relaxed italic">
+              <h3 className="text-lg font-bold text-slate-100 mb-2">Tier 1: Core Accumulation (CORE_ON)</h3>
+              <p className="text-sm text-slate-300 leading-relaxed italic">
                 The "Engine." Focuses on multi-month accumulation during deep-value phases. It uses MVRV to identify 
                 capitulation bottoms and the 40-week Moving Average to confirm the trend.
               </p>
@@ -59,12 +59,12 @@ const Documentation: React.FC = () => {
           </div>
 
           <div className="flex gap-6">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white shadow-sm">
-              <Zap className="h-6 w-6 text-amber-500" />
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-950/40 border border-slate-700/60 shadow-sm">
+              <Zap className="h-6 w-6 text-amber-300" />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-slate-900 mb-2">Tier 2: Macro Acceleration (MACRO_ON)</h3>
-              <p className="text-sm text-slate-600 leading-relaxed italic">
+              <h3 className="text-lg font-bold text-slate-100 mb-2">Tier 2: Macro Acceleration (MACRO_ON)</h3>
+              <p className="text-sm text-slate-300 leading-relaxed italic">
                 The "Turbo." Activates when the external environment is highly favorable. If US Net Liquidity is expanding 
                 and the Business Cycle is out of the danger zone, the model permits triple-sizing the accumulation rate.
               </p>
@@ -73,9 +73,9 @@ const Documentation: React.FC = () => {
         </div>
       </section>
 
-      <section className="rounded-2xl border border-blue-100 bg-blue-50/50 p-8">
-        <h2 className="text-xl font-bold text-blue-900 mb-4">Philosophy of Capital Protection</h2>
-        <p className="text-blue-800 text-sm leading-relaxed">
+      <section className="rounded-2xl border border-blue-500/30 bg-blue-500/10 p-8">
+        <h2 className="text-xl font-bold text-blue-200 mb-4">Philosophy of Capital Protection</h2>
+        <p className="text-slate-200 text-sm leading-relaxed">
           The primary goal of the model is not to pick the exact bottom, but to <strong>stay out of the market during liquidity contractions.</strong> 
           By forcing a "PAUSE" when DXY (USD) is rising sharply or the Sahm Rule triggers a recession alert, the system aims to 
           preserve dry powder for the high-probability periods when liquidity is abundant.
@@ -86,9 +86,9 @@ const Documentation: React.FC = () => {
 };
 
 const DocCard = ({ title, text }: any) => (
-  <div className="rounded-xl border bg-white p-5 shadow-sm">
-    <h4 className="font-bold text-slate-800 mb-2">{title}</h4>
-    <p className="text-xs text-slate-500 leading-relaxed">{text}</p>
+  <div className="rounded-xl border border-slate-700/60 bg-slate-900 p-5 shadow-sm">
+    <h4 className="font-bold text-slate-100 mb-2">{title}</h4>
+    <p className="text-xs text-slate-300 leading-relaxed">{text}</p>
   </div>
 );
 
