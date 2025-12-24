@@ -1,0 +1,17 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+# Proxy for FRED API to handle CORS and hide API key
+[[redirects]]
+  from = "/api/fred/*"
+  to = "/.netlify/functions/fred?series_id=:splat"
+  status = 200
+
+# Redirects for Single Page Application (SPA) routing
+# IMPORTANT: This must be the LAST redirect rule
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
