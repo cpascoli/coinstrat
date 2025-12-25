@@ -481,6 +481,93 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           </Box>
         </Box>
       </Paper>
+
+      {/* USD Regime Inputs (DTWEXBGS proxy) */}
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Box sx={{ mb: 2.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            USD Regime Inputs (DTWEXBGS)
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            Trade-weighted broad USD index used as the DXY proxy + derived MA50/MA200 and ROC20 (%)
+          </Typography>
+        </Box>
+
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="DTWEXBGS" sx={{ borderColor: '#60a5fa', color: '#bfdbfe' }} />
+          <Chip size="small" variant="outlined" label="MA50" sx={{ borderColor: '#fbbf24', color: '#fde68a' }} />
+          <Chip size="small" variant="outlined" label="MA200" sx={{ borderColor: '#a78bfa', color: '#ddd6fe' }} />
+          <Chip size="small" variant="outlined" label="ROC20 (%)" sx={{ borderColor: '#34d399', color: '#bbf7d0' }} />
+        </Stack>
+
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 2.5 }}>
+          {/* Level + MAs */}
+          <Box sx={{ height: 320, width: '100%', minWidth: 0 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart key={`usd-level-${range}`} data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+                <XAxis
+                  dataKey="ts"
+                  type="number"
+                  domain={['dataMin', 'dataMax']}
+                  scale="time"
+                  tickFormatter={xTickFormatter}
+                  tickCount={tickCount}
+                  minTickGap={24}
+                  tick={{ fontSize: 10, fill: '#94a3b8' }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis yAxisId="usd" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                <Tooltip content={<CustomTooltip />} />
+                <Line yAxisId="usd" type="monotone" dataKey="DXY" name="DTWEXBGS" stroke="#60a5fa" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line yAxisId="usd" type="monotone" dataKey="DXY_MA50" name="MA50" stroke="#fbbf24" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line yAxisId="usd" type="monotone" dataKey="DXY_MA200" name="MA200" stroke="#a78bfa" strokeWidth={2} dot={false} isAnimationActive={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </Box>
+
+          {/* ROC20 */}
+          <Box sx={{ height: 320, width: '100%', minWidth: 0 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart key={`usd-roc-${range}`} data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+                <XAxis
+                  dataKey="ts"
+                  type="number"
+                  domain={['dataMin', 'dataMax']}
+                  scale="time"
+                  tickFormatter={xTickFormatter}
+                  tickCount={tickCount}
+                  minTickGap={24}
+                  tick={{ fontSize: 10, fill: '#94a3b8' }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  yAxisId="roc"
+                  domain={['auto', 'auto']}
+                  tick={{ fontSize: 10, fill: '#94a3b8' }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(v) => (typeof v === 'number' ? `${v.toFixed(1)}%` : '')}
+                />
+                <Tooltip content={<CustomTooltip />} />
+                <Line
+                  yAxisId="roc"
+                  type="monotone"
+                  dataKey={(d: any) => (typeof d.DXY_ROC20 === 'number' ? d.DXY_ROC20 * 100 : null)}
+                  name="ROC20 (%)"
+                  stroke="#34d399"
+                  strokeWidth={2}
+                  dot={false}
+                  isAnimationActive={false}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </Box>
+        </Box>
+      </Paper>
     </Box>
   );
 };

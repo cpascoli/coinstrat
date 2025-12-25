@@ -172,19 +172,19 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
             icon={<Gauge className="h-6 w-6 text-amber-300" />}
             title="USD Regime (DXY_SCORE)"
             score={dxyScore}
-            description="Dollar headwind/tailwind: ROC + trend filter."
-            formula="ROC20 thresholds ±0.5% and MA50 vs MA200"
+            description="USD headwind/tailwind using a broad trade‑weighted USD proxy (FRED: DTWEXBGS), not the ICE DXY shown on TradingView."
+            formula="DTWEXBGS: ROC20 thresholds ±0.5% and MA50 vs MA200"
           >
             <Grid container spacing={1.25}>
               <Grid item xs={12}>
                 <RuleRow
                   ok={typeof dxyRoc20 === 'number' && dxyRoc20 < -0.005 && typeof dxyMA50 === 'number' && typeof dxyMA200 === 'number' && dxyMA50 < dxyMA200}
                   label="ROC20 < -0.5% AND MA50 < MA200"
-                  result="Score 2 (Supportive)"
+                  result="Score 2 (USD weakening / supportive)"
                 />
               </Grid>
               <Grid item xs={12}>
-                <RuleRow ok={typeof dxyRoc20 === 'number' && dxyRoc20 > 0.005} label="ROC20 > +0.5%" result="Score 0 (Headwind)" tone="danger" />
+                <RuleRow ok={typeof dxyRoc20 === 'number' && dxyRoc20 > 0.005} label="ROC20 > +0.5%" result="Score 0 (USD strengthening / headwind)" tone="danger" />
               </Grid>
               <Grid item xs={12}>
                 <RuleRow ok label="Otherwise" result="Score 1 (Neutral)" muted />
@@ -195,7 +195,7 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
 
             <Grid container spacing={1.25}>
               <Grid item xs={6}>
-                <MetricRow label="DXY" value={fmtNum(dxy, 2)} />
+                <MetricRow label="USD index (DTWEXBGS)" value={fmtNum(dxy, 2)} />
               </Grid>
               <Grid item xs={6}>
                 <MetricRow label="ROC20" value={fmtPct(dxyRoc20Pct)} />
