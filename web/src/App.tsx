@@ -20,6 +20,7 @@ import {
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import useMediaQuery from '@mui/material/useMediaQuery';
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 
 // Types for the signal data
 export interface SignalData {
@@ -49,21 +50,33 @@ const App: React.FC = () => {
   const [data, setData] = useState<SignalData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<TabKey>('dashboard');
 
   const theme = useTheme();
   const isMdUp = useMediaQuery(theme.breakpoints.up('md'));
+  const location = useLocation();
+  const navigate = useNavigate();
 
   const tabs = useMemo(
     () => [
-      { key: 'dashboard' as const, label: 'Dashboard', icon: <LayoutDashboard className="h-5 w-5" /> },
-      { key: 'scores' as const, label: 'Scores', icon: <BarChart3 className="h-5 w-5" /> },
-      { key: 'logic' as const, label: 'Logic', icon: <Binary className="h-5 w-5" /> },
-      { key: 'charts' as const, label: 'Charts', icon: <Activity className="h-5 w-5" /> },
-      { key: 'docs' as const, label: 'Methodology', icon: <BookOpen className="h-5 w-5" /> },
+      { key: 'dashboard' as const, path: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-5 w-5" /> },
+      { key: 'scores' as const, path: '/scores', label: 'Scores', icon: <BarChart3 className="h-5 w-5" /> },
+      { key: 'logic' as const, path: '/logic', label: 'Logic', icon: <Binary className="h-5 w-5" /> },
+      { key: 'charts' as const, path: '/charts', label: 'Charts', icon: <Activity className="h-5 w-5" /> },
+      { key: 'docs' as const, path: '/docs', label: 'Methodology', icon: <BookOpen className="h-5 w-5" /> },
     ],
     []
   );
+
+  const activeTab: TabKey = useMemo(() => {
+    const p = location.pathname;
+    const found = tabs.find((t) => p === t.path);
+    return found?.key ?? 'dashboard';
+  }, [location.pathname, tabs]);
+
+  const goToTab = (key: TabKey) => {
+    const t = tabs.find((x) => x.key === key);
+    navigate(t?.path ?? '/dashboard');
+  };
 
   useEffect(() => {
     // Replicating Python logic in real-time within the browser
@@ -162,7 +175,7 @@ const App: React.FC = () => {
                 <Paper
                   key={t.key}
                   component="button"
-                  onClick={() => setActiveTab(t.key)}
+                  onClick={() => goToTab(t.key)}
                   sx={{
                     cursor: 'pointer',
                     px: 1.5,
@@ -188,11 +201,15 @@ const App: React.FC = () => {
       </AppBar>
 
       <Container maxWidth="lg" sx={{ py: { xs: 2.5, md: 4 } }}>
-        {activeTab === 'dashboard' && <Dashboard current={lastData} history={data} />}
-        {activeTab === 'scores' && <ScoreBreakdown current={lastData} />}
-        {activeTab === 'logic' && <LogicFlow current={lastData} />}
-        {activeTab === 'charts' && <ChartsView data={data} />}
-        {activeTab === 'docs' && <Documentation />}
+        <Routes>
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard" element={<Dashboard current={lastData} history={data} />} />
+          <Route path="/scores" element={<ScoreBreakdown current={lastData} />} />
+          <Route path="/logic" element={<LogicFlow current={lastData} />} />
+          <Route path="/charts" element={<ChartsView data={data} />} />
+          <Route path="/docs" element={<Documentation />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        </Routes>
       </Container>
 
       {/* Mobile bottom navigation */}
@@ -201,7 +218,7 @@ const App: React.FC = () => {
           <BottomNavigation
             showLabels
             value={activeTab}
-            onChange={(_, next) => setActiveTab(next)}
+            onChange={(_, next) => goToTab(next)}
           >
             {tabs.map((t) => (
               <BottomNavigationAction key={t.key} value={t.key} label={t.label} icon={t.icon} />
