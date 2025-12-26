@@ -19,7 +19,7 @@ interface Props {
 
 const ScoreBreakdown: React.FC<Props> = ({ current }) => {
   const liqScore = current.LIQ_SCORE;
-  const cycleScore = current.CYCLE_SCORE_V2;
+  const cycleScore = current.CYCLE_SCORE;
   const dxyScore = current.DXY_SCORE;
   const valScore = current.VAL_SCORE;
 
@@ -56,6 +56,82 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
       </Box>
 
       <Grid container spacing={2.5}>
+        {/* Valuation (1st) */}
+        <Grid item xs={12} md={6}>
+          <FactorCard
+            icon={<Landmark className="h-6 w-6 text-violet-300" />}
+            title="Valuation (VAL_SCORE)"
+            score={valScore}
+            description="Bitcoin valuation using MVRV."
+            formula="MVRV thresholds: <1.0 cheap, <1.8 fair, ≥1.8 hot"
+          >
+            <Grid container spacing={1.25}>
+              <Grid item xs={12}>
+                <RuleRow ok={typeof mvrv === 'number' && mvrv < 1.0} label="MVRV < 1.0" result="Score 2 (Deep Value)" />
+              </Grid>
+              <Grid item xs={12}>
+                <RuleRow ok={typeof mvrv === 'number' && mvrv >= 1.0 && mvrv < 1.8} label="1.0 ≤ MVRV < 1.8" result="Score 1 (Fair Value)" />
+              </Grid>
+              <Grid item xs={12}>
+                <RuleRow ok={typeof mvrv === 'number' && mvrv >= 1.8} label="MVRV ≥ 1.8" result="Score 0 (Overheated)" tone="danger" />
+              </Grid>
+            </Grid>
+
+            <Divider sx={{ my: 2 }} />
+
+            <Grid container spacing={1.25}>
+              <Grid item xs={12}>
+                <MetricRow label="MVRV" value={fmtNum(mvrv, 2)} />
+              </Grid>
+            </Grid>
+          </FactorCard>
+        </Grid>
+
+        {/* USD Regime (2nd) */}
+        <Grid item xs={12} md={6}>
+          <FactorCard
+            icon={<Gauge className="h-6 w-6 text-amber-300" />}
+            title="USD Regime (DXY_SCORE)"
+            score={dxyScore}
+            description="USD headwind/tailwind using a broad trade‑weighted USD proxy (FRED: DTWEXBGS), not the ICE DXY shown on TradingView."
+            formula="DTWEXBGS: ROC20 thresholds ±0.5% and MA50 vs MA200"
+          >
+            <Grid container spacing={1.25}>
+              <Grid item xs={12}>
+                <RuleRow
+                  ok={typeof dxyRoc20 === 'number' && dxyRoc20 < -0.005 && typeof dxyMA50 === 'number' && typeof dxyMA200 === 'number' && dxyMA50 < dxyMA200}
+                  label="ROC20 < -0.5% AND MA50 < MA200"
+                  result="Score 2 (USD weakening / supportive)"
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <RuleRow ok={typeof dxyRoc20 === 'number' && dxyRoc20 > 0.005} label="ROC20 > +0.5%" result="Score 0 (USD strengthening / headwind)" tone="danger" />
+              </Grid>
+              <Grid item xs={12}>
+                <RuleRow ok label="Otherwise" result="Score 1 (Neutral)" muted />
+              </Grid>
+            </Grid>
+
+            <Divider sx={{ my: 2 }} />
+
+            <Grid container spacing={1.25}>
+              <Grid item xs={6}>
+                <MetricRow label="USD index (DTWEXBGS)" value={fmtNum(dxy, 2)} />
+              </Grid>
+              <Grid item xs={6}>
+                <MetricRow label="ROC20" value={fmtPct(dxyRoc20Pct)} />
+              </Grid>
+              <Grid item xs={6}>
+                <MetricRow label="MA50" value={fmtNum(dxyMA50, 2)} />
+              </Grid>
+              <Grid item xs={6}>
+                <MetricRow label="MA200" value={fmtNum(dxyMA200, 2)} />
+              </Grid>
+            </Grid>
+          </FactorCard>
+        </Grid>
+
+        {/* Liquidity (3rd) */}
         <Grid item xs={12} md={6}>
           <FactorCard
             icon={<Wind className="h-6 w-6 text-blue-300" />}
@@ -105,12 +181,13 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
           </FactorCard>
         </Grid>
 
+        {/* Business Cycle (4th) */}
         <Grid item xs={12} md={6}>
           <FactorCard
             icon={<Landmark className="h-6 w-6 text-emerald-300" />}
-            title="Business Cycle (CYCLE_SCORE_V2)"
+            title="Business Cycle (BIZ_CYCLE_SCORE)"
             score={cycleScore}
-            description="Nowcast: Sahm + Yield Curve + New Orders."
+            description="Business cycle nowcast: Sahm + Yield Curve + New Orders."
             formula="Recession risk if (SAHM≥0.50) OR (YC<0) OR (NO_YOY<0 AND NO_MOM3≤0)"
           >
             <Grid container spacing={1.25}>
@@ -167,78 +244,6 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
           </FactorCard>
         </Grid>
 
-        <Grid item xs={12} md={6}>
-          <FactorCard
-            icon={<Gauge className="h-6 w-6 text-amber-300" />}
-            title="USD Regime (DXY_SCORE)"
-            score={dxyScore}
-            description="USD headwind/tailwind using a broad trade‑weighted USD proxy (FRED: DTWEXBGS), not the ICE DXY shown on TradingView."
-            formula="DTWEXBGS: ROC20 thresholds ±0.5% and MA50 vs MA200"
-          >
-            <Grid container spacing={1.25}>
-              <Grid item xs={12}>
-                <RuleRow
-                  ok={typeof dxyRoc20 === 'number' && dxyRoc20 < -0.005 && typeof dxyMA50 === 'number' && typeof dxyMA200 === 'number' && dxyMA50 < dxyMA200}
-                  label="ROC20 < -0.5% AND MA50 < MA200"
-                  result="Score 2 (USD weakening / supportive)"
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <RuleRow ok={typeof dxyRoc20 === 'number' && dxyRoc20 > 0.005} label="ROC20 > +0.5%" result="Score 0 (USD strengthening / headwind)" tone="danger" />
-              </Grid>
-              <Grid item xs={12}>
-                <RuleRow ok label="Otherwise" result="Score 1 (Neutral)" muted />
-              </Grid>
-            </Grid>
-
-            <Divider sx={{ my: 2 }} />
-
-            <Grid container spacing={1.25}>
-              <Grid item xs={6}>
-                <MetricRow label="USD index (DTWEXBGS)" value={fmtNum(dxy, 2)} />
-              </Grid>
-              <Grid item xs={6}>
-                <MetricRow label="ROC20" value={fmtPct(dxyRoc20Pct)} />
-              </Grid>
-              <Grid item xs={6}>
-                <MetricRow label="MA50" value={fmtNum(dxyMA50, 2)} />
-              </Grid>
-              <Grid item xs={6}>
-                <MetricRow label="MA200" value={fmtNum(dxyMA200, 2)} />
-              </Grid>
-            </Grid>
-          </FactorCard>
-        </Grid>
-
-        <Grid item xs={12} md={6}>
-          <FactorCard
-            icon={<Landmark className="h-6 w-6 text-violet-300" />}
-            title="Valuation (VAL_SCORE)"
-            score={valScore}
-            description="Bitcoin valuation using MVRV."
-            formula="MVRV thresholds: <1.0 cheap, <1.8 fair, ≥1.8 hot"
-          >
-            <Grid container spacing={1.25}>
-              <Grid item xs={12}>
-                <RuleRow ok={typeof mvrv === 'number' && mvrv < 1.0} label="MVRV < 1.0" result="Score 2 (Deep Value)" />
-              </Grid>
-              <Grid item xs={12}>
-                <RuleRow ok={typeof mvrv === 'number' && mvrv >= 1.0 && mvrv < 1.8} label="1.0 ≤ MVRV < 1.8" result="Score 1 (Fair Value)" />
-              </Grid>
-              <Grid item xs={12}>
-                <RuleRow ok={typeof mvrv === 'number' && mvrv >= 1.8} label="MVRV ≥ 1.8" result="Score 0 (Overheated)" tone="danger" />
-              </Grid>
-            </Grid>
-
-            <Divider sx={{ my: 2 }} />
-
-            <Grid container spacing={1.25}>
-              <Grid item xs={12}>
-                <MetricRow label="MVRV" value={fmtNum(mvrv, 2)} />
-              </Grid>
-            </Grid>
-          </FactorCard>
-        </Grid>
       </Grid>
     </Box>
   );

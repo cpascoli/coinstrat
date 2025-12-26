@@ -33,7 +33,7 @@ export interface SignalData {
   VAL_SCORE: number;
   DXY_SCORE: number;
   LIQ_SCORE: number;
-  CYCLE_SCORE_V2: number;
+  CYCLE_SCORE: number;
   US_LIQ: number;
   US_LIQ_YOY: number;
   US_LIQ_13W_DELTA: number;

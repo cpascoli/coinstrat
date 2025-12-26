@@ -22,7 +22,7 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
   const macroStatus = current.MACRO_ON === 1;
   const accumStatus = current.ACCUM_ON === 1;
 
-  const macroScoreSum = useMemo(() => current.LIQ_SCORE + current.CYCLE_SCORE_V2, [current.LIQ_SCORE, current.CYCLE_SCORE_V2]);
+  const macroScoreSum = useMemo(() => current.LIQ_SCORE + current.CYCLE_SCORE, [current.LIQ_SCORE, current.CYCLE_SCORE]);
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -92,7 +92,7 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
             <CardHeader
               avatar={<Zap className="h-6 w-6 text-amber-300" />}
               title={<Typography sx={{ fontWeight: 900 }}>MACRO_ON · Macro Accelerator</Typography>}
-              subheader="High conviction throttle when liquidity + cycle align and USD is not risk-off."
+              subheader="High conviction throttle when liquidity + business cycle align and USD is not risk-off."
               action={
                 <Chip
                   label={macroStatus ? 'ACTIVE' : 'IDLE'}
@@ -107,7 +107,7 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
               <Stack spacing={1.25}>
                 <LogicRule
                   title="Accelerator formula"
-                  formula="(LIQ + CYCLE ≥ 3) AND (DXY ≥ 1)"
+                  formula="(LIQ + BIZ_CYCLE ≥ 3) AND (DXY ≥ 1)"
                   active={macroStatus}
                 />
 
@@ -116,10 +116,10 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
                     <MetricChip label="LIQ_SCORE" value={current.LIQ_SCORE} />
                   </Grid>
                   <Grid item xs={6}>
-                    <MetricChip label="CYCLE_SCORE" value={current.CYCLE_SCORE_V2} />
+                    <MetricChip label="BIZ_CYCLE_SCORE" value={current.CYCLE_SCORE} />
                   </Grid>
                   <Grid item xs={6}>
-                    <MetricChip label="LIQ+CYCLE" value={macroScoreSum} />
+                    <MetricChip label="LIQ+BIZ_CYCLE" value={macroScoreSum} />
                   </Grid>
                   <Grid item xs={6}>
                     <MetricChip label="DXY_SCORE" value={current.DXY_SCORE} />

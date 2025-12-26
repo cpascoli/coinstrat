@@ -67,6 +67,12 @@ export async function computeAllSignals(): Promise<SignalData[]> {
     fetchMVRV()
   ]);
 
+  // Unit normalization:
+  // - WALCL and WTREGEN are in "millions of USD" on FRED.
+  // - RRPONTSYD is in "billions of USD" on FRED (see series page).
+  // To keep US_LIQ = WALCL - WTREGEN - RRP comparable, convert RRPONTSYD to millions.
+  const rrpM = rrp.map((o) => ({ ...o, value: o.value * 1000 }));
+
   // 2. Align data to a common continuous daily timeline
   // We create a continuous range of dates from the start of BTC data to today.
   const dateMap: Map<string, any> = new Map();
@@ -102,7 +108,7 @@ export async function computeAllSignals(): Promise<SignalData[]> {
   fillSeries(btcPrice, "BTCUSD");
   fillSeries(walcl, "WALCL");
   fillSeries(tga, "WTREGEN");
-  fillSeries(rrp, "RRPONTSYD");
+  fillSeries(rrpM, "RRPONTSYD");
   fillSeries(dxyRaw, "DXY");
   fillSeries(sahm, "SAHM");
   fillSeries(yc, "YC_M");
@@ -176,18 +182,53 @@ export async function computeAllSignals(): Promise<SignalData[]> {
     
     d.NO_YOY = noYoY[i] * 100;
     d.NO_MOM3 = noMom3[i];
-    d.CYCLE_SCORE_V2 = isRecessionRisk ? 0 : (isExpansion ? 2 : 1);
+    d.CYCLE_SCORE = isRecessionRisk ? 0 : (isExpansion ? 2 : 1);
   });
 
   // -- Price Regime (40W MA Persistence) --
   const btcVals = dailyData.map(d => d.BTCUSD);
-  const btcMA200 = rollingMean(btcVals, 200); // approx 40 weeks
-  
-  const rawPriceRegime = btcVals.map((v, i) => v > btcMA200[i]);
-  const regimePersistence = rollingMean(rawPriceRegime.map(v => v ? 1 : 0), 30);
-  
+
+  // Build a 40-week moving average based on weekly closes, then forward-fill to daily
+  // (matches dashboard_2026.py: btc_w = resample("W").last(); ma40 = rolling(40).mean(); ffill to daily)
+  const weeklyClose: number[] = [];
+  const weeklyIdx: number[] = [];
+
+  for (let i = 0; i < dailyData.length; i++) {
+    const dt = new Date(dailyData[i].Date);
+    const v = Number(dailyData[i].BTCUSD);
+    if (!Number.isFinite(v)) continue;
+
+    // Week ending Sunday (UTC) – consistent and deterministic for the browser.
+    if (dt.getUTCDay() === 0) {
+      weeklyClose.push(v);
+      weeklyIdx.push(i);
+    }
+  }
+
+  const ma40wWeekly = rollingMean(weeklyClose, 40);
+  let j = 0;
+  let lastMA = NaN;
+
+  for (let i = 0; i < dailyData.length; i++) {
+    while (j < weeklyIdx.length && weeklyIdx[j] <= i) {
+      lastMA = ma40wWeekly[j];
+      j++;
+    }
+    dailyData[i].BTC_MA40W = lastMA;
+  }
+
+  // Raw condition: BTC > MA40W
+  const rawOn = dailyData.map((d) => {
+    const p = Number(d.BTCUSD);
+    const ma = Number((d as any).BTC_MA40W);
+    if (!Number.isFinite(p) || !Number.isFinite(ma)) return 0;
+    return p > ma ? 1 : 0;
+  });
+
+  // Persistence: require 20 of last 30 days ON
+  const regimePersistence = rollingMean(rawOn, 30);
   dailyData.forEach((d, i) => {
-    d.PRICE_REGIME_ON = regimePersistence[i] >= (20/30) ? 1 : 0;
+    d.PRICE_REGIME_ON = regimePersistence[i] >= (20 / 30) ? 1 : 0;
   });
 
   // 4. Final Aggregates (CORE_ON, MACRO_ON, ACCUM_ON)
@@ -206,7 +247,7 @@ export async function computeAllSignals(): Promise<SignalData[]> {
     }
     d.CORE_ON = coreState;
 
-    const abScore = d.LIQ_SCORE + d.CYCLE_SCORE_V2;
+    const abScore = d.LIQ_SCORE + d.CYCLE_SCORE;
     d.MACRO_ON = (abScore >= 3 && dxy >= 1) ? 1 : 0;
     d.ACCUM_ON = (d.CORE_ON === 1 || d.MACRO_ON === 1) ? 1 : 0;
   });

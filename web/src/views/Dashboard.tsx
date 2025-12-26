@@ -32,7 +32,7 @@ const Dashboard: React.FC<Props> = ({ current, history }) => {
     const pr = current.PRICE_REGIME_ON;
     const dxy = current.DXY_SCORE;
     const liq = current.LIQ_SCORE;
-    const cyc = current.CYCLE_SCORE_V2;
+    const cyc = current.CYCLE_SCORE;
     const val = current.VAL_SCORE;
 
     let action: 'PAUSE' | 'BASE' | 'ACCEL' = 'PAUSE';
@@ -50,7 +50,7 @@ const Dashboard: React.FC<Props> = ({ current, history }) => {
       reason = "Accumulation permission is OFF. Capital protection prioritized.";
     } else if (macro === 1) {
       action = 'ACCEL';
-      reason = "Accumulation permitted with Macro Accelerator active (Liquidity/Cycle tailwinds).";
+      reason = "Accumulation permitted with Macro Accelerator active (Liquidity/Business Cycle tailwinds).";
     } else {
       action = 'BASE';
       reason = "Base accumulation permitted. No macro acceleration detected.";
@@ -73,7 +73,7 @@ const Dashboard: React.FC<Props> = ({ current, history }) => {
   const statCards = useMemo(
     () => [
       { title: 'Liquidity', value: current.LIQ_SCORE, max: 2, icon: <Activity className="text-blue-300" /> },
-      { title: 'Cycle', value: current.CYCLE_SCORE_V2, max: 2, icon: <TrendingUp className="text-emerald-300" /> },
+      { title: 'Business Cycle', value: current.CYCLE_SCORE, max: 2, icon: <TrendingUp className="text-emerald-300" /> },
       { title: 'USD', value: current.DXY_SCORE, max: 2, icon: <Activity className="text-amber-300" /> },
       { title: 'Valuation', value: current.VAL_SCORE, max: 2, icon: <Info className="text-violet-300" /> },
     ],
@@ -204,8 +204,8 @@ const Dashboard: React.FC<Props> = ({ current, history }) => {
               <TableBody>
                 <SnapshotRow label="US Net Liquidity" value={fmtTrillions(current.US_LIQ)} score={current.LIQ_SCORE} />
                 <SnapshotRow label="Liquidity YoY" value={fmtPct(current.US_LIQ_YOY)} score={current.LIQ_SCORE} />
-                <SnapshotRow label="Sahm Rule" value={fmtNum(current.SAHM, 2)} score={current.CYCLE_SCORE_V2} />
-                <SnapshotRow label="Yield Curve (10Y-3M)" value={fmtNum(current.YC_M, 2)} score={current.CYCLE_SCORE_V2} />
+                <SnapshotRow label="Sahm Rule" value={fmtNum(current.SAHM, 2)} score={current.CYCLE_SCORE} />
+                <SnapshotRow label="Yield Curve (10Y-3M)" value={fmtNum(current.YC_M, 2)} score={current.CYCLE_SCORE} />
                 <SnapshotRow label="MVRV" value={fmtNum(current.MVRV, 2)} score={current.VAL_SCORE} />
               </TableBody>
             </Table>

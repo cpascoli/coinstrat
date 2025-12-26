@@ -14,8 +14,10 @@ interface Props {
 
 type RangeKey = 'all' | '10y' | '5y' | '2y' | '1y';
 
-type RegimeKey = 'LIQ_SCORE' | 'CYCLE_SCORE_V2';
+type RegimeKey = 'LIQ_SCORE' | 'CYCLE_SCORE';
 type RegimeSpan = { x1: number; x2: number; value: 0 | 1 | 2 };
+type BinarySpan = { x1: number; x2: number; value: 0 | 1 };
+type SystemSpan = { x1: number; x2: number; value: 0 | 1 | 2 | 3 };
 
 function buildRegimeSpans(rows: Array<{ ts: number } & Record<string, any>>, key: RegimeKey): RegimeSpan[] {
   const spans: RegimeSpan[] = [];
@@ -57,14 +59,113 @@ function buildRegimeSpans(rows: Array<{ ts: number } & Record<string, any>>, key
   return spans;
 }
 
+function buildBinarySpans(rows: Array<{ ts: number } & Record<string, any>>, key: string): BinarySpan[] {
+  const spans: BinarySpan[] = [];
+  if (!rows.length) return spans;
+
+  let current: 0 | 1 | null = null;
+  let startTs: number | null = null;
+
+  const coerce = (v: any): 0 | 1 | null => {
+    const n = Number(v);
+    if (n === 0 || n === 1) return n;
+    return null;
+  };
+
+  for (let i = 0; i < rows.length; i++) {
+    const v = coerce((rows[i] as any)[key]);
+    const ts = rows[i].ts;
+    if (v === null) continue;
+
+    if (current === null) {
+      current = v;
+      startTs = ts;
+      continue;
+    }
+
+    if (v !== current && startTs !== null) {
+      const prevTs = rows[i - 1]?.ts ?? ts;
+      if (prevTs > startTs) spans.push({ x1: startTs, x2: prevTs, value: current });
+      current = v;
+      startTs = ts;
+    }
+  }
+
+  if (current !== null && startTs !== null) {
+    const endTs = rows[rows.length - 1].ts;
+    if (endTs > startTs) spans.push({ x1: startTs, x2: endTs, value: current });
+  }
+
+  return spans;
+}
+
+function buildSystemSpans(rows: Array<{ ts: number } & Record<string, any>>): SystemSpan[] {
+  const spans: SystemSpan[] = [];
+  if (!rows.length) return spans;
+
+  // 0 = red (0,0), 1 = gray (0,1), 2 = light green (1,0), 3 = dark green (1,1)
+  const mapState = (row: any): 0 | 1 | 2 | 3 | null => {
+    const core = Number(row.CORE_ON);
+    const macro = Number(row.MACRO_ON);
+    if (![0, 1].includes(core) || ![0, 1].includes(macro)) return null;
+    if (core === 0 && macro === 0) return 0;
+    if (core === 0 && macro === 1) return 1;
+    if (core === 1 && macro === 0) return 2;
+    return 3;
+  };
+
+  let current: 0 | 1 | 2 | 3 | null = null;
+  let startTs: number | null = null;
+
+  for (let i = 0; i < rows.length; i++) {
+    const v = mapState(rows[i]);
+    const ts = rows[i].ts;
+    if (v === null) continue;
+
+    if (current === null) {
+      current = v;
+      startTs = ts;
+      continue;
+    }
+
+    if (v !== current && startTs !== null) {
+      const prevTs = rows[i - 1]?.ts ?? ts;
+      if (prevTs > startTs) spans.push({ x1: startTs, x2: prevTs, value: current });
+      current = v;
+      startTs = ts;
+    }
+  }
+
+  if (current !== null && startTs !== null) {
+    const endTs = rows[rows.length - 1].ts;
+    if (endTs > startTs) spans.push({ x1: startTs, x2: endTs, value: current });
+  }
+
+  return spans;
+}
+
 function regimeColor(key: RegimeKey, v: 0 | 1 | 2) {
   // Match the feel of dashboard_2026.py shading: red (risk), grey (neutral), green (tailwind)
   const palette = {
-    0: { fill: '#ef4444', alpha: 0.16 },
-    1: { fill: '#94a3b8', alpha: 0.12 },
-    2: { fill: '#22c55e', alpha: 0.14 },
+    0: { fill: '#ef4444', alpha: 0.36 },
+    1: { fill: '#94a3b8', alpha: 0.32 },
+    2: { fill: '#22c55e', alpha: 0.34 },
   } as const;
   return palette[v];
+}
+
+function systemColor(v: 0 | 1 | 2 | 3) {
+  // 0: red, 1: gray/neutral, 2: light green, 3: darker green
+  switch (v) {
+    case 0:
+      return { fill: '#ef4444', alpha: 0.36 };
+    case 1:
+      return { fill: '#94a3b8', alpha: 0.32 };
+    case 2:
+      return { fill: '#86efac', alpha: 0.34 };
+    case 3:
+      return { fill: '#22c55e', alpha: 0.34 };
+  }
 }
 
 const ChartsView: React.FC<Props> = ({ data }) => {
@@ -175,7 +276,9 @@ const ChartsView: React.FC<Props> = ({ data }) => {
   };
 
   const liqSpans = useMemo(() => buildRegimeSpans(chartData as any, 'LIQ_SCORE'), [chartData]);
-  const cycleSpans = useMemo(() => buildRegimeSpans(chartData as any, 'CYCLE_SCORE_V2'), [chartData]);
+  const cycleSpans = useMemo(() => buildRegimeSpans(chartData as any, 'CYCLE_SCORE'), [chartData]);
+  const priceRegimeSpans = useMemo(() => buildBinarySpans(chartData as any, 'PRICE_REGIME_ON'), [chartData]);
+  const systemSpans = useMemo(() => buildSystemSpans(chartData as any), [chartData]);
 
   const tickCount = range === 'all' ? 10 : range === '10y' ? 10 : range === '5y' ? 8 : range === '2y' ? 8 : 6;
 
@@ -215,11 +318,59 @@ const ChartsView: React.FC<Props> = ({ data }) => {
         </ToggleButtonGroup>
       </Box>
 
+      {/* System State: BTCUSD with CORE/MACRO background shading */}
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Box sx={{ mb: 2.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            System State (CORE_ON / MACRO_ON)
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            BTCUSD shaded by the current system state
+          </Typography>
+        </Box>
+
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="CORE=1 MACRO=0 (light green)" sx={{ borderColor: '#86efac', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="CORE=1 MACRO=1 (dark green)" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="CORE=0 MACRO=0 (red)" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
+          <Chip size="small" variant="outlined" label="CORE=0 MACRO=1 (gray)" sx={{ borderColor: '#94a3b8', color: '#cbd5e1' }} />
+        </Stack>
+
+        <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart key={`system-${range}`} data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              {systemSpans.map((s, i) => {
+                const c = systemColor(s.value);
+                return (
+                  <ReferenceArea
+                    key={`sys-${i}-${s.x1}`}
+                    yAxisId="btc"
+                    x1={s.x1}
+                    x2={s.x2}
+                    y1={btcDomain.y1}
+                    y2={btcDomain.y2}
+                    ifOverflow="extendDomain"
+                    fill={c.fill}
+                    fillOpacity={c.alpha}
+                    strokeOpacity={0}
+                  />
+                );
+              })}
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis yAxisId="btc" scale="log" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
+              <Tooltip content={<CustomTooltip />} />
+              <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={2} dot={false} isAnimationActive={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Box>
+      </Paper>
+
       {/* Main Chart: BTC + Liquidity Overlay + LIQ_SCORE background shading */}
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
-            BTC Price & US Net Liquidity
+            US Net Liquidity
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
             BTCUSD (log) with US_LIQ and LIQ_SCORE regime shading
@@ -327,7 +478,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             US Net Liquidity Inputs
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            Components used to compute US_LIQ = WALCL − WTREGEN − RRPONTSYD
+            Components used to compute US_LIQ = WALCL − WTREGEN − RRPONTSYD (RRPONTSYD normalized from billions → millions to match units)
           </Typography>
         </Box>
 
@@ -338,7 +489,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           <Chip size="small" variant="outlined" label="US_LIQ" sx={{ borderColor: '#60a5fa', color: '#bfdbfe' }} />
         </Stack>
 
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 2.5 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr', gap: 2.5 }}>
           {/* Components */}
           <Box sx={{ height: 320, width: '100%', minWidth: 0 }}>
             <ResponsiveContainer width="100%" height="100%">
@@ -393,6 +544,52 @@ const ChartsView: React.FC<Props> = ({ data }) => {
         </Box>
       </Paper>
 
+      {/* Price Regime: BTCUSD vs 40W MA with regime shading */}
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Box sx={{ mb: 2.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            BTC Price Regime (BTCUSD vs 40W MA)
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            BTCUSD with 40-week moving average and PRICE_REGIME shading
+          </Typography>
+        </Box>
+
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="Bullish (PRICE_REGIME=1)" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="Bearish (PRICE_REGIME=0)" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
+          <Chip size="small" variant="outlined" label="BTCUSD" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
+          <Chip size="small" variant="outlined" label="40W MA" sx={{ borderColor: '#fbbf24', color: '#fde68a' }} />
+        </Stack>
+
+        <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart key={`price-regime-${range}`} data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              {priceRegimeSpans.map((s, i) => (
+                <ReferenceArea
+                  key={`pr-${i}-${s.x1}`}
+                  yAxisId="btc"
+                  x1={s.x1}
+                  x2={s.x2}
+                  y1={btcDomain.y1}
+                  y2={btcDomain.y2}
+                  ifOverflow="extendDomain"
+                  fill={s.value === 1 ? '#22c55e' : '#ef4444'}
+                  fillOpacity={s.value === 1 ? 0.12 : 0.12}
+                  strokeOpacity={0}
+                />
+              ))}
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis yAxisId="btc" scale="log" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
+              <Tooltip content={<CustomTooltip />} />
+              <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={2} dot={false} isAnimationActive={false} />
+              <Line yAxisId="btc" type="monotone" dataKey="BTC_MA40W" name="BTC 40W MA" stroke="#fbbf24" strokeWidth={2} dot={false} isAnimationActive={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Box>
+      </Paper>
+
       {/* BTC over Business Cycle Score shading */}
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
@@ -400,21 +597,21 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             BTC Price with Business Cycle Regime Shading
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            BTCUSD (log) shaded by CYCLE_SCORE_V2
+            BTCUSD (log) shaded by BIZ_CYCLE_SCORE
           </Typography>
         </Box>
 
         <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
-          <Chip size="small" variant="outlined" label="Cycle 0: contraction risk" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
-          <Chip size="small" variant="outlined" label="Cycle 1: stabilizing" sx={{ borderColor: '#94a3b8', color: '#cbd5e1' }} />
-          <Chip size="small" variant="outlined" label="Cycle 2: expansion" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="Contraction risk (BIZ_CYCLE=0)" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
+          <Chip size="small" variant="outlined" label="Stabilizing (BIZ_CYCLE=1)" sx={{ borderColor: '#94a3b8', color: '#cbd5e1' }} />
+          <Chip size="small" variant="outlined" label="Expansion (BIZ_CYCLE=2)" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
         </Stack>
 
         <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
           <ResponsiveContainer width="100%" height="100%">
             <LineChart key={`btc-cycle-${range}`} data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-              {cycleSpans.map((s, i) => {
-                const c = regimeColor('CYCLE_SCORE_V2', s.value);
+                {cycleSpans.map((s, i) => {
+                  const c = regimeColor('CYCLE_SCORE', s.value);
                 return (
                   <ReferenceArea
                     key={`cyc-${i}-${s.x1}`}
@@ -440,7 +637,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
         </Box>
       </Paper>
 
-      {/* Business Cycle: inputs (moved below BTC + cycle shading) */}
+      {/* Business Cycle: inputs (moved below BTC + business cycle shading) */}
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -451,7 +648,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           </Typography>
         </Box>
 
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 2.5 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr', gap: 2.5 }}>
           <Box sx={{ height: 320, width: '100%', minWidth: 0 }}>
             <ResponsiveContainer width="100%" height="100%">
               <LineChart key={`cycle-inputs-1-${range}`} data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
@@ -500,7 +697,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           <Chip size="small" variant="outlined" label="ROC20 (%)" sx={{ borderColor: '#34d399', color: '#bbf7d0' }} />
         </Stack>
 
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 2.5 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr', gap: 2.5 }}>
           {/* Level + MAs */}
           <Box sx={{ height: 320, width: '100%', minWidth: 0 }}>
             <ResponsiveContainer width="100%" height="100%">
@@ -522,7 +719,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                 <Tooltip content={<CustomTooltip />} />
                 <Line yAxisId="usd" type="monotone" dataKey="DXY" name="DTWEXBGS" stroke="#60a5fa" strokeWidth={2} dot={false} isAnimationActive={false} />
                 <Line yAxisId="usd" type="monotone" dataKey="DXY_MA50" name="MA50" stroke="#fbbf24" strokeWidth={2} dot={false} isAnimationActive={false} />
-                <Line yAxisId="usd" type="monotone" dataKey="DXY_MA200" name="MA200" stroke="#a78bfa" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line yAxisId="usd" type="monotone" dataKey="DXY_MA200" name="MA200" stroke="#ef4444" strokeWidth={2} dot={false} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           </Box>
