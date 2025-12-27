@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   AreaChart, Area, ReferenceArea 
@@ -6,13 +6,15 @@ import {
 import { SignalData } from '../App';
 import { format } from 'date-fns';
 import { Activity } from 'lucide-react';
-import { Box, Chip, Paper, Stack, ToggleButton, ToggleButtonGroup, Typography } from '@mui/material';
+import { Box, Chip, Paper, Stack, Tab, Tabs, ToggleButton, ToggleButtonGroup, Typography } from '@mui/material';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 interface Props {
   data: SignalData[];
 }
 
 type RangeKey = 'all' | '10y' | '5y' | '2y' | '1y';
+type ChartsSection = 'system' | 'liquidity' | 'business';
 
 type RegimeKey = 'LIQ_SCORE' | 'CYCLE_SCORE';
 type RegimeSpan = { x1: number; x2: number; value: 0 | 1 | 2 };
@@ -170,6 +172,28 @@ function systemColor(v: 0 | 1 | 2 | 3) {
 
 const ChartsView: React.FC<Props> = ({ data }) => {
   const [range, setRange] = useState<RangeKey>('all');
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const section: ChartsSection = useMemo(() => {
+    const m = location.pathname.match(/^\/charts\/([^/]+)/);
+    const seg = (m?.[1] ?? 'system').toLowerCase();
+    if (seg === 'system' || seg === 'liquidity' || seg === 'business') return seg;
+    return 'system';
+  }, [location.pathname]);
+
+  useEffect(() => {
+    // Normalize /charts and unknown subroutes -> /charts/system
+    if (location.pathname === '/charts' || location.pathname === '/charts/') {
+      navigate('/charts/system', { replace: true });
+      return;
+    }
+    const m = location.pathname.match(/^\/charts\/([^/]+)/);
+    const seg = (m?.[1] ?? '').toLowerCase();
+    if (seg && seg !== 'system' && seg !== 'liquidity' && seg !== 'business') {
+      navigate('/charts/system', { replace: true });
+    }
+  }, [location.pathname, navigate]);
 
   const chartData = useMemo(() => {
     if (!data || data.length === 0) return [];
@@ -302,7 +326,19 @@ const ChartsView: React.FC<Props> = ({ data }) => {
         </Typography>
       </Box>
 
-      <Box sx={{ display: 'flex', justifyContent: { xs: 'flex-start', sm: 'flex-end' } }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
+        <Tabs
+          value={section}
+          onChange={(_, v: ChartsSection) => navigate(`/charts/${v}`)}
+          textColor="inherit"
+          indicatorColor="primary"
+          sx={{ minHeight: 40 }}
+        >
+          <Tab value="system" label="Overview" sx={{ minHeight: 40 }} />
+          <Tab value="liquidity" label="Liquidity" sx={{ minHeight: 40 }} />
+          <Tab value="business" label="Business Cycle" sx={{ minHeight: 40 }} />
+        </Tabs>
+
         <ToggleButtonGroup
           color="primary"
           exclusive
@@ -319,10 +355,11 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       </Box>
 
       {/* System State: BTCUSD with CORE/MACRO background shading */}
+      {section === 'system' && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
-            System State (CORE_ON / MACRO_ON)
+            System State (CORE / MACRO)
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
             BTCUSD shaded by the current system state
@@ -330,10 +367,10 @@ const ChartsView: React.FC<Props> = ({ data }) => {
         </Box>
 
         <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
-          <Chip size="small" variant="outlined" label="CORE=1 MACRO=0 (light green)" sx={{ borderColor: '#86efac', color: '#bbf7d0' }} />
-          <Chip size="small" variant="outlined" label="CORE=1 MACRO=1 (dark green)" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
-          <Chip size="small" variant="outlined" label="CORE=0 MACRO=0 (red)" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
-          <Chip size="small" variant="outlined" label="CORE=0 MACRO=1 (gray)" sx={{ borderColor: '#94a3b8', color: '#cbd5e1' }} />
+          <Chip size="small" variant="outlined" label="CORE=1 MACRO=0" sx={{ borderColor: '#86efac', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="CORE=1 MACRO=1" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="CORE=0 MACRO=0" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
+          <Chip size="small" variant="outlined" label="CORE=0 MACRO=1" sx={{ borderColor: '#94a3b8', color: '#cbd5e1' }} />
         </Stack>
 
         <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
@@ -365,8 +402,10 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           </ResponsiveContainer>
         </Box>
       </Paper>
+      )}
 
       {/* Main Chart: BTC + Liquidity Overlay + LIQ_SCORE background shading */}
+      {section === 'liquidity' && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -378,9 +417,9 @@ const ChartsView: React.FC<Props> = ({ data }) => {
         </Box>
 
         <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
-          <Chip size="small" variant="outlined" label="LIQ 0: contracting" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
-          <Chip size="small" variant="outlined" label="LIQ 1: improving" sx={{ borderColor: '#94a3b8', color: '#cbd5e1' }} />
-          <Chip size="small" variant="outlined" label="LIQ 2: expanding" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="Contracting (LIQ=0)" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
+          <Chip size="small" variant="outlined" label="Improving (LIQ=1" sx={{ borderColor: '#94a3b8', color: '#cbd5e1' }} />
+          <Chip size="small" variant="outlined" label="Expanding (LIQ=2)" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
         </Stack>
         
         {/* IMPORTANT: set an explicit height so Recharts never renders into a 0px container in production */}
@@ -470,8 +509,10 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           </ResponsiveContainer>
         </Box>
       </Paper>
+      )}
 
       {/* US Net Liquidity Inputs */}
+      {section === 'liquidity' && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -543,8 +584,10 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           </Box>
         </Box>
       </Paper>
+      )}
 
       {/* Price Regime: BTCUSD vs 40W MA with regime shading */}
+      {section === 'system' && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -589,12 +632,14 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           </ResponsiveContainer>
         </Box>
       </Paper>
+      )}
 
       {/* BTC over Business Cycle Score shading */}
+      {section === 'business' && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
-            BTC Price with Business Cycle Regime Shading
+            Business Cycle Regime
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
             BTCUSD (log) shaded by BIZ_CYCLE_SCORE
@@ -636,8 +681,10 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           </ResponsiveContainer>
         </Box>
       </Paper>
+      )}
 
       {/* Business Cycle: inputs (moved below BTC + business cycle shading) */}
+      {section === 'business' && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -678,12 +725,14 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           </Box>
         </Box>
       </Paper>
+      )}
 
       {/* USD Regime Inputs (DTWEXBGS proxy) */}
+      {section === 'system' && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
-            USD Regime Inputs (DTWEXBGS)
+            USD Regime (DTWEXBGS)
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
             Trade-weighted broad USD index used as the DXY proxy + derived MA50/MA200 and ROC20 (%)
@@ -765,6 +814,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           </Box>
         </Box>
       </Paper>
+      )}
     </Box>
   );
 };

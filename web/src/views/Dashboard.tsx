@@ -39,7 +39,7 @@ const Dashboard: React.FC<Props> = ({ current, history }) => {
     let reason = '';
     const blockers: string[] = [];
 
-    if (pr === 0) blockers.push("Price regime OFF (below long-term trend filter).");
+    if (pr === 0) blockers.push("Price below long-term trend.");
     if (dxy === 0) blockers.push("USD regime risk-off (DXY strengthening).");
     if (liq === 0) blockers.push("Liquidity contracting/worsening.");
     if (cyc === 0) blockers.push("Business cycle contraction-risk elevated.");

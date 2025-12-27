@@ -61,7 +61,8 @@ const App: React.FC = () => {
       { key: 'dashboard' as const, path: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-5 w-5" /> },
       { key: 'scores' as const, path: '/scores', label: 'Scores', icon: <BarChart3 className="h-5 w-5" /> },
       { key: 'logic' as const, path: '/logic', label: 'Logic', icon: <Binary className="h-5 w-5" /> },
-      { key: 'charts' as const, path: '/charts', label: 'Charts', icon: <Activity className="h-5 w-5" /> },
+      // Default to the System subpage under Charts
+      { key: 'charts' as const, path: '/charts/system', label: 'Charts', icon: <Activity className="h-5 w-5" /> },
       { key: 'docs' as const, path: '/docs', label: 'Methodology', icon: <BookOpen className="h-5 w-5" /> },
     ],
     []
@@ -70,7 +71,10 @@ const App: React.FC = () => {
   const activeTab: TabKey = useMemo(() => {
     const p = location.pathname;
     const found = tabs.find((t) => p === t.path);
-    return found?.key ?? 'dashboard';
+    if (found) return found.key;
+    // Treat any /charts/* route as the Charts tab
+    if (p.startsWith('/charts')) return 'charts';
+    return 'dashboard';
   }, [location.pathname, tabs]);
 
   const goToTab = (key: TabKey) => {
@@ -206,7 +210,7 @@ const App: React.FC = () => {
           <Route path="/dashboard" element={<Dashboard current={lastData} history={data} />} />
           <Route path="/scores" element={<ScoreBreakdown current={lastData} />} />
           <Route path="/logic" element={<LogicFlow current={lastData} />} />
-          <Route path="/charts" element={<ChartsView data={data} />} />
+          <Route path="/charts/*" element={<ChartsView data={data} />} />
           <Route path="/docs" element={<Documentation />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
