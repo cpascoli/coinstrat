@@ -185,7 +185,7 @@ const App: React.FC = () => {
               CS
             </Box>
             <Typography variant="h6" sx={{ fontWeight: 900, letterSpacing: -0.4 }}>
-              Coin Strat <Box component="span" sx={{ color: 'primary.main' }}>2026</Box>
+              Coin <Box component="span" sx={{ color: 'primary.main' }}>Strat</Box>
             </Typography>
           </Box>
 

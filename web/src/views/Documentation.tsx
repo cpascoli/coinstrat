@@ -1,33 +1,197 @@
 import React from 'react';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
-import { Box, Card, CardContent, CardHeader, Divider, IconButton, Link, Stack, Tooltip, Typography } from '@mui/material';
+import { Box, Button, Card, CardContent, CardHeader, Divider, IconButton, Link, Stack, Tooltip, Typography } from '@mui/material';
+import { useNavigate } from 'react-router-dom';
+
+const HeroIllustration: React.FC = () => (
+  <Box
+    component="svg"
+    viewBox="0 0 760 520"
+    width="100%"
+    height="auto"
+    role="img"
+    aria-label="Coin Strat hero illustration: price chart with macro regimes and signals"
+    sx={{ display: 'block' }}
+  >
+    <defs>
+      <linearGradient id="cs-bg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stopColor="#0b1220" stopOpacity="1" />
+        <stop offset="55%" stopColor="#0f1a2f" stopOpacity="1" />
+        <stop offset="100%" stopColor="#111c33" stopOpacity="1" />
+      </linearGradient>
+      <linearGradient id="cs-accent" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%" stopColor="#60a5fa" stopOpacity="0.95" />
+        <stop offset="50%" stopColor="#a78bfa" stopOpacity="0.85" />
+        <stop offset="100%" stopColor="#22c55e" stopOpacity="0.85" />
+      </linearGradient>
+      <linearGradient id="cs-line" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%" stopColor="#e5e7eb" />
+        <stop offset="100%" stopColor="#93c5fd" />
+      </linearGradient>
+      <filter id="cs-glow" x="-20%" y="-20%" width="140%" height="140%">
+        <feGaussianBlur stdDeviation="6" result="blur" />
+        <feColorMatrix
+          in="blur"
+          type="matrix"
+          values="
+            1 0 0 0 0
+            0 1 0 0 0
+            0 0 1 0 0
+            0 0 0 .55 0"
+          result="glow"
+        />
+        <feMerge>
+          <feMergeNode in="glow" />
+          <feMergeNode in="SourceGraphic" />
+        </feMerge>
+      </filter>
+    </defs>
+
+    {/* Card background */}
+    <rect x="16" y="16" width="728" height="488" rx="26" fill="url(#cs-bg)" stroke="rgba(148,163,184,0.22)" />
+    <rect x="16" y="16" width="728" height="5" rx="3" fill="url(#cs-accent)" />
+
+    {/* Grid */}
+    {Array.from({ length: 9 }).map((_, i) => (
+      <line
+        key={`h-${i}`}
+        x1="60"
+        x2="700"
+        y1={110 + i * 36}
+        y2={110 + i * 36}
+        stroke="rgba(148,163,184,0.10)"
+        strokeWidth="1"
+      />
+    ))}
+    {Array.from({ length: 10 }).map((_, i) => (
+      <line
+        key={`v-${i}`}
+        y1="92"
+        y2="448"
+        x1={80 + i * 62}
+        x2={80 + i * 62}
+        stroke="rgba(148,163,184,0.06)"
+        strokeWidth="1"
+      />
+    ))}
+
+    {/* Regime shading blocks */}
+    <rect x="86" y="92" width="126" height="356" fill="rgba(34,197,94,0.10)" />
+    <rect x="212" y="92" width="148" height="356" fill="rgba(148,163,184,0.10)" />
+    <rect x="360" y="92" width="126" height="356" fill="rgba(239,68,68,0.10)" />
+    <rect x="486" y="92" width="214" height="356" fill="rgba(34,197,94,0.08)" />
+
+    {/* Price line */}
+    <path
+      d="M86 394 C 132 380, 154 330, 206 344 C 248 356, 258 298, 306 286 C 354 274, 366 238, 404 246 C 448 256, 462 210, 494 200 C 540 186, 562 150, 600 158 C 640 166, 664 132, 700 116"
+      fill="none"
+      stroke="url(#cs-line)"
+      strokeWidth="3.2"
+      filter="url(#cs-glow)"
+    />
+
+    {/* "Liquidity" area line */}
+    <path
+      d="M86 424 C 150 420, 206 430, 274 412 C 330 398, 382 402, 440 392 C 510 380, 612 382, 700 360"
+      fill="none"
+      stroke="rgba(96,165,250,0.55)"
+      strokeWidth="2"
+      strokeDasharray="6 6"
+    />
+
+    {/* Mini badges */}
+    <g transform="translate(66 44)">
+      <rect x="0" y="0" width="156" height="36" rx="12" fill="rgba(2,6,23,0.60)" stroke="rgba(148,163,184,0.22)" />
+      <text x="16" y="24" fill="#e5e7eb" fontFamily="ui-sans-serif, system-ui" fontSize="14" fontWeight="800">
+        Coin Strat 2026
+      </text>
+    </g>
+
+    <g transform="translate(560 44)">
+      <rect x="0" y="0" width="146" height="36" rx="12" fill="rgba(2,6,23,0.60)" stroke="rgba(148,163,184,0.22)" />
+      <circle cx="18" cy="18" r="8" fill="#22c55e" fillOpacity="0.9" />
+      <text x="34" y="24" fill="#cbd5e1" fontFamily="ui-sans-serif, system-ui" fontSize="13" fontWeight="700">
+        Signals: ON
+      </text>
+    </g>
+
+    {/* Bottom factor chips */}
+    <g transform="translate(68 460)">
+      {[
+        { x: 0, label: 'Liquidity', c: '#60a5fa' },
+        { x: 170, label: 'Business Cycle', c: '#34d399' },
+        { x: 356, label: 'USD Regime', c: '#fbbf24' },
+        { x: 520, label: 'Valuation', c: '#e5e7eb' },
+      ].map((t) => (
+        <g key={t.label} transform={`translate(${t.x} 0)`}>
+          <rect x="0" y="0" width="152" height="34" rx="12" fill="rgba(2,6,23,0.60)" stroke="rgba(148,163,184,0.22)" />
+          <circle cx="18" cy="17" r="7" fill={t.c} fillOpacity="0.95" />
+          <text x="34" y="22" fill="#cbd5e1" fontFamily="ui-sans-serif, system-ui" fontSize="12.8" fontWeight="700">
+            {t.label}
+          </text>
+        </g>
+      ))}
+    </g>
+  </Box>
+);
 
 const Documentation: React.FC = () => {
+  const navigate = useNavigate();
   return (
     <div className="mx-auto max-w-4xl space-y-12">
-      <div className="text-center space-y-4">
-        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg">
-        </div>
-        <h1 className="text-4xl font-black text-slate-100 tracking-tight">Coin Strat</h1>
-        <p className="text-slate-300 leading-relaxed">
-          The Coin Strat engine is a multi-factor model designed to 
-          complement{' '}
-          <Link
-            href="https://powerwallet.finance"
-            target="_blank"
-            rel="noreferrer"
-            underline="hover"
-            sx={{ color: 'primary.light', fontWeight: 800 }}
-          >
-            Power Wallet
-          </Link>{' '}
-          Bitcoin accumulation strategies.
-          <br />
-          This system combines various factors including global liquidity, macroeconomic health, and BTC valuation metrics.
-          <br />
-          It suggests when is the best time to deploy fresh capital into Bitcoin accumulation strategies, when to accelerate accumulation, or pause it to protect capital.
-        </p>
-      </div>
+      <Box
+        sx={{
+          borderRadius: 3,
+          p: { xs: 2.5, sm: 3, md: 4 },
+          border: '1px solid',
+          borderColor: 'rgba(148,163,184,0.25)',
+          background:
+            'linear-gradient(180deg, rgba(2,6,23,0.35) 0%, rgba(15,23,42,0.70) 100%)',
+          position: 'relative',
+          overflow: 'hidden',
+        }}
+      >
+        <Box sx={{ display: 'grid', gap: { xs: 3, md: 4 }, gridTemplateColumns: { xs: '1fr', md: '1.1fr 0.9fr' }, alignItems: 'center' }}>
+          <Box>
+            <Typography variant="h3" sx={{ fontWeight: 950, letterSpacing: -0.8, color: 'text.primary', mb: 1 }}>
+              Coin
+              <Box component="span" sx={{ color: 'primary.main' }}> Strat</Box>
+            </Typography>
+            <Typography color="text.secondary" sx={{ lineHeight: 1.75, mb: 2.25 }}>
+              Coin Strat is a multi-factor model designed to complement{' '}
+              <Link
+                href="https://powerwallet.finance"
+                target="_blank"
+                rel="noreferrer"
+                underline="hover"
+                sx={{ color: 'primary.light', fontWeight: 900 }}
+              >
+                Power Wallet
+              </Link>{' '}
+              investment strategies.
+              <br />
+              The system suggests when is the best time to deploy fresh capital into Bitcoin accumulation strategies, when to accelerate accumulation,
+              or pause it to protect capital.
+              <br />
+              This model combines various factors including global liquidity, macroeconomic health, and BTC valuation metrics.
+ 
+            </Typography>
+
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} sx={{ alignItems: { sm: 'center' } }}>
+              <Button variant="contained" size="medium" onClick={() => navigate('/dashboard')} sx={{ fontWeight: 900 }}>
+                Open Dashboard
+              </Button>
+              <Button variant="outlined" size="medium" onClick={() => navigate('/charts/system')} sx={{ fontWeight: 900 }}>
+                View Charts
+              </Button>
+            </Stack>
+          </Box>
+
+          <Box sx={{ width: '100%', maxWidth: 520, mx: { xs: 'auto', md: 0 } }}>
+            <HeroIllustration />
+          </Box>
+        </Box>
+      </Box>
 
       <section className="space-y-6">
         <div className="flex items-center gap-3 border-b pb-2">
