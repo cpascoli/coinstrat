@@ -4,7 +4,7 @@ import Dashboard from './views/Dashboard';
 import ScoreBreakdown from './views/ScoreBreakdown';
 import LogicFlow from './views/LogicFlow';
 import ChartsView from './views/ChartsView';
-import Documentation from './views/Documentation';
+import Home from './views/Home';
 import { computeAllSignals } from './services/engine';
 import {
   AppBar,
@@ -232,14 +232,10 @@ const App: React.FC = () => {
 
       <Container maxWidth="lg" sx={{ py: { xs: 2.5, md: 4 } }}>
         <Routes>
-          <Route path="/" element={<Documentation />} />
-          {/* Back-compat: old About route */}
-          <Route path="/docs" element={<Navigate to="/" replace />} />
+          <Route path="/" element={<Home />} />
           <Route path="/dashboard" element={<Dashboard current={lastData} history={data} />} />
           <Route path="/scores" element={<ScoreBreakdown current={lastData} />} />
           <Route path="/signals" element={<LogicFlow current={lastData} />} />
-          {/* Back-compat: old Signals route */}
-          <Route path="/logic" element={<Navigate to="/signals" replace />} />
           <Route path="/charts/*" element={<ChartsView data={data} />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>

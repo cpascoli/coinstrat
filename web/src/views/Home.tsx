@@ -4,7 +4,7 @@ import { Box, Button, Card, CardContent, CardHeader, Divider, IconButton, Link, 
 import { useNavigate } from 'react-router-dom';
 import { HeroIllustration } from '../components/HeroIllustration';
 
-const Documentation: React.FC = () => {
+const Home: React.FC = () => {
   const navigate = useNavigate();
   return (
     <div className="mx-auto max-w-4xl space-y-12">
@@ -55,7 +55,7 @@ const Documentation: React.FC = () => {
 
               <Box component="li" sx={{ mb: 1}}>
                 <Typography color="text.secondary" sx={{ lineHeight: 1.75, fontSize: { xs: 14, sm: 16, md: 18 } }}>
-                  You can use Coin Strat to optimize the way you fund {' '}
+                  You can use Coin Strat to optimize how you fund {' '}
                   <Link
                     href="https://powerwallet.finance"
                     target="_blank"
@@ -412,5 +412,5 @@ const ReferenceCard = ({
   </Card>
 );
 
-export default Documentation;
+export default Home;
 
