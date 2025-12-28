@@ -29,7 +29,7 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, pb: 1.5, borderBottom: '1px solid', borderColor: 'divider' }}>
         <Binary className="h-8 w-8 text-blue-400" />
         <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: -0.5 }}>
-          Signal Synthesis Logic
+          Signal Synthesis
         </Typography>
       </Box>
 
@@ -73,13 +73,13 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
 
                 <Grid container spacing={1.25}>
                   <Grid item xs={6}>
-                    <MetricChip label="VAL_SCORE" value={current.VAL_SCORE} />
+                    <MetricChip title="Valuation" label="VAL_SCORE" value={current.VAL_SCORE} />
                   </Grid>
                   <Grid item xs={6}>
-                    <MetricChip label="PRICE_REGIME" value={current.PRICE_REGIME_ON} />
+                    <MetricChip title="Price Regime" label="PRICE_REGIME" value={current.PRICE_REGIME_ON} />
                   </Grid>
                   <Grid item xs={12}>
-                    <MetricChip label="DXY_SCORE" value={current.DXY_SCORE} />
+                    <MetricChip title="USD Regime" label="DXY_SCORE" value={current.DXY_SCORE} />
                   </Grid>
                 </Grid>
               </Stack>
@@ -113,16 +113,16 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
 
                 <Grid container spacing={1.25}>
                   <Grid item xs={6}>
-                    <MetricChip label="LIQ_SCORE" value={current.LIQ_SCORE} />
+                    <MetricChip title="Liquidity" label="LIQ_SCORE" value={current.LIQ_SCORE} />
                   </Grid>
                   <Grid item xs={6}>
-                    <MetricChip label="BIZ_CYCLE_SCORE" value={current.CYCLE_SCORE} />
+                    <MetricChip title="Business Cycle" label="BIZ_CYCLE_SCORE" value={current.CYCLE_SCORE} />
                   </Grid>
                   <Grid item xs={6}>
-                    <MetricChip label="LIQ+BIZ_CYCLE" value={macroScoreSum} />
+                    <MetricChip title="Liquidity + Business Cycle" label="LIQ_SCORE+BIZ_CYCLE_SCORE" value={macroScoreSum} />
                   </Grid>
                   <Grid item xs={6}>
-                    <MetricChip label="DXY_SCORE" value={current.DXY_SCORE} />
+                    <MetricChip title="USD Regime" label="DXY_SCORE" value={current.DXY_SCORE} />
                   </Grid>
                 </Grid>
               </Stack>
@@ -143,8 +143,8 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
           >
             <CardHeader
               avatar={<ToggleRight className="h-7 w-7 text-blue-300" />}
-              title={<Typography sx={{ fontWeight: 900 }}>ACCUM_ON · Final Permission</Typography>}
-              subheader="Final permission to deploy capital (CORE_ON OR MACRO_ON)."
+              title={<Typography sx={{ fontWeight: 900 }}>Final Permission (ACCUM)</Typography>}
+              subheader="Final permission to deploy capital (CORE OR MACRO)."
               action={
                 <Chip
                   label={accumStatus ? 'ON' : 'OFF'}
@@ -249,8 +249,8 @@ function LogicRule(props: { title: string; formula: string; active: boolean; ton
   );
 }
 
-function MetricChip(props: { label: string; value: number | string }) {
-  const { label, value } = props;
+function MetricChip(props: { title: string; label: string; value: number | string }) {
+  const { title, label, value } = props;
   const v = typeof value === 'number' ? value : value;
   const color =
     typeof v === 'number'
@@ -266,7 +266,7 @@ function MetricChip(props: { label: string; value: number | string }) {
   return (
     <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, px: 2, py: 1.25, bgcolor: 'rgba(2,6,23,0.15)' }}>
       <Typography variant="overline" color="text.secondary">
-        {label}
+        {title}
       </Typography>
       <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1}>
         <Typography variant="h6" sx={{ fontWeight: 900 }}>

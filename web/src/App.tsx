@@ -60,7 +60,7 @@ const App: React.FC = () => {
     () => [
       { key: 'dashboard' as const, path: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-5 w-5" /> },
       { key: 'scores' as const, path: '/scores', label: 'Scores', icon: <BarChart3 className="h-5 w-5" /> },
-      { key: 'logic' as const, path: '/logic', label: 'Logic', icon: <Binary className="h-5 w-5" /> },
+      { key: 'logic' as const, path: '/signals', label: 'Signals', icon: <Binary className="h-5 w-5" /> },
       // Default to the System subpage under Charts
       { key: 'charts' as const, path: '/charts/system', label: 'Charts', icon: <Activity className="h-5 w-5" /> },
     ],
@@ -151,7 +151,16 @@ const App: React.FC = () => {
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', pb: { xs: 8, md: 0 } }}>
-      <AppBar position="sticky" color="transparent">
+      <AppBar
+        position="sticky"
+        color="transparent"
+        sx={{
+          bgcolor: 'rgba(10, 15, 28, 0.78)', // dark glass
+          backdropFilter: 'blur(10px)',
+          borderBottom: '1px solid',
+          borderColor: 'rgba(148,163,184,0.18)',
+        }}
+      >
         <Toolbar sx={{ minHeight: 64 }}>
           <Box
             component="button"
@@ -228,7 +237,9 @@ const App: React.FC = () => {
           <Route path="/docs" element={<Navigate to="/" replace />} />
           <Route path="/dashboard" element={<Dashboard current={lastData} history={data} />} />
           <Route path="/scores" element={<ScoreBreakdown current={lastData} />} />
-          <Route path="/logic" element={<LogicFlow current={lastData} />} />
+          <Route path="/signals" element={<LogicFlow current={lastData} />} />
+          {/* Back-compat: old Signals route */}
+          <Route path="/logic" element={<Navigate to="/signals" replace />} />
           <Route path="/charts/*" element={<ChartsView data={data} />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>

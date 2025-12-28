@@ -157,25 +157,33 @@ const Documentation: React.FC = () => {
               Coin
               <Box component="span" sx={{ color: 'primary.main' }}> Strat</Box>
             </Typography>
-            <Typography color="text.secondary" sx={{ lineHeight: 1.75, mb: 2.25 }}>
-              Coin Strat is a multi-factor model designed to complement{' '}
-              <Link
-                href="https://powerwallet.finance"
-                target="_blank"
-                rel="noreferrer"
-                underline="hover"
-                sx={{ color: 'primary.light', fontWeight: 900 }}
-              >
-                Power Wallet
-              </Link>{' '}
-              investment strategies.
-              <br />
-              The system suggests when is the best time to deploy fresh capital into Bitcoin accumulation strategies, when to accelerate accumulation,
-              or pause it to protect capital.
-              <br />
-              This model combines various factors including global liquidity, macroeconomic health, and BTC valuation metrics.
- 
-            </Typography>
+            <Box component="ul" sx={{ m: 0, mb: 2.25, pl: 2.5, color: 'text.secondary' }}>
+              <Box component="li" sx={{ mb: 1 }}>
+                <Typography color="text.secondary" sx={{ lineHeight: 1.75 }}>
+                  Coin Strat is a multi-factor signal engine designed to help you time capital allocation to {' '}
+                  <Link
+                    href="https://powerwallet.finance"
+                    target="_blank"
+                    rel="noreferrer"
+                    underline="hover"
+                    sx={{ color: 'primary.light', fontWeight: 900, whiteSpace: 'nowrap' }}
+                  >
+                    Power Wallet
+                  </Link>'s bitcoin accumulation strategies.
+                </Typography>
+              </Box>
+              <Box component="li" sx={{ mb: 1 }}>
+                <Typography color="text.secondary" sx={{ lineHeight: 1.75 }}>
+                  It tells you when to <strong>deploy fresh capital</strong>, when to <strong>accelerate accumulation</strong>, and when to{' '}
+                  <strong>pause</strong> to protect capital.
+                </Typography>
+              </Box>
+              <Box component="li">
+                <Typography color="text.secondary" sx={{ lineHeight: 1.75 }}>
+                  Signals blend <strong>global liquidity</strong>, <strong>macro conditions</strong>, and <strong>BTC valuation</strong> into one clear system state.
+                </Typography>
+              </Box>
+            </Box>
 
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} sx={{ alignItems: { sm: 'center' } }}>
               <Button variant="contained" size="medium" onClick={() => navigate('/dashboard')} sx={{ fontWeight: 900 }}>
@@ -245,10 +253,10 @@ const Documentation: React.FC = () => {
           >
             <CardContent sx={{ pt: 2.25 }}>
               <Typography sx={{ fontWeight: 900, color: 'text.primary', mb: 1 }}>
-                Tier 1: Core Accumulation (CORE_ON)
+                Tier 1: CORE Accumulation
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.65, fontStyle: 'regular' }}>
-                The "Engine" focuses on multi-month accumulation during deep-value phases. It uses MVRV to identify
+                The Core "Engine" focuses on multi-month accumulation during deep-value phases. It uses MVRV to identify
                 capitulation bottoms and the 40-week Moving Average to confirm the trend.
               </Typography>
             </CardContent>
@@ -274,7 +282,7 @@ const Documentation: React.FC = () => {
           >
             <CardContent sx={{ pt: 2.25 }}>
               <Typography sx={{ fontWeight: 900, color: 'text.primary', mb: 1 }}>
-                Tier 2: Macro Acceleration (MACRO_ON)
+                Tier 2: MACRO Acceleration
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.65, fontStyle: 'regular' }}>
                 The "Turbo" activates when the external environment is highly favorable. If US Net Liquidity is expanding
@@ -375,8 +383,8 @@ const Documentation: React.FC = () => {
           />
 
           <ReferenceCard
-            title="BTC Daily Price"
-            id="Binance, BTCUSDT"
+            title="BTC Daily Close"
+            id="BTCUSDT (Binance)"
             href="https://www.binance.com/en-GB/trade/BTC_USDT?type=spot"
             meaning="Exchange candlestick endpoint used to fetch recent BTC daily candles."
             usage={[

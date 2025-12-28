@@ -90,10 +90,10 @@ const Dashboard: React.FC<Props> = ({ current, history }) => {
           borderColor: rec.action === 'PAUSE' ? 'error.main' : rec.action === 'ACCEL' ? 'success.main' : 'primary.main',
           backgroundImage:
             rec.action === 'PAUSE'
-              ? 'radial-gradient(700px circle at 15% 0%, rgba(239,68,68,0.12), transparent 55%)'
+              ? 'radial-gradient(700px circle at 15% 0%, rgba(239,68,68,0.32), transparent 55%)'
               : rec.action === 'ACCEL'
-                ? 'radial-gradient(700px circle at 15% 0%, rgba(34,197,94,0.12), transparent 55%)'
-                : 'radial-gradient(700px circle at 15% 0%, rgba(96,165,250,0.12), transparent 55%)',
+                ? 'radial-gradient(700px circle at 15% 0%, rgba(34,197,94,0.32), transparent 55%)'
+                : 'radial-gradient(700px circle at 15% 0%, rgba(96,165,250,0.32), transparent 55%)',
         }}
       >
         <CardHeader

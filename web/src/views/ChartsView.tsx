@@ -389,7 +389,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, pb: 1.5, borderBottom: '1px solid', borderColor: 'divider' }}>
         <Activity className="h-8 w-8 text-blue-600" />
         <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: -0.5 }}>
-          Interactive Analytics
+          Charts of Key Signals
         </Typography>
       </Box>
 
@@ -430,7 +430,12 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             System State (CORE + MACRO)
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            BTCUSD shaded by the current system state
+            BTCUSD shaded by the engine’s state machine. 
+            <br />
+            CORE is driven by VAL_SCORE + PRICE_REGIME with DXY_SCORE as a gate;
+            MACRO is driven by (LIQ_SCORE + CYCLE_SCORE) with DXY_SCORE as a gate. 
+            <br />
+            ACCUM is enabled when CORE=1 or MACRO=1.
           </Typography>
         </Box>
 
@@ -480,7 +485,11 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             US Net Liquidity
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            BTCUSD (log) with US_LIQ and LIQ_SCORE regime shading
+            BTCUSD with US_LIQ overlay and LIQ_SCORE regime shading. 
+            <br />
+            US_LIQ is computed as WALCL − WTREGEN − RRPONTSYD. 
+            <br />
+            LIQ_SCORE=2 when US_LIQ YoY is positive; LIQ_SCORE=1 when YoY is non‑positive but the 13‑week delta is positive; otherwise LIQ_SCORE=0.
           </Typography>
         </Box>
 
@@ -587,7 +596,9 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             US Net Liquidity Inputs
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            Components used to compute US_LIQ = WALCL − WTREGEN − RRPONTSYD (RRPONTSYD normalized from billions → millions to match units)
+            Raw inputs used to compute US_LIQ = WALCL − WTREGEN − RRPONTSYD.
+            <br />
+            These feed LIQ_SCORE via US_LIQ YoY (%) and the 13‑week delta (momentum).
           </Typography>
         </Box>
 
@@ -659,16 +670,20 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
-            BTC Price Regime (BTCUSD vs 40W MA)
+            BTC Price Regime (PRICE_REGIME)
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            BTCUSD with 40-week moving average and PRICE_REGIME_ON (20/30) shading
+            BTCUSD with the 40‑week MA computed from weekly closes.
+            <br />
+            PRICE_REGIME shading requires ≥20 “BTCUSD ≥ 40W MA” days in the last 30. 
+            <br />
+            This persistence‑filtered regime is used directly in CORE_ON entry/exit logic (trend confirmation + risk-off exit).
           </Typography>
         </Box>
 
         <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
-          <Chip size="small" variant="outlined" label="Bullish (PRICE_REGIME_ON=1)" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
-          <Chip size="small" variant="outlined" label="Bearish (PRICE_REGIME_ON=0)" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
+          <Chip size="small" variant="outlined" label="Bullish (PRICE_REGIME=1)" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="Bearish (PRICE_REGIME=0)" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
           <Chip size="small" variant="outlined" label="BTCUSD" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
           <Chip size="small" variant="outlined" label="40W MA" sx={{ borderColor: '#fbbf24', color: '#fde68a' }} />
         </Stack>
@@ -686,7 +701,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                   y2={btcDomain.y2}
                   ifOverflow="extendDomain"
                   fill={s.value === 1 ? '#22c55e' : '#ef4444'}
-                  fillOpacity={s.value === 1 ? 0.12 : 0.12}
+                  fillOpacity={s.value === 1 ? 0.32 : 0.32}
                   strokeOpacity={0}
                 />
               ))}
@@ -707,10 +722,14 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
-            MVRV Valuation
+            BTC Valuation (VAL_SCORE)
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            BTCUSD shaded by MVRV bands (green cheap / gray fair / red overheated)
+            BTCUSD shaded by MVRV valuation bands and plotted with the MVRV ratio (right axis). 
+            <br />
+            VAL_SCORE is bucketed from MVRV: 2 when MVRV is below 1.0 (cheap), 1 when MVRV is 1.0–1.8 (fair), 0 when MVRV is ≥ 1.8 (hot). 
+            <br />
+            VAL_SCORE feeds CORE_ON entry rules.
           </Typography>
         </Box>
 
@@ -763,7 +782,13 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             Business Cycle Regime
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            BTCUSD (log) shaded by BIZ_CYCLE_SCORE
+            BTCUSD shaded by CYCLE_SCORE (Business Cycle). 
+            <br />
+            CYCLE_SCORE=0 on recession risk (SAHM ≥ 0.5 OR YC_M is negative OR New Orders YoY is negative with 3‑month momentum non‑positive); 
+            <br />
+            CYCLE_SCORE=2 in expansion (SAHM below 0.35 AND YC_M ≥ 0.75 AND New Orders YoY ≥ 0); otherwise CYCLE_SCORE=1. 
+            <br />
+            This score contributes to MACRO_ON via (LIQ_SCORE + BIZ_CYCLE_SCORE).
           </Typography>
         </Box>
 
@@ -812,7 +837,9 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             Business Cycle Inputs
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            SAHM, Yield Curve (10Y-3M) and New Orders proxies
+            Inputs that drive CYCLE_SCORE: SAHM Rule (labor stress), YC_M (10Y–3M yield curve slope), and New Orders (level + YoY). 
+            <br />
+            The engine classifies recession risk vs expansion vs neutral using the thresholds described above.
           </Typography>
         </Box>
 
@@ -856,7 +883,11 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             USD Regime (DXY_SCORE)
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            Trade-weighted broad USD index used as the DXY proxy + derived MA50/MA200 and ROC20 (%)
+            DTWEXBGS (trade‑weighted USD; the DXY proxy) with MA50/MA200 and ROC20 (20‑day % change). 
+            <br />
+            DXY_SCORE=0 (headwind) when ROC20 &gt; +0.5%; DXY_SCORE=2 (supportive) when ROC20 &lt; −0.5% and MA50 &lt; MA200; otherwise DXY_SCORE=1 (neutral). 
+            <br />
+            DXY_SCORE gates CORE and MACRO signals (and triggers CORE exit when combined with PRICE_REGIME=0).
           </Typography>
         </Box>
 
@@ -865,9 +896,6 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           <Chip size="small" variant="outlined" label="MA50" sx={{ borderColor: '#fbbf24', color: '#fde68a' }} />
           <Chip size="small" variant="outlined" label="MA200" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
           <Chip size="small" variant="outlined" label="ROC20 (%)" sx={{ borderColor: '#34d399', color: '#bbf7d0' }} />
-          <Chip size="small" variant="outlined" label="Supportive (ROC20<-0.5% & MA50<MA200)" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
-          <Chip size="small" variant="outlined" label="Headwind (ROC20>+0.5%)" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
-          <Chip size="small" variant="outlined" label="Neutral (otherwise)" sx={{ borderColor: '#94a3b8', color: '#cbd5e1' }} />
         </Stack>
 
         <Box sx={{ display: 'grid', gridTemplateColumns: '1fr', gap: 2.5 }}>
@@ -923,12 +951,33 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                   tickFormatter={(v) => (typeof v === 'number' ? `${v.toFixed(1)}%` : '')}
                 />
                 <Tooltip content={<CustomTooltip />} />
+                {/* Color ROC20 green above 0% and red below 0% */}
                 <Line
                   yAxisId="roc"
                   type="monotone"
-                  dataKey={(d: any) => (typeof d.DXY_ROC20 === 'number' ? d.DXY_ROC20 * 100 : null)}
-                  name="ROC20 (%)"
-                  stroke="#34d399"
+                  dataKey={(d: any) => {
+                    const v = d?.DXY_ROC20;
+                    if (typeof v !== 'number') return null;
+                    const pct = v * 100;
+                    return pct >= 0 ? pct : null;
+                  }}
+                  name="ROC20 (≥ 0%)"
+                  stroke="#22c55e"
+                  strokeWidth={2}
+                  dot={false}
+                  isAnimationActive={false}
+                />
+                <Line
+                  yAxisId="roc"
+                  type="monotone"
+                  dataKey={(d: any) => {
+                    const v = d?.DXY_ROC20;
+                    if (typeof v !== 'number') return null;
+                    const pct = v * 100;
+                    return pct < 0 ? pct : null;
+                  }}
+                  name="ROC20 (< 0%)"
+                  stroke="#ef4444"
                   strokeWidth={2}
                   dot={false}
                   isAnimationActive={false}

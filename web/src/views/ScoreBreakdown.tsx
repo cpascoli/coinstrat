@@ -129,7 +129,7 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
                 <MetricRow label="PRICE_REGIME" value={fmtInt(priceRegime)} />
               </Grid>
               <Grid item xs={6}>
-                <MetricRow label="PRICE_REGIME_ON (20/30)" value={fmtInt(current.PRICE_REGIME_ON)} />
+                <MetricRow label="PRICE_REGIME (20/30)" value={fmtInt(current.PRICE_REGIME_ON)} />
               </Grid>
             </Grid>
           </FactorCard>
