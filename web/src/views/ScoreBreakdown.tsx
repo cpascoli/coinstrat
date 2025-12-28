@@ -43,6 +43,8 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
   const dxyRoc20 = (current as any).DXY_ROC20 as number | undefined; // fraction
 
   const mvrv = current.MVRV;
+  const btcMa40w = (current as any).BTC_MA40W as number | undefined;
+  const priceRegime = (current as any).PRICE_REGIME as number | undefined;
 
   const dxyRoc20Pct = useMemo(() => (typeof dxyRoc20 === 'number' ? dxyRoc20 * 100 : undefined), [dxyRoc20]);
 
@@ -60,7 +62,7 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
         <Grid item xs={12} md={6}>
           <FactorCard
             icon={<Landmark className="h-6 w-6 text-violet-300" />}
-            title="Valuation (VAL_SCORE)"
+            title="BTC Valuation (VAL_SCORE)"
             score={valScore}
             description="Bitcoin valuation using MVRV."
             formula="MVRV thresholds: <1.0 cheap, <1.8 fair, ≥1.8 hot"
@@ -87,14 +89,60 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
           </FactorCard>
         </Grid>
 
+        {/* BTC Regime (2nd) */}
+        <Grid item xs={12} md={6}>
+          <FactorCard
+            icon={<Landmark className="h-6 w-6 text-amber-300" />}
+            title="BTC Regime (PRICE_REGIME)"
+            score={typeof priceRegime === 'number' ? priceRegime : current.PRICE_REGIME_ON}
+            description="Trend filter based on BTCUSD vs the 40-week moving average."
+            formula="PRICE_REGIME = 1 if BTCUSD ≥ BTC_MA40W, else 0"
+          >
+            <Grid container spacing={1.25}>
+              <Grid item xs={12}>
+                <RuleRow
+                  ok={typeof current.BTCUSD === 'number' && typeof btcMa40w === 'number' && current.BTCUSD >= btcMa40w}
+                  label="BTCUSD ≥ BTC_MA40W"
+                  result="PRICE_REGIME = 1 (Bullish)"
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <RuleRow
+                  ok={typeof current.BTCUSD === 'number' && typeof btcMa40w === 'number' && current.BTCUSD < btcMa40w}
+                  label="BTCUSD < BTC_MA40W"
+                  result="PRICE_REGIME = 0 (Bearish)"
+                  tone="danger"
+                />
+              </Grid>
+            </Grid>
+
+            <Divider sx={{ my: 2 }} />
+
+            <Grid container spacing={1.25}>
+              <Grid item xs={6}>
+                <MetricRow label="BTCUSD" value={fmtUsd(current.BTCUSD)} />
+              </Grid>
+              <Grid item xs={6}>
+                <MetricRow label="BTC_MA40W" value={fmtUsd(btcMa40w)} />
+              </Grid>
+              <Grid item xs={6}>
+                <MetricRow label="PRICE_REGIME" value={fmtInt(priceRegime)} />
+              </Grid>
+              <Grid item xs={6}>
+                <MetricRow label="PRICE_REGIME_ON (20/30)" value={fmtInt(current.PRICE_REGIME_ON)} />
+              </Grid>
+            </Grid>
+          </FactorCard>
+        </Grid>
+
         {/* USD Regime (2nd) */}
         <Grid item xs={12} md={6}>
           <FactorCard
             icon={<Gauge className="h-6 w-6 text-amber-300" />}
             title="USD Regime (DXY_SCORE)"
             score={dxyScore}
-            description="USD headwind/tailwind using a broad trade‑weighted USD proxy (FRED: DTWEXBGS), not the ICE DXY shown on TradingView."
-            formula="DTWEXBGS: ROC20 thresholds ±0.5% and MA50 vs MA200"
+            description="USD headwind/tailwind using a broad trade‑weighted USD proxy (FRED: DTWEXBGS)"
+            formula="ROC20 thresholds ±0.5% and MA50 vs MA200"
           >
             <Grid container spacing={1.25}>
               <Grid item xs={12}>
@@ -135,7 +183,7 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
         <Grid item xs={12} md={6}>
           <FactorCard
             icon={<Wind className="h-6 w-6 text-blue-300" />}
-            title="Liquidity (LIQ_SCORE)"
+            title="US Liquidity (LIQ_SCORE)"
             score={liqScore}
             description="Net liquidity impulse in the US system."
             formula="US_LIQ = WALCL − WTREGEN − RRPONTSYD"
@@ -338,6 +386,18 @@ function MetricRow(props: { label: string; value: string }) {
 function fmtNum(x: any, digits = 2): string {
   if (typeof x !== 'number' || !isFinite(x)) return 'n/a';
   return x.toFixed(digits);
+}
+
+function fmtUsd(x: any): string {
+  const v = Number(x);
+  if (!Number.isFinite(v)) return 'n/a';
+  return `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+}
+
+function fmtInt(x: any): string {
+  const v = Number(x);
+  if (!Number.isFinite(v)) return 'n/a';
+  return String(Math.trunc(v));
 }
 
 function fmtPct(x: any): string {

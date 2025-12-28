@@ -218,11 +218,16 @@ export async function computeAllSignals(): Promise<SignalData[]> {
   }
 
   // Raw condition: BTC > MA40W
+  // Define PRICE_REGIME as the raw trend state:
+  //   1 if BTCUSD >= BTC_MA40W
+  //   0 if BTCUSD <  BTC_MA40W
   const rawOn = dailyData.map((d) => {
     const p = Number(d.BTCUSD);
     const ma = Number((d as any).BTC_MA40W);
     if (!Number.isFinite(p) || !Number.isFinite(ma)) return 0;
-    return p > ma ? 1 : 0;
+    const state = p >= ma ? 1 : 0;
+    (d as any).PRICE_REGIME = state;
+    return state;
   });
 
   // Persistence: require 20 of last 30 days ON

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { LayoutDashboard, BarChart3, Binary, BookOpen, Info, Activity } from 'lucide-react';
+import { LayoutDashboard, BarChart3, Binary, Info, Activity } from 'lucide-react';
 import Dashboard from './views/Dashboard';
 import ScoreBreakdown from './views/ScoreBreakdown';
 import LogicFlow from './views/LogicFlow';
@@ -44,7 +44,7 @@ export interface SignalData {
   [key: string]: any;
 }
 
-type TabKey = 'dashboard' | 'scores' | 'logic' | 'charts' | 'docs';
+type TabKey = 'dashboard' | 'scores' | 'logic' | 'charts';
 
 const App: React.FC = () => {
   const [data, setData] = useState<SignalData[]>([]);
@@ -63,17 +63,18 @@ const App: React.FC = () => {
       { key: 'logic' as const, path: '/logic', label: 'Logic', icon: <Binary className="h-5 w-5" /> },
       // Default to the System subpage under Charts
       { key: 'charts' as const, path: '/charts/system', label: 'Charts', icon: <Activity className="h-5 w-5" /> },
-      { key: 'docs' as const, path: '/docs', label: 'Methodology', icon: <BookOpen className="h-5 w-5" /> },
     ],
     []
   );
 
-  const activeTab: TabKey = useMemo(() => {
+  const activeTab: TabKey | false = useMemo(() => {
     const p = location.pathname;
     const found = tabs.find((t) => p === t.path);
     if (found) return found.key;
     // Treat any /charts/* route as the Charts tab
     if (p.startsWith('/charts')) return 'charts';
+    // Home/About landing page shouldn't highlight a nav item
+    if (p === '/') return false;
     return 'dashboard';
   }, [location.pathname, tabs]);
 
@@ -152,7 +153,23 @@ const App: React.FC = () => {
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', pb: { xs: 8, md: 0 } }}>
       <AppBar position="sticky" color="transparent">
         <Toolbar sx={{ minHeight: 64 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexGrow: 1 }}>
+          <Box
+            component="button"
+            onClick={() => navigate('/')}
+            aria-label="Go to homepage"
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1.5,
+              flexGrow: 1,
+              cursor: 'pointer',
+              border: 'none',
+              background: 'transparent',
+              color: 'inherit',
+              p: 0,
+              textAlign: 'left',
+            }}
+          >
             <Box
               sx={{
                 height: 34,
@@ -206,14 +223,30 @@ const App: React.FC = () => {
 
       <Container maxWidth="lg" sx={{ py: { xs: 2.5, md: 4 } }}>
         <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/" element={<Documentation />} />
+          {/* Back-compat: old About route */}
+          <Route path="/docs" element={<Navigate to="/" replace />} />
           <Route path="/dashboard" element={<Dashboard current={lastData} history={data} />} />
           <Route path="/scores" element={<ScoreBreakdown current={lastData} />} />
           <Route path="/logic" element={<LogicFlow current={lastData} />} />
           <Route path="/charts/*" element={<ChartsView data={data} />} />
-          <Route path="/docs" element={<Documentation />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
+
+        <Box
+          component="footer"
+          sx={{
+            mt: { xs: 4, md: 6 },
+            pt: 2,
+            borderTop: '1px solid',
+            borderColor: 'divider',
+            textAlign: 'center',
+          }}
+        >
+          <Typography variant="caption" color="text.secondary">
+            © {new Date().getFullYear()} Coin Strat. All rights reserved.
+          </Typography>
+        </Box>
       </Container>
 
       {/* Mobile bottom navigation */}

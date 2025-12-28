@@ -1,30 +1,44 @@
 import React from 'react';
-import { BookOpen, ShieldCheck, Zap, Layers, RefreshCw } from 'lucide-react';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
-import { Box, Card, CardContent, CardHeader, Divider, IconButton, Stack, Tooltip, Typography } from '@mui/material';
+import { Box, Card, CardContent, CardHeader, Divider, IconButton, Link, Stack, Tooltip, Typography } from '@mui/material';
 
 const Documentation: React.FC = () => {
   return (
     <div className="mx-auto max-w-4xl space-y-12">
       <div className="text-center space-y-4">
         <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg">
-          <BookOpen className="h-8 w-8" />
         </div>
-        <h1 className="text-4xl font-black text-slate-100 tracking-tight">Model Methodology</h1>
-        <p className="text-lg text-slate-400">The Coin Strat Pre-Accumulation Framework (2026 Edition)</p>
+        <h1 className="text-4xl font-black text-slate-100 tracking-tight">Coin Strat</h1>
+        <p className="text-slate-300 leading-relaxed">
+          The Coin Strat engine is a multi-factor model designed to 
+          complement{' '}
+          <Link
+            href="https://powerwallet.finance"
+            target="_blank"
+            rel="noreferrer"
+            underline="hover"
+            sx={{ color: 'primary.light', fontWeight: 800 }}
+          >
+            Power Wallet
+          </Link>{' '}
+          Bitcoin accumulation strategies.
+          <br />
+          This system combines various factors including global liquidity, macroeconomic health, and BTC valuation metrics.
+          <br />
+          It suggests when is the best time to deploy fresh capital into Bitcoin accumulation strategies, when to accelerate accumulation, or pause it to protect capital.
+        </p>
       </div>
 
       <section className="space-y-6">
         <div className="flex items-center gap-3 border-b pb-2">
-          <Layers className="h-6 w-6 text-blue-400" />
+         
           <h2 className="text-2xl font-bold text-slate-100">System Architecture</h2>
         </div>
         <p className="text-slate-300 leading-relaxed">
-          The Coin Strat model is a multi-factor regime-switching engine designed to navigate the highly volatile Bitcoin market. 
-          Unlike traditional "Buy and Hold" strategies, this system dynamically adjusts capital exposure based on the confluence 
-          of global liquidity, macroeconomic health, and crypto-native valuation metrics.
+          The system is composed of three main components
         </p>
-        <div className="grid gap-6 md:grid-cols-3">
+        {/* Use MUI breakpoints for layout so cards reliably render in a row on desktop */}
+        <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' } }}>
           <DocCard 
             title="Data Ingestion" 
             text="Real-time feeds from FRED (Federal Reserve), Stooq, and Blockchain.info provide the foundation."
@@ -37,61 +51,85 @@ const Documentation: React.FC = () => {
             title="Action Synthesis" 
             text="Scores are aggregated into a permission-based hierarchy (PAUSE, BASE, ACCELERATED)."
           />
-        </div>
+        </Box>
       </section>
 
       <section className="space-y-6">
         <div className="flex items-center gap-3 border-b pb-2">
-          <RefreshCw className="h-6 w-6 text-blue-400" />
+         
           <h2 className="text-2xl font-bold text-slate-100">The Accumulation Hierarchy</h2>
         </div>
         
-        <div className="rounded-2xl bg-slate-900 border border-slate-700/60 p-8 space-y-8">
-          <div className="flex gap-6">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-950/40 border border-slate-700/60 shadow-sm">
-              <ShieldCheck className="h-6 w-6 text-blue-300" />
-            </div>
-            <div>
-              <h3 className="text-lg font-bold text-slate-100 mb-2">Tier 1: Core Accumulation (CORE_ON)</h3>
-              <p className="text-sm text-slate-300 leading-relaxed italic">
-                The "Engine." Focuses on multi-month accumulation during deep-value phases. It uses MVRV to identify 
+        <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' } }}>
+          <Card
+            sx={{
+              position: 'relative',
+              overflow: 'hidden',
+              borderColor: 'rgba(148,163,184,0.35)',
+              background:
+                'linear-gradient(180deg, rgba(2,6,23,0.35) 0%, rgba(15,23,42,0.65) 100%)',
+              boxShadow: 'none',
+              '&::before': {
+                content: '""',
+                position: 'absolute',
+                inset: 0,
+                height: 3,
+                background: 'linear-gradient(90deg, rgba(96,165,250,0.95), rgba(59,130,246,0.65))',
+                opacity: 0.95,
+              },
+            }}
+          >
+            <CardContent sx={{ pt: 2.25 }}>
+              <Typography sx={{ fontWeight: 900, color: 'text.primary', mb: 1 }}>
+                Tier 1: Core Accumulation (CORE_ON)
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.65, fontStyle: 'regular' }}>
+                The "Engine" focuses on multi-month accumulation during deep-value phases. It uses MVRV to identify
                 capitulation bottoms and the 40-week Moving Average to confirm the trend.
-              </p>
-            </div>
-          </div>
+              </Typography>
+            </CardContent>
+          </Card>
 
-          <div className="flex gap-6">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-950/40 border border-slate-700/60 shadow-sm">
-              <Zap className="h-6 w-6 text-amber-300" />
-            </div>
-            <div>
-              <h3 className="text-lg font-bold text-slate-100 mb-2">Tier 2: Macro Acceleration (MACRO_ON)</h3>
-              <p className="text-sm text-slate-300 leading-relaxed italic">
-                The "Turbo." Activates when the external environment is highly favorable. If US Net Liquidity is expanding 
+          <Card
+            sx={{
+              position: 'relative',
+              overflow: 'hidden',
+              borderColor: 'rgba(148,163,184,0.35)',
+              background:
+                'linear-gradient(180deg, rgba(2,6,23,0.35) 0%, rgba(15,23,42,0.65) 100%)',
+              boxShadow: 'none',
+              '&::before': {
+                content: '""',
+                position: 'absolute',
+                inset: 0,
+                height: 3,
+                background: 'linear-gradient(90deg, rgba(251,191,36,0.95), rgba(245,158,11,0.65))',
+                opacity: 0.95,
+              },
+            }}
+          >
+            <CardContent sx={{ pt: 2.25 }}>
+              <Typography sx={{ fontWeight: 900, color: 'text.primary', mb: 1 }}>
+                Tier 2: Macro Acceleration (MACRO_ON)
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.65, fontStyle: 'regular' }}>
+                The "Turbo" activates when the external environment is highly favorable. If US Net Liquidity is expanding
                 and the Business Cycle is out of the danger zone, the model permits triple-sizing the accumulation rate.
-              </p>
-            </div>
-          </div>
-        </div>
+              </Typography>
+            </CardContent>
+          </Card>
+        </Box>
       </section>
 
-      <section className="rounded-2xl border border-blue-500/30 bg-blue-500/10 p-8">
-        <h2 className="text-xl font-bold text-blue-200 mb-4">Philosophy of Capital Protection</h2>
-        <p className="text-slate-200 text-sm leading-relaxed">
-          The primary goal of the model is not to pick the exact bottom, but to <strong>stay out of the market during liquidity contractions. </strong> 
-          By forcing a "PAUSE" when USD strength is rising sharply or the Sahm Rule triggers a recession alert, the system aims to 
-          preserve dry powder for the high-probability periods when liquidity is abundant.
-        </p>
-      </section>
+  
 
       <section className="space-y-6">
         <div className="flex items-center gap-3 border-b pb-2">
-          <BookOpen className="h-6 w-6 text-blue-400" />
-          <h2 className="text-2xl font-bold text-slate-100">References (Data Feeds)</h2>
+          <h2 className="text-2xl font-bold text-slate-100">Data Feeds</h2>
         </div>
 
         <p className="text-slate-300 leading-relaxed">
-          The app computes scores from the following 3rd party data feeds.
+          The app computes scores from the following 3rd party data feeds
         </p>
 
         {/* Use MUI breakpoints for layout so cards reliably become multi-column on desktop */}
@@ -100,7 +138,7 @@ const Documentation: React.FC = () => {
             title="Fed Total Assets"
             id="WALCL"
             href="https://fred.stlouisfed.org/series/WALCL"
-            meaning="The Federal Reserve’s total assets (balance sheet size)."
+            meaning="The Federal Reserve’s total assets (balance sheet)."
             usage={[
               "Liquidity inputs: used in US net liquidity proxy.",
               "Derived: US_LIQ = WALCL − WTREGEN − RRPONTSYD (RRP normalized to match units).",
@@ -119,10 +157,10 @@ const Documentation: React.FC = () => {
           />
 
           <ReferenceCard
-            title="Overnight Reverse Repo (RRP)"
+            title="Overnight Reverse Repo"
             id="RRPONTSYD"
             href="https://fred.stlouisfed.org/series/RRPONTSYD"
-            meaning="Daily ON RRP usage reported by the New York Fed (units: billions USD on FRED)."
+            meaning="Daily ON RRP usage reported by the New York Fed"
             usage={[
               "Liquidity inputs: used in US net liquidity proxy.",
               "Derived: US_LIQ = WALCL − WTREGEN − RRPONTSYD.",
@@ -175,7 +213,7 @@ const Documentation: React.FC = () => {
           <ReferenceCard
             title="BTC Daily Price"
             id="Binance, BTCUSDT"
-            href="https://api.binance.com/api/v3/klines"
+            href="https://www.binance.com/en-GB/trade/BTC_USDT?type=spot"
             meaning="Exchange candlestick endpoint used to fetch recent BTC daily candles."
             usage={[
               "BTC price tail: merged with local bundled history to keep data current.",
@@ -185,7 +223,7 @@ const Documentation: React.FC = () => {
           <ReferenceCard
             title="Market Value to Realized Value"
             id="MVRV"
-            href="https://api.blockchain.info/charts/mvrv?timespan=all&sampled=true&metadata=false&daysAverageString=1d&cors=true&format=json"
+            href="https://www.blockchain.com/explorer/charts/mvrv"
             meaning="Market Value to Realized Value ratio (valuation proxy)."
             usage={[
               "Valuation scoring (VAL_SCORE): MVRV < 1.0 → 2; 1.0–1.8 → 1; ≥ 1.8 → 0.",
@@ -198,10 +236,40 @@ const Documentation: React.FC = () => {
 };
 
 const DocCard = ({ title, text }: any) => (
-  <div className="rounded-xl border border-slate-700/60 bg-slate-900 p-5 shadow-sm">
-    <h4 className="font-bold text-slate-100 mb-2">{title}</h4>
-    <p className="text-xs text-slate-300 leading-relaxed">{text}</p>
-  </div>
+  <Card
+    sx={{
+      position: 'relative',
+      overflow: 'hidden',
+      borderColor: 'rgba(148,163,184,0.35)',
+      background:
+        'linear-gradient(180deg, rgba(2,6,23,0.35) 0%, rgba(15,23,42,0.65) 100%)',
+      boxShadow: 'none',
+      transition: 'transform 140ms ease, border-color 140ms ease, background 140ms ease',
+      '&:hover': {
+        transform: 'translateY(-2px)',
+        borderColor: 'rgba(96,165,250,0.55)',
+        background:
+          'linear-gradient(180deg, rgba(2,6,23,0.35) 0%, rgba(15,23,42,0.80) 100%)',
+      },
+      '&::before': {
+        content: '""',
+        position: 'absolute',
+        inset: 0,
+        height: 3,
+        background: 'linear-gradient(90deg, rgba(96,165,250,0.9), rgba(167,139,250,0.7), rgba(34,197,94,0.7))',
+        opacity: 0.9,
+      },
+    }}
+  >
+    <CardContent sx={{ pt: 2.25 }}>
+      <Typography sx={{ fontWeight: 900, color: 'text.primary', mb: 1 }}>
+        {title}
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.6 }}>
+        {text}
+      </Typography>
+    </CardContent>
+  </Card>
 );
 
 const ReferenceCard = ({

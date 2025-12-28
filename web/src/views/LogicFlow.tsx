@@ -38,7 +38,7 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
           <Card>
             <CardHeader
               avatar={<ShieldCheck className="h-6 w-6 text-blue-300" />}
-              title={<Typography sx={{ fontWeight: 900 }}>CORE_ON · Core Engine</Typography>}
+              title={<Typography sx={{ fontWeight: 900 }}>Core Engine (CORE)</Typography>}
               subheader="State-machine for value-led accumulation (entry/hold/exit)."
               action={
                 <Chip
@@ -54,7 +54,7 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
               <Stack spacing={1.25}>
                 <LogicRule
                   title="Entry condition"
-                  formula="(VAL=2) OR (VAL=1 AND PRICE_REGIME=1)"
+                  formula="(VAL_SCORE=2) OR (VAL_SCORE=1 AND PRICE_REGIME=1)"
                   active={coreStatus}
                 />
                 <LogicRule
@@ -91,7 +91,7 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
           <Card>
             <CardHeader
               avatar={<Zap className="h-6 w-6 text-amber-300" />}
-              title={<Typography sx={{ fontWeight: 900 }}>MACRO_ON · Macro Accelerator</Typography>}
+              title={<Typography sx={{ fontWeight: 900 }}>Macro Accelerator (MACRO)</Typography>}
               subheader="High conviction throttle when liquidity + business cycle align and USD is not risk-off."
               action={
                 <Chip

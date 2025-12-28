@@ -14,12 +14,13 @@ interface Props {
 }
 
 type RangeKey = 'all' | '10y' | '5y' | '2y' | '1y';
-type ChartsSection = 'system' | 'liquidity' | 'business';
+type ChartsSection = 'system' | 'valuation' | 'liquidity' | 'business';
 
 type RegimeKey = 'LIQ_SCORE' | 'CYCLE_SCORE';
 type RegimeSpan = { x1: number; x2: number; value: 0 | 1 | 2 };
 type BinarySpan = { x1: number; x2: number; value: 0 | 1 };
 type SystemSpan = { x1: number; x2: number; value: 0 | 1 | 2 | 3 };
+type MvrvSpan = { x1: number; x2: number; value: 0 | 1 | 2 }; // 2=cheap(green), 1=fair(grey), 0=hot(red)
 
 function buildRegimeSpans(rows: Array<{ ts: number } & Record<string, any>>, key: RegimeKey): RegimeSpan[] {
   const spans: RegimeSpan[] = [];
@@ -146,6 +147,48 @@ function buildSystemSpans(rows: Array<{ ts: number } & Record<string, any>>): Sy
   return spans;
 }
 
+function buildMvrvSpans(rows: Array<{ ts: number } & Record<string, any>>): MvrvSpan[] {
+  const spans: MvrvSpan[] = [];
+  if (!rows.length) return spans;
+
+  const classify = (row: any): 0 | 1 | 2 | null => {
+    const m = Number(row.MVRV);
+    if (!Number.isFinite(m)) return null;
+    if (m < 1.0) return 2;
+    if (m < 1.8) return 1;
+    return 0;
+  };
+
+  let current: 0 | 1 | 2 | null = null;
+  let startTs: number | null = null;
+
+  for (let i = 0; i < rows.length; i++) {
+    const v = classify(rows[i]);
+    const ts = rows[i].ts;
+    if (v === null) continue;
+
+    if (current === null) {
+      current = v;
+      startTs = ts;
+      continue;
+    }
+
+    if (v !== current && startTs !== null) {
+      const prevTs = rows[i - 1]?.ts ?? ts;
+      if (prevTs > startTs) spans.push({ x1: startTs, x2: prevTs, value: current });
+      current = v;
+      startTs = ts;
+    }
+  }
+
+  if (current !== null && startTs !== null) {
+    const endTs = rows[rows.length - 1].ts;
+    if (endTs > startTs) spans.push({ x1: startTs, x2: endTs, value: current });
+  }
+
+  return spans;
+}
+
 function regimeColor(key: RegimeKey, v: 0 | 1 | 2) {
   // Match the feel of dashboard_2026.py shading: red (risk), grey (neutral), green (tailwind)
   const palette = {
@@ -170,6 +213,18 @@ function systemColor(v: 0 | 1 | 2 | 3) {
   }
 }
 
+function mvrvColor(v: 0 | 1 | 2) {
+  // 2=cheap(green), 1=fair(grey), 0=hot(red)
+  switch (v) {
+    case 2:
+      return { fill: '#22c55e', alpha: 0.28 };
+    case 0:
+      return { fill: '#ef4444', alpha: 0.28 };
+    default:
+      return { fill: '#94a3b8', alpha: 0.22 };
+  }
+}
+
 const ChartsView: React.FC<Props> = ({ data }) => {
   const [range, setRange] = useState<RangeKey>('all');
   const location = useLocation();
@@ -178,7 +233,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
   const section: ChartsSection = useMemo(() => {
     const m = location.pathname.match(/^\/charts\/([^/]+)/);
     const seg = (m?.[1] ?? 'system').toLowerCase();
-    if (seg === 'system' || seg === 'liquidity' || seg === 'business') return seg;
+    if (seg === 'system' || seg === 'valuation' || seg === 'liquidity' || seg === 'business') return seg as ChartsSection;
     return 'system';
   }, [location.pathname]);
 
@@ -190,7 +245,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
     }
     const m = location.pathname.match(/^\/charts\/([^/]+)/);
     const seg = (m?.[1] ?? '').toLowerCase();
-    if (seg && seg !== 'system' && seg !== 'liquidity' && seg !== 'business') {
+    if (seg && seg !== 'system' && seg !== 'valuation' && seg !== 'liquidity' && seg !== 'business') {
       navigate('/charts/system', { replace: true });
     }
   }, [location.pathname, navigate]);
@@ -303,6 +358,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
   const cycleSpans = useMemo(() => buildRegimeSpans(chartData as any, 'CYCLE_SCORE'), [chartData]);
   const priceRegimeSpans = useMemo(() => buildBinarySpans(chartData as any, 'PRICE_REGIME_ON'), [chartData]);
   const systemSpans = useMemo(() => buildSystemSpans(chartData as any), [chartData]);
+  const mvrvSpans = useMemo(() => buildMvrvSpans(chartData as any), [chartData]);
 
   const tickCount = range === 'all' ? 10 : range === '10y' ? 10 : range === '5y' ? 8 : range === '2y' ? 8 : 6;
 
@@ -315,6 +371,17 @@ const ChartsView: React.FC<Props> = ({ data }) => {
     const max = Math.max(...vals);
     // Padding for log chart; keep strictly > 0
     return { y1: Math.max(min * 0.85, 1e-6), y2: max * 1.15 };
+  }, [chartData]);
+
+  const usdDomain = useMemo(() => {
+    const vals = (chartData as any[])
+      .flatMap((d) => [Number(d.DXY), Number(d.DXY_MA50), Number(d.DXY_MA200)])
+      .filter((v) => Number.isFinite(v));
+    if (!vals.length) return { y1: 0, y2: 1 };
+    const min = Math.min(...vals);
+    const max = Math.max(...vals);
+    const pad = (max - min) * 0.06 || 1;
+    return { y1: min - pad, y2: max + pad };
   }, [chartData]);
 
   return (
@@ -334,7 +401,8 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           indicatorColor="primary"
           sx={{ minHeight: 40 }}
         >
-          <Tab value="system" label="Overview" sx={{ minHeight: 40 }} />
+          <Tab value="system" label="System" sx={{ minHeight: 40 }} />
+          <Tab value="valuation" label="Valuation" sx={{ minHeight: 40 }} />
           <Tab value="liquidity" label="Liquidity" sx={{ minHeight: 40 }} />
           <Tab value="business" label="Business Cycle" sx={{ minHeight: 40 }} />
         </Tabs>
@@ -359,7 +427,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
-            System State (CORE / MACRO)
+            System State (CORE + MACRO)
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
             BTCUSD shaded by the current system state
@@ -587,20 +655,20 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* Price Regime: BTCUSD vs 40W MA with regime shading */}
-      {section === 'system' && (
+      {section === 'valuation' && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
             BTC Price Regime (BTCUSD vs 40W MA)
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            BTCUSD with 40-week moving average and PRICE_REGIME shading
+            BTCUSD with 40-week moving average and PRICE_REGIME_ON (20/30) shading
           </Typography>
         </Box>
 
         <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
-          <Chip size="small" variant="outlined" label="Bullish (PRICE_REGIME=1)" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
-          <Chip size="small" variant="outlined" label="Bearish (PRICE_REGIME=0)" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
+          <Chip size="small" variant="outlined" label="Bullish (PRICE_REGIME_ON=1)" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="Bearish (PRICE_REGIME_ON=0)" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
           <Chip size="small" variant="outlined" label="BTCUSD" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
           <Chip size="small" variant="outlined" label="40W MA" sx={{ borderColor: '#fbbf24', color: '#fde68a' }} />
         </Stack>
@@ -628,6 +696,59 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               <Tooltip content={<CustomTooltip />} />
               <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={2} dot={false} isAnimationActive={false} />
               <Line yAxisId="btc" type="monotone" dataKey="BTC_MA40W" name="BTC 40W MA" stroke="#fbbf24" strokeWidth={2} dot={false} isAnimationActive={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Box>
+      </Paper>
+      )}
+
+      {/* MVRV Valuation: BTCUSD shaded by MVRV bands */}
+      {section === 'valuation' && (
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Box sx={{ mb: 2.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            MVRV Valuation
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            BTCUSD shaded by MVRV bands (green cheap / gray fair / red overheated)
+          </Typography>
+        </Box>
+
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="Cheap (MVRV < 1.0)" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="Fair (1.0–1.8)" sx={{ borderColor: '#94a3b8', color: '#cbd5e1' }} />
+          <Chip size="small" variant="outlined" label="Hot (MVRV ≥ 1.8)" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
+          <Chip size="small" variant="outlined" label="BTCUSD" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
+          <Chip size="small" variant="outlined" label="MVRV" sx={{ borderColor: '#fbbf24', color: '#fde68a' }} />
+        </Stack>
+
+        <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart key={`mvrv-${range}`} data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              {mvrvSpans.map((s, i) => {
+                const c = mvrvColor(s.value);
+                return (
+                  <ReferenceArea
+                    key={`mvrv-${i}-${s.x1}`}
+                    yAxisId="btc"
+                    x1={s.x1}
+                    x2={s.x2}
+                    y1={btcDomain.y1}
+                    y2={btcDomain.y2}
+                    ifOverflow="extendDomain"
+                    fill={c.fill}
+                    fillOpacity={c.alpha}
+                    strokeOpacity={0}
+                  />
+                );
+              })}
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis yAxisId="btc" scale="log" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
+              <YAxis yAxisId="mvrv" orientation="right" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => (typeof v === 'number' ? v.toFixed(2) : '')} />
+              <Tooltip content={<CustomTooltip />} />
+              <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={2} dot={false} isAnimationActive={false} />
+              <Line yAxisId="mvrv" type="monotone" dataKey="MVRV" name="MVRV" stroke="#fbbf24" strokeWidth={2} dot={false} isAnimationActive={false} />
             </LineChart>
           </ResponsiveContainer>
         </Box>
@@ -732,7 +853,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
-            USD Regime (DTWEXBGS)
+            USD Regime (DXY_SCORE)
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
             Trade-weighted broad USD index used as the DXY proxy + derived MA50/MA200 and ROC20 (%)
@@ -742,8 +863,11 @@ const ChartsView: React.FC<Props> = ({ data }) => {
         <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
           <Chip size="small" variant="outlined" label="DTWEXBGS" sx={{ borderColor: '#60a5fa', color: '#bfdbfe' }} />
           <Chip size="small" variant="outlined" label="MA50" sx={{ borderColor: '#fbbf24', color: '#fde68a' }} />
-          <Chip size="small" variant="outlined" label="MA200" sx={{ borderColor: '#a78bfa', color: '#ddd6fe' }} />
+          <Chip size="small" variant="outlined" label="MA200" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
           <Chip size="small" variant="outlined" label="ROC20 (%)" sx={{ borderColor: '#34d399', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="Supportive (ROC20<-0.5% & MA50<MA200)" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="Headwind (ROC20>+0.5%)" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
+          <Chip size="small" variant="outlined" label="Neutral (otherwise)" sx={{ borderColor: '#94a3b8', color: '#cbd5e1' }} />
         </Stack>
 
         <Box sx={{ display: 'grid', gridTemplateColumns: '1fr', gap: 2.5 }}>
