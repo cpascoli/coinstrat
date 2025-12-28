@@ -100,6 +100,17 @@ export const HeroIllustration: React.FC = () => {
         <stop offset="55%" stopColor="rgba(167,139,250,0.10)" />
         <stop offset="100%" stopColor="rgba(167,139,250,0)" />
       </radialGradient>
+      {/* Left-side chaos palette (warmer) */}
+      <radialGradient id="ae-chaosRed" cx="50%" cy="50%" r="60%">
+        <stop offset="0%" stopColor="rgba(239,68,68,0.07)" />
+        <stop offset="55%" stopColor="rgba(239,68,68,0.05)" />
+        <stop offset="100%" stopColor="rgba(239,68,68,0)" />
+      </radialGradient>
+      <radialGradient id="ae-chaosMagenta" cx="50%" cy="50%" r="60%">
+        <stop offset="0%" stopColor="rgba(236,72,153,0.26)" />
+        <stop offset="55%" stopColor="rgba(236,72,153,0.10)" />
+        <stop offset="100%" stopColor="rgba(236,72,153,0)" />
+      </radialGradient>
 
       {/* Soft glow */}
       <filter id="ae-glow" x="-40%" y="-40%" width="180%" height="180%">
@@ -191,7 +202,7 @@ export const HeroIllustration: React.FC = () => {
     {/* Vertically centered block: canvas center ~260px; this block height ~160px => y≈180–200 */}
     <g transform="translate(42 192)" opacity="0.0">
       {/* Quick fade in/out, visible for most of the cycle */}
-      <animate attributeName="opacity" values="0;0.92;0.92;0" keyTimes="0;0.07;0.93;1" dur={cycleDur} repeatCount="indefinite" />
+      <animate attributeName="opacity" values="0;0.92;0.92;0" keyTimes="0;0.2;0.80;1" dur={cycleDur} repeatCount="indefinite" />
       <text x="0" y="0" fill="#94a3b8" fontFamily="ui-sans-serif, system-ui" fontSize="13" fontWeight="900">
         INPUTS
       </text>
@@ -208,7 +219,7 @@ export const HeroIllustration: React.FC = () => {
         const y = 22 + i * 30;
         return (
           <g key={row.k} transform={`translate(0 ${y})`}>
-            <rect x="0" y="-17" width="70" height="24" rx="12" fill="rgba(2,6,23,0.60)" stroke="rgba(148,163,184,0.22)" />
+            <rect x="0" y="-17" width="70" height="24" rx="12" fill="rgba(2,6,23,0.90)" stroke="rgba(148,163,184,0.22)" />
             <text x="13" y="0" fill="#cbd5e1" fontFamily="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace" fontSize="13.5" fontWeight="900">
               {row.k}
             </text>
@@ -239,12 +250,13 @@ export const HeroIllustration: React.FC = () => {
       <g filter="url(#ae-glow)" opacity="0.95">
         <g>
           <animateTransform attributeName="transform" type="translate" values="0 0; 10 -6; 0 0" dur="10s" repeatCount="indefinite" />
-          <circle cx="120" cy="170" r="150" fill="url(#ae-blue)" />
+          <circle cx="120" cy="170" r="150" fill="url(#ae-chaosRed)" />
           <circle cx="220" cy="260" r="170" fill="url(#ae-purple)" />
+          <circle cx="170" cy="210" r="140" fill="url(#ae-chaosMagenta)" opacity="0.85" />
         </g>
         <g>
           <animateTransform attributeName="transform" type="translate" values="0 0; -12 10; 0 0" dur="11s" repeatCount="indefinite" />
-          <circle cx="160" cy="340" r="190" fill="url(#ae-green)" />
+          <circle cx="160" cy="340" r="190" fill="url(#ae-chaosRed)" opacity="0.9" />
           <circle cx="90" cy="290" r="120" fill="url(#ae-ink)" opacity="0.8" />
         </g>
       </g>
@@ -257,8 +269,8 @@ export const HeroIllustration: React.FC = () => {
         <g>
           <animateTransform attributeName="transform" type="translate" values="0 0; 8 -4; 0 0" dur="9s" repeatCount="indefinite" />
           <path d="M44 140 C 98 88, 146 194, 208 144 C 268 96, 308 196, 372 136" fill="none" stroke="rgba(148,163,184,0.22)" strokeWidth="1.2" />
-          <path d="M52 214 C 126 168, 160 260, 238 214 C 312 170, 330 270, 398 220" fill="none" stroke="rgba(96,165,250,0.24)" strokeWidth="1.1" />
-          <path d="M48 296 C 124 264, 160 332, 238 306 C 314 280, 332 356, 406 330" fill="none" stroke="rgba(34,197,94,0.20)" strokeWidth="1.0" />
+          <path d="M52 214 C 126 168, 160 260, 238 214 C 312 170, 330 270, 398 220" fill="none" stroke="rgba(236,72,153,0.20)" strokeWidth="1.1" />
+          <path d="M48 296 C 124 264, 160 332, 238 306 C 314 280, 332 356, 406 330" fill="none" stroke="rgba(239,68,68,0.20)" strokeWidth="1.0" />
         </g>
         <g>
           <animateTransform attributeName="transform" type="translate" values="0 0; -7 6; 0 0" dur="10.5s" repeatCount="indefinite" />
@@ -274,8 +286,8 @@ export const HeroIllustration: React.FC = () => {
         <animateTransform
           attributeName="transform"
           type="scale"
-          values="1;1.045;0.985;1.03;1"
-          dur="6.5s"
+          values="1;1.085;0.94;1.065;1"
+          dur={cycleDur}
           repeatCount="indefinite"
         />
 
