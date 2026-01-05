@@ -3,6 +3,12 @@
   publish = "dist"
   functions = "netlify/functions"
 
+# Security headers (HSTS)
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
+
 # Proxy for FRED API to handle CORS and hide API key
 [[redirects]]
   from = "/api/fred/*"

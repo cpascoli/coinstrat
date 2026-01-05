@@ -843,6 +843,13 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           </Typography>
         </Box>
 
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="SAHM" sx={{ borderColor: '#a78bfa', color: '#ddd6fe' }} />
+          <Chip size="small" variant="outlined" label="Yield Curve (10Y-3M)" sx={{ borderColor: '#34d399', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="New Orders (level)" sx={{ borderColor: '#60a5fa', color: '#bfdbfe' }} />
+          <Chip size="small" variant="outlined" label="New Orders YoY (%)" sx={{ borderColor: '#fbbf24', color: '#fde68a' }} />
+        </Stack>
+
         <Box sx={{ display: 'grid', gridTemplateColumns: '1fr', gap: 2.5 }}>
           <Box sx={{ height: 320, width: '100%', minWidth: 0 }}>
             <ResponsiveContainer width="100%" height="100%">

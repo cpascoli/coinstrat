@@ -98,56 +98,40 @@ const App: React.FC = () => {
       });
   }, []);
 
-  if (loading) {
-    return (
-      <Box
-        sx={{
-          minHeight: '100vh',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          bgcolor: 'background.default',
-          px: 2,
-        }}
-      >
-        <Paper sx={{ p: 4, textAlign: 'center', width: '100%', maxWidth: 420 }}>
-          <CircularProgress />
-          <Typography variant="h6" sx={{ mt: 2, fontWeight: 700 }}>
-            Loading Coin Strat…
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Fetching BTC + macro series and recomputing signals in-browser.
-          </Typography>
-        </Paper>
-      </Box>
-    );
-  }
+  const lastData = data.length ? data[data.length - 1] : null;
 
-  if (error) {
-    return (
-      <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', bgcolor: 'background.default', px: 2 }}>
-        <Container maxWidth="sm">
-          <Paper sx={{ p: 3 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
-              <Info className="h-6 w-6 text-red-600" />
-              <Typography variant="h6" sx={{ fontWeight: 800 }}>
-                Data Error
-              </Typography>
-            </Box>
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {error}
-            </Alert>
-            <Typography variant="body2" color="text.secondary">
-              This usually happens due to missing API keys (FRED on Netlify) or local CORS restrictions. Check the browser
-              console and Network tab for details.
-            </Typography>
-          </Paper>
-        </Container>
+  const DataLoading = (
+    <Paper sx={{ p: 3 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+        <CircularProgress size={22} />
+        <Typography sx={{ fontWeight: 800 }}>Loading data…</Typography>
       </Box>
-    );
-  }
+      <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+        Fetching BTC + macro series and recomputing signals in-browser.
+      </Typography>
+    </Paper>
+  );
 
-  const lastData = data[data.length - 1];
+  const DataError = (
+    <Paper sx={{ p: 3 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1.5 }}>
+        <Info className="h-6 w-6 text-red-600" />
+        <Typography sx={{ fontWeight: 900 }}>Data Error</Typography>
+      </Box>
+      <Alert severity="error" sx={{ mb: 2 }}>
+        {error ?? 'Unknown error'}
+      </Alert>
+      <Typography variant="body2" color="text.secondary">
+        You can still browse the Home page while data loads. Check the browser console / Network tab for details.
+      </Typography>
+    </Paper>
+  );
+
+  const gate = (node: React.ReactElement) => {
+    if (error) return DataError;
+    if (loading || !lastData) return DataLoading;
+    return node;
+  };
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', pb: { xs: 8, md: 0 } }}>
@@ -233,10 +217,10 @@ const App: React.FC = () => {
       <Container maxWidth="lg" sx={{ py: { xs: 2.5, md: 4 } }}>
         <Routes>
           <Route path="/" element={<Home />} />
-          <Route path="/dashboard" element={<Dashboard current={lastData} history={data} />} />
-          <Route path="/scores" element={<ScoreBreakdown current={lastData} />} />
-          <Route path="/signals" element={<LogicFlow current={lastData} />} />
-          <Route path="/charts/*" element={<ChartsView data={data} />} />
+          <Route path="/dashboard" element={gate(<Dashboard current={lastData as SignalData} history={data} />)} />
+          <Route path="/scores" element={gate(<ScoreBreakdown current={lastData as SignalData} />)} />
+          <Route path="/signals" element={gate(<LogicFlow current={lastData as SignalData} />)} />
+          <Route path="/charts/*" element={gate(<ChartsView data={data} />)} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
 

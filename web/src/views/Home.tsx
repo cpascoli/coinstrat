@@ -29,33 +29,32 @@ const Home: React.FC = () => {
           color: 'transparent',
         }}
       >
-        Multi-factor macro engine for Bitcoin accumulation
+        Multi‑Factor Bitcoin Macro Engine
       </Box>
     </Typography>
 
       <Box
         sx={{
           borderRadius: 3,
-          p: { xs: 2.5, sm: 3, md: 4 },
+          py: { xs: 2.5, sm: 3, md: 4 },
           position: 'relative',
           overflow: 'hidden',
         }}
       >
-        <Box sx={{ display: 'grid', gap: { xs: 3, md: 4 }, gridTemplateColumns: { xs: '1fr', md: '1.2fr 0.8fr' }, alignItems: 'center' }}>
+        <Box sx={{ display: 'grid', gap: { xs: 3, md: 4 }, gridTemplateColumns: { xs: '1fr', md: '1.0fr 1.0fr' }, alignItems: 'flex-start' }}>
           <Box>
-
             <Box component="ul" sx={{ mb: 1, pl: 2.5, color: 'text.secondary' }}>
     
               <Box component="li" sx={{ mb: 1 }}>
                 <Typography color="text.secondary" sx={{ lineHeight: 1.75, fontSize: { xs: 14, sm: 16, md: 18 } }}>
-                  Coin Strat blends <strong>global liquidity</strong>, <strong>macro conditions</strong>, and <strong>BTC valuation</strong> into simple signals 
-                  that tell you when to <strong>deploy fresh capital</strong> into Bitcoin, when to <strong>accelerate accumulation</strong>, and when to <strong>pause</strong> to protect capital.
+                  Coin Strat turns <strong>global liquidity</strong>, <strong>macro conditions</strong>, and <strong>BTC valuation</strong> into simple signals 
+                  that help you decide when to <strong>deploy</strong>, <strong>accelerate</strong>, and <strong>pause</strong> bitcoin accumulation.
                 </Typography>
               </Box>
 
               <Box component="li" sx={{ mb: 1}}>
                 <Typography color="text.secondary" sx={{ lineHeight: 1.75, fontSize: { xs: 14, sm: 16, md: 18 } }}>
-                  You can use Coin Strat to optimize how you fund {' '}
+                  Use Coin Strat to optimize how you fund {' '}
                   <Link
                     href="https://powerwallet.finance"
                     target="_blank"
@@ -65,7 +64,7 @@ const Home: React.FC = () => {
                   >
                     Power Wallet
                   </Link>
-                  ’s Bitcoin accumulation strategies.
+                  ’s bitcoin accumulation strategies.
                 </Typography>
               </Box>
             </Box>
@@ -80,7 +79,7 @@ const Home: React.FC = () => {
             </Stack>
           </Box>
 
-          <Box sx={{ width: '100%', maxWidth: 520, mx: { xs: 'auto', md: 0 } }}>
+          <Box sx={{ width: '100%', mx: { xs: 'auto', md: 0 } }}>
             <HeroIllustration />
           </Box>
         </Box>
