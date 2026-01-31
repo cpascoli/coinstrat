@@ -59,8 +59,8 @@ const App: React.FC = () => {
   const tabs = useMemo(
     () => [
       { key: 'dashboard' as const, path: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-5 w-5" /> },
-      { key: 'scores' as const, path: '/scores', label: 'Scores', icon: <BarChart3 className="h-5 w-5" /> },
       { key: 'logic' as const, path: '/signals', label: 'Signals', icon: <Binary className="h-5 w-5" /> },
+      { key: 'scores' as const, path: '/scores', label: 'Scores', icon: <BarChart3 className="h-5 w-5" /> },
       // Default to the System subpage under Charts
       { key: 'charts' as const, path: '/charts/system', label: 'Charts', icon: <Activity className="h-5 w-5" /> },
     ],

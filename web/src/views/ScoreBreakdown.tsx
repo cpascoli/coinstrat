@@ -89,97 +89,7 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
           </FactorCard>
         </Grid>
 
-        {/* BTC Regime (2nd) */}
-        <Grid item xs={12} md={6}>
-          <FactorCard
-            icon={<Landmark className="h-6 w-6 text-amber-300" />}
-            title="BTC Regime (PRICE_REGIME)"
-            score={typeof priceRegime === 'number' ? priceRegime : current.PRICE_REGIME_ON}
-            description="Trend filter based on BTCUSD vs the 40-week moving average."
-            formula="PRICE_REGIME = 1 if BTCUSD ≥ BTC_MA40W, else 0"
-          >
-            <Grid container spacing={1.25}>
-              <Grid item xs={12}>
-                <RuleRow
-                  ok={typeof current.BTCUSD === 'number' && typeof btcMa40w === 'number' && current.BTCUSD >= btcMa40w}
-                  label="BTCUSD ≥ BTC_MA40W"
-                  result="PRICE_REGIME = 1 (Bullish)"
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <RuleRow
-                  ok={typeof current.BTCUSD === 'number' && typeof btcMa40w === 'number' && current.BTCUSD < btcMa40w}
-                  label="BTCUSD < BTC_MA40W"
-                  result="PRICE_REGIME = 0 (Bearish)"
-                  tone="danger"
-                />
-              </Grid>
-            </Grid>
-
-            <Divider sx={{ my: 2 }} />
-
-            <Grid container spacing={1.25}>
-              <Grid item xs={6}>
-                <MetricRow label="BTCUSD" value={fmtUsd(current.BTCUSD)} />
-              </Grid>
-              <Grid item xs={6}>
-                <MetricRow label="BTC_MA40W" value={fmtUsd(btcMa40w)} />
-              </Grid>
-              <Grid item xs={6}>
-                <MetricRow label="PRICE_REGIME" value={fmtInt(priceRegime)} />
-              </Grid>
-              <Grid item xs={6}>
-                <MetricRow label="PRICE_REGIME (20/30)" value={fmtInt(current.PRICE_REGIME_ON)} />
-              </Grid>
-            </Grid>
-          </FactorCard>
-        </Grid>
-
-        {/* USD Regime (2nd) */}
-        <Grid item xs={12} md={6}>
-          <FactorCard
-            icon={<Gauge className="h-6 w-6 text-amber-300" />}
-            title="USD Regime (DXY_SCORE)"
-            score={dxyScore}
-            description="USD headwind/tailwind using a broad trade‑weighted USD proxy (FRED: DTWEXBGS)"
-            formula="ROC20 thresholds ±0.5% and MA50 vs MA200"
-          >
-            <Grid container spacing={1.25}>
-              <Grid item xs={12}>
-                <RuleRow
-                  ok={typeof dxyRoc20 === 'number' && dxyRoc20 < -0.005 && typeof dxyMA50 === 'number' && typeof dxyMA200 === 'number' && dxyMA50 < dxyMA200}
-                  label="ROC20 < -0.5% AND MA50 < MA200"
-                  result="Score 2 (USD weakening / supportive)"
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <RuleRow ok={typeof dxyRoc20 === 'number' && dxyRoc20 > 0.005} label="ROC20 > +0.5%" result="Score 0 (USD strengthening / headwind)" tone="danger" />
-              </Grid>
-              <Grid item xs={12}>
-                <RuleRow ok label="Otherwise" result="Score 1 (Neutral)" muted />
-              </Grid>
-            </Grid>
-
-            <Divider sx={{ my: 2 }} />
-
-            <Grid container spacing={1.25}>
-              <Grid item xs={6}>
-                <MetricRow label="USD index (DTWEXBGS)" value={fmtNum(dxy, 2)} />
-              </Grid>
-              <Grid item xs={6}>
-                <MetricRow label="ROC20" value={fmtPct(dxyRoc20Pct)} />
-              </Grid>
-              <Grid item xs={6}>
-                <MetricRow label="MA50" value={fmtNum(dxyMA50, 2)} />
-              </Grid>
-              <Grid item xs={6}>
-                <MetricRow label="MA200" value={fmtNum(dxyMA200, 2)} />
-              </Grid>
-            </Grid>
-          </FactorCard>
-        </Grid>
-
-        {/* Liquidity (3rd) */}
+        {/* Liquidity (2nd) */}
         <Grid item xs={12} md={6}>
           <FactorCard
             icon={<Wind className="h-6 w-6 text-blue-300" />}
@@ -194,7 +104,9 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
               </Grid>
               <Grid item xs={12}>
                 <RuleRow
-                  ok={typeof usLiqYoY === 'number' && typeof usLiq13w === 'number' && usLiqYoY <= 0 && usLiq13w > 0}
+                  ok={
+                    typeof usLiqYoY === 'number' && typeof usLiq13w === 'number' && usLiqYoY <= 0 && usLiq13w > 0
+                  }
                   label="US_LIQ YoY ≤ 0 AND 13W Δ > 0"
                   result="Score 1 (Inflecting Up)"
                 />
@@ -229,7 +141,7 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
           </FactorCard>
         </Grid>
 
-        {/* Business Cycle (4th) */}
+        {/* Business Cycle (3rd) */}
         <Grid item xs={12} md={6}>
           <FactorCard
             icon={<Landmark className="h-6 w-6 text-emerald-300" />}
@@ -287,6 +199,96 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
               </Grid>
               <Grid item xs={12}>
                 <MetricRow label="NO_MOM3 (approx)" value={fmtNum(noMom3, 2)} />
+              </Grid>
+            </Grid>
+          </FactorCard>
+        </Grid>
+
+        {/* BTC Regime (4th) */}
+        <Grid item xs={12} md={6}>
+          <FactorCard
+            icon={<Landmark className="h-6 w-6 text-amber-300" />}
+            title="BTC Regime (PRICE_REGIME)"
+            score={typeof priceRegime === 'number' ? priceRegime : current.PRICE_REGIME_ON}
+            description="Trend filter based on BTCUSD vs the 40-week moving average."
+            formula="PRICE_REGIME = 1 if BTCUSD ≥ BTC_MA40W, else 0"
+          >
+            <Grid container spacing={1.25}>
+              <Grid item xs={12}>
+                <RuleRow
+                  ok={typeof current.BTCUSD === 'number' && typeof btcMa40w === 'number' && current.BTCUSD >= btcMa40w}
+                  label="BTCUSD ≥ BTC_MA40W"
+                  result="PRICE_REGIME = 1 (Bullish)"
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <RuleRow
+                  ok={typeof current.BTCUSD === 'number' && typeof btcMa40w === 'number' && current.BTCUSD < btcMa40w}
+                  label="BTCUSD < BTC_MA40W"
+                  result="PRICE_REGIME = 0 (Bearish)"
+                  tone="danger"
+                />
+              </Grid>
+            </Grid>
+
+            <Divider sx={{ my: 2 }} />
+
+            <Grid container spacing={1.25}>
+              <Grid item xs={6}>
+                <MetricRow label="BTCUSD" value={fmtUsd(current.BTCUSD)} />
+              </Grid>
+              <Grid item xs={6}>
+                <MetricRow label="BTC_MA40W" value={fmtUsd(btcMa40w)} />
+              </Grid>
+              <Grid item xs={6}>
+                <MetricRow label="PRICE_REGIME" value={fmtInt(priceRegime)} />
+              </Grid>
+              <Grid item xs={6}>
+                <MetricRow label="PRICE_REGIME (20/30)" value={fmtInt(current.PRICE_REGIME_ON)} />
+              </Grid>
+            </Grid>
+          </FactorCard>
+        </Grid>
+
+        {/* USD Regime (5th) */}
+        <Grid item xs={12} md={6}>
+          <FactorCard
+            icon={<Gauge className="h-6 w-6 text-amber-300" />}
+            title="USD Regime (DXY_SCORE)"
+            score={dxyScore}
+            description="USD headwind/tailwind using a broad trade‑weighted USD proxy (FRED: DTWEXBGS)"
+            formula="ROC20 thresholds ±0.5% and MA50 vs MA200"
+          >
+            <Grid container spacing={1.25}>
+              <Grid item xs={12}>
+                <RuleRow
+                  ok={typeof dxyRoc20 === 'number' && dxyRoc20 < -0.005 && typeof dxyMA50 === 'number' && typeof dxyMA200 === 'number' && dxyMA50 < dxyMA200}
+                  label="ROC20 < -0.5% AND MA50 < MA200"
+                  result="Score 2 (USD weakening / supportive)"
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <RuleRow ok={typeof dxyRoc20 === 'number' && dxyRoc20 > 0.005} label="ROC20 > +0.5%" result="Score 0 (USD strengthening / headwind)" tone="danger" />
+              </Grid>
+              <Grid item xs={12}>
+                <RuleRow ok label="Otherwise" result="Score 1 (Neutral)" muted />
+              </Grid>
+            </Grid>
+
+            <Divider sx={{ my: 2 }} />
+
+            <Grid container spacing={1.25}>
+              <Grid item xs={6}>
+                <MetricRow label="USD index (DTWEXBGS)" value={fmtNum(dxy, 2)} />
+              </Grid>
+              <Grid item xs={6}>
+                <MetricRow label="ROC20" value={fmtPct(dxyRoc20Pct)} />
+              </Grid>
+              <Grid item xs={6}>
+                <MetricRow label="MA50" value={fmtNum(dxyMA50, 2)} />
+              </Grid>
+              <Grid item xs={6}>
+                <MetricRow label="MA200" value={fmtNum(dxyMA200, 2)} />
               </Grid>
             </Grid>
           </FactorCard>

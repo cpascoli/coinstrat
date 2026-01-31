@@ -665,58 +665,6 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       </Paper>
       )}
 
-      {/* Price Regime: BTCUSD vs 40W MA with regime shading */}
-      {section === 'valuation' && (
-      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
-        <Box sx={{ mb: 2.5 }}>
-          <Typography variant="h6" sx={{ fontWeight: 800 }}>
-            BTC Price Regime (PRICE_REGIME)
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            BTCUSD with the 40‑week MA computed from weekly closes.
-            <br />
-            PRICE_REGIME shading requires ≥20 “BTCUSD ≥ 40W MA” days in the last 30. 
-            <br />
-            This persistence‑filtered regime is used directly in CORE_ON entry/exit logic (trend confirmation + risk-off exit).
-          </Typography>
-        </Box>
-
-        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
-          <Chip size="small" variant="outlined" label="Bullish (PRICE_REGIME=1)" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
-          <Chip size="small" variant="outlined" label="Bearish (PRICE_REGIME=0)" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
-          <Chip size="small" variant="outlined" label="BTCUSD" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
-          <Chip size="small" variant="outlined" label="40W MA" sx={{ borderColor: '#fbbf24', color: '#fde68a' }} />
-        </Stack>
-
-        <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart key={`price-regime-${range}`} data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-              {priceRegimeSpans.map((s, i) => (
-                <ReferenceArea
-                  key={`pr-${i}-${s.x1}`}
-                  yAxisId="btc"
-                  x1={s.x1}
-                  x2={s.x2}
-                  y1={btcDomain.y1}
-                  y2={btcDomain.y2}
-                  ifOverflow="extendDomain"
-                  fill={s.value === 1 ? '#22c55e' : '#ef4444'}
-                  fillOpacity={s.value === 1 ? 0.32 : 0.32}
-                  strokeOpacity={0}
-                />
-              ))}
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
-              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-              <YAxis yAxisId="btc" scale="log" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
-              <Tooltip content={<CustomTooltip />} />
-              <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={2} dot={false} isAnimationActive={false} />
-              <Line yAxisId="btc" type="monotone" dataKey="BTC_MA40W" name="BTC 40W MA" stroke="#fbbf24" strokeWidth={2} dot={false} isAnimationActive={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        </Box>
-      </Paper>
-      )}
-
       {/* MVRV Valuation: BTCUSD shaded by MVRV bands */}
       {section === 'valuation' && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
@@ -768,6 +716,58 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               <Tooltip content={<CustomTooltip />} />
               <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={2} dot={false} isAnimationActive={false} />
               <Line yAxisId="mvrv" type="monotone" dataKey="MVRV" name="MVRV" stroke="#fbbf24" strokeWidth={2} dot={false} isAnimationActive={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Box>
+      </Paper>
+      )}
+
+      {/* Price Regime: BTCUSD vs 40W MA with regime shading */}
+      {section === 'valuation' && (
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Box sx={{ mb: 2.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            BTC Price Regime (PRICE_REGIME)
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            BTCUSD with the 40‑week MA computed from weekly closes.
+            <br />
+            PRICE_REGIME shading requires ≥20 “BTCUSD ≥ 40W MA” days in the last 30. 
+            <br />
+            This persistence‑filtered regime is used directly in CORE_ON entry/exit logic (trend confirmation + risk-off exit).
+          </Typography>
+        </Box>
+
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="Bullish (PRICE_REGIME=1)" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="Bearish (PRICE_REGIME=0)" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
+          <Chip size="small" variant="outlined" label="BTCUSD" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
+          <Chip size="small" variant="outlined" label="40W MA" sx={{ borderColor: '#fbbf24', color: '#fde68a' }} />
+        </Stack>
+
+        <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart key={`price-regime-${range}`} data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              {priceRegimeSpans.map((s, i) => (
+                <ReferenceArea
+                  key={`pr-${i}-${s.x1}`}
+                  yAxisId="btc"
+                  x1={s.x1}
+                  x2={s.x2}
+                  y1={btcDomain.y1}
+                  y2={btcDomain.y2}
+                  ifOverflow="extendDomain"
+                  fill={s.value === 1 ? '#22c55e' : '#ef4444'}
+                  fillOpacity={s.value === 1 ? 0.32 : 0.32}
+                  strokeOpacity={0}
+                />
+              ))}
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis yAxisId="btc" scale="log" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
+              <Tooltip content={<CustomTooltip />} />
+              <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={2} dot={false} isAnimationActive={false} />
+              <Line yAxisId="btc" type="monotone" dataKey="BTC_MA40W" name="BTC 40W MA" stroke="#fbbf24" strokeWidth={2} dot={false} isAnimationActive={false} />
             </LineChart>
           </ResponsiveContainer>
         </Box>
