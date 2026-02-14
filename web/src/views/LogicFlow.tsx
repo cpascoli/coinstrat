@@ -54,7 +54,7 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
               <Stack spacing={1.25}>
                 <LogicRule
                   title="Entry condition"
-                  formula="(VAL_SCORE=2) OR (VAL_SCORE=1 AND PRICE_REGIME=1)"
+                  formula="(VAL_SCORE=2) OR (VAL_SCORE=1 AND PRICE_REGIME=1)  —  Note: VAL=2 if MVRV<1 or (MVRV<1.8 AND LTH_SOPR<1)"
                   active={coreStatus}
                 />
                 <LogicRule
@@ -72,20 +72,26 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
                 <Divider sx={{ my: 1 }} />
 
                 <Grid container spacing={1.25}>
-                  <Grid item xs={6}>
+                  <Grid item xs={4}>
                     <MetricChip title="Valuation" label="VAL_SCORE" value={current.VAL_SCORE} />
+                  </Grid>
+                  <Grid item xs={4}>
+                    <MetricChip title="MVRV" label="MVRV" value={typeof current.MVRV === 'number' ? current.MVRV.toFixed(2) : '–'} />
+                  </Grid>
+                  <Grid item xs={4}>
+                    <MetricChip title="LTH SOPR" label="LTH_SOPR" value={typeof (current as any).LTH_SOPR === 'number' ? ((current as any).LTH_SOPR as number).toFixed(2) : '–'} />
                   </Grid>
                   <Grid item xs={6}>
                     <MetricChip title="Price Regime" label="PRICE_REGIME" value={current.PRICE_REGIME_ON} />
+                  </Grid>
+                  <Grid item xs={6}>
+                    <MetricChip title="DXY (eff.)" label="DXY_SCORE" value={current.DXY_SCORE} />
                   </Grid>
                   <Grid item xs={4}>
                     <MetricChip title="DXY (raw)" label="DXY_SCORE_RAW" value={(current as any).DXY_SCORE_RAW ?? '–'} />
                   </Grid>
                   <Grid item xs={4}>
                     <MetricChip title="DXY Persist" label="DXY_PERSIST" value={(current as any).DXY_PERSIST ?? '–'} />
-                  </Grid>
-                  <Grid item xs={4}>
-                    <MetricChip title="DXY (eff.)" label="DXY_SCORE" value={current.DXY_SCORE} />
                   </Grid>
                 </Grid>
               </Stack>

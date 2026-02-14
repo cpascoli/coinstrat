@@ -20,21 +20,22 @@ export interface SeriesPoint {
   date: string;
   portfolioValue: number;   // btcHeld * price + cashBalance
   btcHeld: number;
-  cashDeployed: number;      // cumulative USD spent buying
-  cashWithdrawn: number;     // cumulative USD received from sells
+  cashDeployed: number;      // cumulative USD deposited into the strategy
+  cashWithdrawn: number;     // cumulative USD received from sells (stays in portfolio as cash)
   btcPrice: number;
 }
 
 export interface StrategyResult {
   name: string;
   series: SeriesPoint[];
-  totalInvested: number;
-  totalWithdrawn: number;
-  netDeployed: number;        // invested - withdrawn
+  totalInvested: number;     // total cash deposited into the strategy
+  totalWithdrawn: number;    // total USD received from BTC sells (internal, stays in portfolio)
+  netDeployed: number;       // invested - withdrawn
   finalBtcHeld: number;
+  finalCashBalance: number;  // remaining USD cash in portfolio (dry powder)
   finalPortfolioValue: number;
-  totalReturn: number;        // % return on total capital invested
-  maxDrawdown: number;        // worst peak-to-trough %
+  totalReturn: number;       // % return on total capital deposited
+  maxDrawdown: number;       // worst peak-to-trough %
   btcAccumulated: number;
 }
 
@@ -102,11 +103,44 @@ function computeMaxDrawdown(values: number[]): number {
 
 // --- Strategy Simulation ---
 
+/**
+ * Equal-funding model:
+ * 
+ * Every DCA period, the strategy receives `dcaAmount` as a cash deposit.
+ * The decision logic then determines how that cash (and any reserves) is used:
+ * 
+ * - Baseline: immediately convert the deposit to BTC.
+ * - CoinStrat: when CORE is ON, buy BTC; when OFF, hold as cash (dry powder).
+ *   On the first buy after CORE flips ON, deploy the full cash reserve.
+ *   Off-signal modes (sell_matching, sell_all) convert BTC back to cash,
+ *   growing the reserve for re-entry.
+ * - CoinStrat + MACRO 3x: same as CoinStrat, but spend 3x DCA when MACRO is
+ *   also ON (drawing from cash reserves).
+ *
+ * This ensures all strategies receive identical total capital, making
+ * comparisons fair (same "Total Invested" across strategies).
+ */
+
 interface SimState {
   btcHeld: number;
-  cashDeployed: number;
-  cashWithdrawn: number;
-  cashBalance: number; // cash from sells, available for accounting
+  cashBalance: number;       // USD cash sitting in the portfolio (dry powder + sell proceeds)
+  totalDeposited: number;    // cumulative USD deposited into strategy
+  totalSellProceeds: number; // cumulative USD received from selling BTC (stays in portfolio)
+  prevCoreOn: boolean;       // track CORE state for flip detection
+}
+
+/**
+ * Decision returned by the strategy logic each DCA period.
+ * - buyBtcUsd:  how much USD to spend buying BTC (from cash reserves)
+ * - sellBtcUsd: how much USD worth of BTC to sell (proceeds go to cash)
+ * - sellAll:    sell entire BTC position (proceeds go to cash)
+ * - deployReserves: deploy full cash balance into BTC (lump-sum re-entry)
+ */
+interface TradeDecision {
+  buyBtcUsd: number;
+  sellBtcUsd: number;
+  sellAll: boolean;
+  deployReserves: boolean;
 }
 
 function runStrategy(
@@ -114,69 +148,76 @@ function runStrategy(
   sampledData: SignalData[],
   allDailyData: SignalData[],
   config: BacktestConfig,
-  buyLogic: (d: SignalData, state: SimState) => { buyUsd: number; sellUsd: number; sellAll: boolean },
+  decisionLogic: (d: SignalData, state: SimState) => TradeDecision,
 ): StrategyResult {
   const state: SimState = {
     btcHeld: 0,
-    cashDeployed: 0,
-    cashWithdrawn: 0,
     cashBalance: 0,
+    totalDeposited: 0,
+    totalSellProceeds: 0,
+    prevCoreOn: false,
   };
 
   // Track which sampled dates trigger actions
   const actionDates = new Set(sampledData.map(d => d.Date));
 
-  // We build the series on ALL daily data for smooth charting,
-  // but only execute buy/sell on sampled dates.
+  // Build series on ALL daily data for smooth charting,
+  // but only execute deposits + trades on sampled dates.
   const series: SeriesPoint[] = [];
-  let soldAllAlready = false; // for sell_all mode: only sell once per OFF period
+  let soldAllAlready = false;
 
   for (const d of allDailyData) {
     const price = d.BTCUSD;
     if (!Number.isFinite(price) || price <= 0) continue;
 
-    // Execute trades only on DCA sample dates
     if (actionDates.has(d.Date)) {
-      const action = buyLogic(d, state);
+      // 1. Deposit DCA amount as cash (equal funding for all strategies)
+      state.cashBalance += config.dcaAmount;
+      state.totalDeposited += config.dcaAmount;
 
-      if (action.sellAll) {
+      // 2. Get the strategy's decision
+      const decision = decisionLogic(d, state);
+
+      // 3. Execute sells first (to free up cash)
+      if (decision.sellAll) {
         if (!soldAllAlready && state.btcHeld > 0) {
-          // Sell entire position
           const proceeds = state.btcHeld * price;
-          state.cashWithdrawn += proceeds;
+          state.totalSellProceeds += proceeds;
           state.cashBalance += proceeds;
           state.btcHeld = 0;
           soldAllAlready = true;
         }
-      } else if (action.sellUsd > 0) {
-        // Sell matching amount
-        const btcToSell = Math.min(action.sellUsd / price, state.btcHeld);
-        const proceeds = btcToSell * price;
-        state.btcHeld -= btcToSell;
-        state.cashWithdrawn += proceeds;
-        state.cashBalance += proceeds;
-        soldAllAlready = false;
-      } else if (action.buyUsd > 0) {
-        // Re-invest idle cash from previous sell_all when signal turns back ON.
-        // This is an internal rebalance (cash pocket -> BTC pocket), not new
-        // capital, so we only touch cashBalance and btcHeld.  portfolioValue
-        // stays the same at the moment of re-entry: cash goes down, BTC goes
-        // up by the same amount.  Future price moves then affect returns.
-        if (state.cashBalance > 0) {
-          const reinvest = state.cashBalance;
-          state.btcHeld += reinvest / price;
-          state.cashBalance = 0;
+      } else if (decision.sellBtcUsd > 0) {
+        const btcToSell = Math.min(decision.sellBtcUsd / price, state.btcHeld);
+        if (btcToSell > 0) {
+          const proceeds = btcToSell * price;
+          state.btcHeld -= btcToSell;
+          state.totalSellProceeds += proceeds;
+          state.cashBalance += proceeds;
         }
-
-        // Buy with DCA amount (fresh capital)
-        const btcBought = action.buyUsd / price;
-        state.btcHeld += btcBought;
-        state.cashDeployed += action.buyUsd;
         soldAllAlready = false;
       } else {
-        // Pause — do nothing
         soldAllAlready = false;
       }
+
+      // 4. Execute buys (deploy reserves first, then regular buy)
+      if (decision.deployReserves && state.cashBalance > 0) {
+        // Lump-sum: convert entire cash reserve to BTC
+        const lumpBtc = state.cashBalance / price;
+        state.btcHeld += lumpBtc;
+        state.cashBalance = 0;
+      } else if (decision.buyBtcUsd > 0) {
+        // Buy up to what cash allows
+        const spendUsd = Math.min(decision.buyBtcUsd, state.cashBalance);
+        if (spendUsd > 0) {
+          const btcBought = spendUsd / price;
+          state.btcHeld += btcBought;
+          state.cashBalance -= spendUsd;
+        }
+      }
+
+      // Track CORE state for next iteration
+      state.prevCoreOn = d.ACCUM_ON === 1;
     }
 
     const portfolioValue = state.btcHeld * price + state.cashBalance;
@@ -185,30 +226,30 @@ function runStrategy(
       date: d.Date,
       portfolioValue,
       btcHeld: state.btcHeld,
-      cashDeployed: state.cashDeployed,
-      cashWithdrawn: state.cashWithdrawn,
+      cashDeployed: state.totalDeposited,
+      cashWithdrawn: state.totalSellProceeds,
       btcPrice: price,
     });
   }
 
   const lastPrice = series.length > 0 ? series[series.length - 1].btcPrice : 0;
   const finalPortfolioValue = state.btcHeld * lastPrice + state.cashBalance;
-  const netDeployed = state.cashDeployed - state.cashWithdrawn;
-  // Return on total capital invested.
-  // finalPortfolioValue already includes cashBalance (proceeds from any sells)
-  // plus remaining BTC at market price, so the formula works for all modes.
-  const totalReturn = state.cashDeployed > 0
-    ? ((finalPortfolioValue - state.cashDeployed) / state.cashDeployed)
+
+  // Return on total capital deposited.
+  // finalPortfolioValue includes BTC at market + any remaining cash.
+  const totalReturn = state.totalDeposited > 0
+    ? ((finalPortfolioValue - state.totalDeposited) / state.totalDeposited)
     : 0;
   const maxDrawdown = computeMaxDrawdown(series.map(s => s.portfolioValue));
 
   return {
     name,
     series,
-    totalInvested: state.cashDeployed,
-    totalWithdrawn: state.cashWithdrawn,
-    netDeployed,
+    totalInvested: state.totalDeposited,
+    totalWithdrawn: state.totalSellProceeds,
+    netDeployed: state.totalDeposited - state.totalSellProceeds,
     finalBtcHeld: state.btcHeld,
+    finalCashBalance: state.cashBalance,
     finalPortfolioValue,
     totalReturn,
     maxDrawdown,
@@ -229,35 +270,53 @@ export function runBacktest(
   // 2. Sample for DCA periods
   const sampled = sampleByFrequency(filtered, config.frequency);
 
-  // 3. Run Baseline DCA
+  // 3. Baseline DCA — always buy immediately, never hold cash
   const baseline = runStrategy(
     'Baseline DCA',
     sampled,
     filtered,
     config,
-    () => ({ buyUsd: config.dcaAmount, sellUsd: 0, sellAll: false }),
+    (_d, _state) => ({
+      buyBtcUsd: config.dcaAmount,
+      sellBtcUsd: 0,
+      sellAll: false,
+      deployReserves: false,
+    }),
   );
 
-  // 4. Run CoinStrat DCA
+  // 4. CoinStrat DCA — CORE gates buys, off-signal determines sell behaviour
   const coinstrat = runStrategy(
-    'CoinStrat DCA',
+    'CORE DCA',
     sampled,
     filtered,
     config,
     (d, state) => {
-      if (d.ACCUM_ON === 1) {
-        return { buyUsd: config.dcaAmount, sellUsd: 0, sellAll: false };
+      const coreOn = d.ACCUM_ON === 1;
+      const coreJustFlipped = coreOn && !state.prevCoreOn;
+
+      if (coreOn) {
+        return {
+          buyBtcUsd: config.dcaAmount,
+          sellBtcUsd: 0,
+          sellAll: false,
+          // First buy after CORE flips ON: deploy full cash reserve
+          deployReserves: coreJustFlipped,
+        };
       }
-      // ACCUM_ON = 0
+
+      // CORE is OFF — behaviour depends on offSignalMode
       switch (config.offSignalMode) {
         case 'pause':
-          return { buyUsd: 0, sellUsd: 0, sellAll: false };
+          // Cash sits as dry powder (already deposited above)
+          return { buyBtcUsd: 0, sellBtcUsd: 0, sellAll: false, deployReserves: false };
         case 'sell_matching':
-          return { buyUsd: 0, sellUsd: config.dcaAmount, sellAll: false };
+          // Sell DCA-amount worth of BTC (proceeds become more dry powder)
+          return { buyBtcUsd: 0, sellBtcUsd: config.dcaAmount, sellAll: false, deployReserves: false };
         case 'sell_all':
-          return { buyUsd: 0, sellUsd: 0, sellAll: true };
+          // Sell entire BTC position (maximum dry powder)
+          return { buyBtcUsd: 0, sellBtcUsd: 0, sellAll: true, deployReserves: false };
         default:
-          return { buyUsd: 0, sellUsd: 0, sellAll: false };
+          return { buyBtcUsd: 0, sellBtcUsd: 0, sellAll: false, deployReserves: false };
       }
     },
   );
@@ -267,25 +326,36 @@ export function runBacktest(
   // 5. Optionally run CoinStrat + MACRO 3x
   if (config.macroAccel) {
     const accelerated = runStrategy(
-      'CoinStrat + MACRO 3x',
+      'CORE DCA + MACRO 3x',
       sampled,
       filtered,
       config,
       (d, state) => {
-        if (d.ACCUM_ON === 1) {
-          const multiplier = d.MACRO_ON === 1 ? config.accelMultiplier : 1;
-          return { buyUsd: config.dcaAmount * multiplier, sellUsd: 0, sellAll: false };
+        const coreOn = d.ACCUM_ON === 1;
+        const macroOn = d.MACRO_ON === 1;
+        const coreJustFlipped = coreOn && !state.prevCoreOn;
+
+        if (coreOn) {
+          // MACRO multiplier: spend 3x DCA if MACRO is also ON (capped by cash)
+          const multiplier = macroOn ? config.accelMultiplier : 1;
+          return {
+            buyBtcUsd: config.dcaAmount * multiplier,
+            sellBtcUsd: 0,
+            sellAll: false,
+            deployReserves: coreJustFlipped,
+          };
         }
-        // ACCUM_ON = 0
+
+        // CORE is OFF
         switch (config.offSignalMode) {
           case 'pause':
-            return { buyUsd: 0, sellUsd: 0, sellAll: false };
+            return { buyBtcUsd: 0, sellBtcUsd: 0, sellAll: false, deployReserves: false };
           case 'sell_matching':
-            return { buyUsd: 0, sellUsd: config.dcaAmount, sellAll: false };
+            return { buyBtcUsd: 0, sellBtcUsd: config.dcaAmount, sellAll: false, deployReserves: false };
           case 'sell_all':
-            return { buyUsd: 0, sellUsd: 0, sellAll: true };
+            return { buyBtcUsd: 0, sellBtcUsd: 0, sellAll: true, deployReserves: false };
           default:
-            return { buyUsd: 0, sellUsd: 0, sellAll: false };
+            return { buyBtcUsd: 0, sellBtcUsd: 0, sellAll: false, deployReserves: false };
         }
       },
     );

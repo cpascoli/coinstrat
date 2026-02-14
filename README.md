@@ -16,7 +16,7 @@ The web dashboard fetches live data from FRED, Binance, Blockchain.info, and BGe
 
 | Factor | Source | Range | What it measures |
 |--------|--------|-------|------------------|
-| **VAL_SCORE** | MVRV (Blockchain.info) | 0 / 1 / 2 | On-chain valuation — 2 = deep value (MVRV < 1.0), 1 = fair (1.0–3.2), 0 = overheated (> 3.2) |
+| **VAL_SCORE** | MVRV (Blockchain.info) + LTH SOPR (BGeometrics) | 0 / 1 / 2 | On-chain valuation — 2 = deep value (MVRV < 1.0, or MVRV < 1.8 with LTH SOPR < 1.0 capitulation), 1 = fair (MVRV 1.0–1.8, no capitulation), 0 = overheated (MVRV ≥ 1.8) |
 | **LIQ_SCORE** | US Net Liquidity (FRED: WALCL − WTREGEN − RRPONTSYD) | 0 / 1 / 2 | Macro liquidity regime — YoY and 13-week momentum of Fed net liquidity |
 | **DXY_SCORE** | USD Index (FRED: DTWEXBGS) | 0 / 1 / 2 | Currency headwind/tailwind — 200-day rate of change of the broad trade-weighted dollar. Includes a **20/30-day persistence filter** to prevent whipsaw entries |
 | **CYCLE_SCORE** | Sahm Rule, Yield Curve, New Orders (FRED) | 0 / 1 / 2 | Business cycle positioning — recession risk vs expansion |
@@ -40,11 +40,12 @@ ACCUM_ON = CORE_ON
 
 ### Display-Only Metrics
 
-These are charted for context but do not currently influence scoring:
+These are charted for context but do not directly produce their own score:
 
 - **G3 Global Liquidity** — Fed + ECB + BOJ total assets converted to USD
-- **LTH SOPR** — Long-Term Holder Spent Output Profit Ratio (BGeometrics)
-- **NUPL** — Net Unrealised Profit/Loss (BGeometrics)
+- **NUPL** — Net Unrealised Profit/Loss (BGeometrics) — mathematically related to MVRV, kept for visual confirmation
+
+Note: **LTH SOPR** is now used in scoring — it amplifies VAL_SCORE in the MVRV fair-value zone (see above).
 
 ---
 

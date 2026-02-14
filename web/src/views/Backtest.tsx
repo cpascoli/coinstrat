@@ -8,7 +8,7 @@ import {
   runBacktest, BacktestConfig, StrategyResult, DcaFrequency, OffSignalMode,
 } from '../services/backtest';
 import { format } from 'date-fns';
-import { FlaskConical, TrendingUp, Coins, BarChart3, ShieldAlert, DollarSign, ArrowDownToLine } from 'lucide-react';
+import { FlaskConical, TrendingUp, Coins, BarChart3, ShieldAlert, DollarSign, ArrowDownToLine, Wallet } from 'lucide-react';
 import {
   Box,
   Card,
@@ -47,8 +47,8 @@ const ALL_START_DATE = '2013-01-01';
 
 const STRATEGY_COLORS: Record<string, string> = {
   'Baseline DCA': '#94a3b8',
-  'CoinStrat DCA': '#60a5fa',
-  'CoinStrat + MACRO 3x': '#22c55e',
+  'CORE DCA': '#60a5fa',
+  'CORE DCA + MACRO 3x': '#22c55e',
 };
 
 // Build system-state spans for regime shading (same logic as ChartsView)
@@ -446,9 +446,9 @@ const Backtest: React.FC<Props> = ({ data }) => {
                       </Grid>
                       <Grid item xs={6}>
                         <MetricBox
-                          icon={<ArrowDownToLine className="h-4 w-4" style={{ color }} />}
-                          label="Total Withdrawn"
-                          value={fmtUsd(r.totalWithdrawn)}
+                          icon={<Wallet className="h-4 w-4" style={{ color }} />}
+                          label="Cash Balance"
+                          value={fmtUsd(r.finalCashBalance)}
                         />
                       </Grid>
                       <Grid item xs={6}>
@@ -483,7 +483,8 @@ const Backtest: React.FC<Props> = ({ data }) => {
               Portfolio Value Over Time
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-              Total portfolio value (BTC holdings at market price + cash from any sells) for each strategy.
+              Total portfolio value (BTC holdings at market price + cash reserves) for each strategy.
+              All strategies receive the same DCA deposits; CoinStrat holds cash as dry powder when CORE is OFF and deploys reserves on re-entry.
               Background shading shows the CoinStrat system state (CORE = accumulation permission; MACRO = 3× intensity modifier).
             </Typography>
           </Box>
@@ -705,10 +706,10 @@ const Backtest: React.FC<Props> = ({ data }) => {
                 </TableRow>
               </TableHead>
               <TableBody>
-                <CompRow label="Total Invested" values={results.map(r => fmtUsd(r.totalInvested))} />
-                <CompRow label="Total Withdrawn" values={results.map(r => fmtUsd(r.totalWithdrawn))} />
-                <CompRow label="Net Deployed" values={results.map(r => fmtUsd(r.netDeployed))} />
+                <CompRow label="Total Deposited" values={results.map(r => fmtUsd(r.totalInvested))} />
                 <CompRow label="Final Portfolio Value" values={results.map(r => fmtUsd(r.finalPortfolioValue))} />
+                <CompRow label="Cash Balance" values={results.map(r => fmtUsd(r.finalCashBalance))} />
+                <CompRow label="BTC Value" values={results.map(r => fmtUsd(r.finalBtcHeld * (r.series.length > 0 ? r.series[r.series.length - 1].btcPrice : 0)))} />
                 <CompRow label="Total Return" values={results.map(r => fmtPct(r.totalReturn * 100))} />
                 <CompRow label="BTC Accumulated" values={results.map(r => r.btcAccumulated.toFixed(4))} />
                 <CompRow label="Max Drawdown" values={results.map(r => `-${(r.maxDrawdown * 100).toFixed(1)}%`)} />

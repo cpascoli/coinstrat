@@ -45,6 +45,7 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
   const dxyPersist = (current as any).DXY_PERSIST as number | undefined;
 
   const mvrv = current.MVRV;
+  const lthSopr = (current as any).LTH_SOPR as number | undefined;
   const btcMa40w = (current as any).BTC_MA40W as number | undefined;
   const priceRegime = (current as any).PRICE_REGIME as number | undefined;
 
@@ -66,15 +67,26 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
             icon={<Landmark className="h-6 w-6 text-violet-300" />}
             title="BTC Valuation (VAL_SCORE)"
             score={valScore}
-            description="Bitcoin valuation using MVRV."
-            formula="MVRV thresholds: <1.0 cheap, <1.8 fair, ≥1.8 hot"
+            description="Bitcoin valuation using MVRV, amplified by LTH SOPR in the fair-value zone."
+            formula="MVRV thresholds + LTH SOPR capitulation upgrade"
           >
             <Grid container spacing={1.25}>
               <Grid item xs={12}>
                 <RuleRow ok={typeof mvrv === 'number' && mvrv < 1.0} label="MVRV < 1.0" result="Score 2 (Deep Value)" />
               </Grid>
               <Grid item xs={12}>
-                <RuleRow ok={typeof mvrv === 'number' && mvrv >= 1.0 && mvrv < 1.8} label="1.0 ≤ MVRV < 1.8" result="Score 1 (Fair Value)" />
+                <RuleRow
+                  ok={typeof mvrv === 'number' && mvrv >= 1.0 && mvrv < 1.8 && typeof lthSopr === 'number' && lthSopr < 1.0}
+                  label="1.0 ≤ MVRV < 1.8 AND LTH SOPR < 1.0"
+                  result="Score 2 (Fair Value + Capitulation → Deep Value)"
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <RuleRow
+                  ok={typeof mvrv === 'number' && mvrv >= 1.0 && mvrv < 1.8 && (typeof lthSopr !== 'number' || lthSopr >= 1.0)}
+                  label="1.0 ≤ MVRV < 1.8 AND LTH SOPR ≥ 1.0"
+                  result="Score 1 (Fair Value)"
+                />
               </Grid>
               <Grid item xs={12}>
                 <RuleRow ok={typeof mvrv === 'number' && mvrv >= 1.8} label="MVRV ≥ 1.8" result="Score 0 (Overheated)" tone="danger" />
@@ -84,8 +96,11 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
             <Divider sx={{ my: 2 }} />
 
             <Grid container spacing={1.25}>
-              <Grid item xs={12}>
+              <Grid item xs={6}>
                 <MetricRow label="MVRV" value={fmtNum(mvrv, 2)} />
+              </Grid>
+              <Grid item xs={6}>
+                <MetricRow label="LTH SOPR" value={fmtNum(lthSopr, 3)} />
               </Grid>
             </Grid>
           </FactorCard>

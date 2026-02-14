@@ -125,7 +125,7 @@ export async function computeAllSignals(): Promise<SignalData[]> {
   fillSeries(newOrders, "NO");
   fillSeries(mvrv, "MVRV");
 
-  // On-chain valuation series (display-only)
+  // On-chain valuation series (LTH_SOPR used in VAL_SCORE; NUPL display-only)
   fillSeries(lthSopr, "LTH_SOPR");
   fillSeries(nupl, "NUPL");
 
@@ -190,6 +190,10 @@ export async function computeAllSignals(): Promise<SignalData[]> {
   };
 
   // -- Valuation Score --
+  // MVRV provides the base score. LTH SOPR acts as an amplifier in the fair-value zone:
+  // if MVRV is in fair-value territory (1.0–1.8) AND long-term holders are capitulating
+  // (LTH_SOPR < 1.0), upgrade to deep value (score 2). This uses an economically
+  // grounded threshold (break-even) rather than cycle-fitted numbers, reducing overfitting risk.
   let lastValScore = 0;
   dailyData.forEach(d => {
     const mvrv = d.MVRV;
@@ -198,9 +202,19 @@ export async function computeAllSignals(): Promise<SignalData[]> {
       d.VAL_SCORE = lastValScore;
       return;
     }
+
+    const sopr = d.LTH_SOPR;
+    const soprOk = typeof sopr === 'number' && !isNaN(sopr);
+
     let score = 0;
-    if (mvrv < 1.0) score = 2;
-    else if (mvrv < 1.8) score = 1;
+    if (mvrv < 1.0) {
+      score = 2; // deep value (MVRV alone)
+    } else if (mvrv < 1.8) {
+      // Fair value zone — check if LTH SOPR confirms capitulation
+      score = (soprOk && sopr < 1.0) ? 2 : 1;
+    }
+    // mvrv >= 1.8 → score stays 0 (overheated)
+
     d.VAL_SCORE = score;
     lastValScore = score;
   });
