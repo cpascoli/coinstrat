@@ -264,12 +264,12 @@ const Home: React.FC = () => {
           />
 
           <ReferenceCard
-            title="BTC Daily Close"
-            id="BTCUSDT (Binance)"
-            href="https://www.binance.com/en-GB/trade/BTC_USDT?type=spot"
-            meaning="Exchange candlestick endpoint used to fetch recent BTC daily candles."
+            title="Long-Term Holder SOPR"
+            id="LTH SOPR (BGeometrics)"
+            href="https://charts.bgeometrics.com/lth_sopr.html"
+            meaning="Spent Output Profit Ratio for coins held > 155 days. LTH SOPR < 1 means long-term holders are selling at a loss (capitulation)."
             usage={[
-              "BTC price tail: merged with local bundled history to keep data current.",
+              "Valuation amplifier: when MVRV is in fair-value range (1.0–1.8) and LTH SOPR < 1.0, VAL_SCORE is upgraded from 1 to 2 (deep value).",
             ]}
           />
 
@@ -279,7 +279,7 @@ const Home: React.FC = () => {
             href="https://www.blockchain.com/explorer/charts/mvrv"
             meaning="Market Value to Realized Value ratio (valuation proxy)."
             usage={[
-              "Valuation scoring (VAL_SCORE): MVRV < 1.0 → 2; 1.0–1.8 → 1; ≥ 1.8 → 0.",
+              "Valuation scoring (VAL_SCORE): MVRV < 1.0 → 2; 1.0–1.8 → 1 (or 2 if LTH SOPR < 1); ≥ 1.8 → 0.",
             ]}
           />
         </Box>

@@ -207,6 +207,7 @@ const Dashboard: React.FC<Props> = ({ current, history }) => {
                 <SnapshotRow label="Sahm Rule" value={fmtNum(current.SAHM, 2)} score={current.CYCLE_SCORE} />
                 <SnapshotRow label="Yield Curve (10Y-3M)" value={fmtNum(current.YC_M, 2)} score={current.CYCLE_SCORE} />
                 <SnapshotRow label="MVRV" value={fmtNum(current.MVRV, 2)} score={current.VAL_SCORE} />
+                <SnapshotRow label="LTH SOPR" value={fmtNum((current as any).LTH_SOPR, 3)} score={typeof (current as any).LTH_SOPR === 'number' && (current as any).LTH_SOPR < 1.0 ? 2 : (typeof (current as any).LTH_SOPR === 'number' && (current as any).LTH_SOPR < 1.5 ? 1 : 0)} />
                 <SnapshotRow label="BTC 40W MA" value={fmtUsd((current as any).BTC_MA40W)} score={current.PRICE_REGIME_ON} />
               </TableBody>
             </Table>
