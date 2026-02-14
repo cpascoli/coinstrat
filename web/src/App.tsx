@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { LayoutDashboard, BarChart3, Binary, Info, Activity } from 'lucide-react';
+import { LayoutDashboard, BarChart3, Binary, Info, Activity, FlaskConical } from 'lucide-react';
 import Dashboard from './views/Dashboard';
 import ScoreBreakdown from './views/ScoreBreakdown';
 import LogicFlow from './views/LogicFlow';
 import ChartsView from './views/ChartsView';
 import Home from './views/Home';
+import Backtest from './views/Backtest';
 import { computeAllSignals } from './services/engine';
 import {
   AppBar,
@@ -44,7 +45,7 @@ export interface SignalData {
   [key: string]: any;
 }
 
-type TabKey = 'dashboard' | 'scores' | 'logic' | 'charts';
+type TabKey = 'dashboard' | 'scores' | 'logic' | 'charts' | 'backtest';
 
 const App: React.FC = () => {
   const [data, setData] = useState<SignalData[]>([]);
@@ -63,6 +64,7 @@ const App: React.FC = () => {
       { key: 'scores' as const, path: '/scores', label: 'Scores', icon: <BarChart3 className="h-5 w-5" /> },
       // Default to the System subpage under Charts
       { key: 'charts' as const, path: '/charts/system', label: 'Charts', icon: <Activity className="h-5 w-5" /> },
+      { key: 'backtest' as const, path: '/backtest', label: 'Backtest', icon: <FlaskConical className="h-5 w-5" /> },
     ],
     []
   );
@@ -221,6 +223,7 @@ const App: React.FC = () => {
           <Route path="/scores" element={gate(<ScoreBreakdown current={lastData as SignalData} />)} />
           <Route path="/signals" element={gate(<LogicFlow current={lastData as SignalData} />)} />
           <Route path="/charts/*" element={gate(<ChartsView data={data} />)} />
+          <Route path="/backtest" element={gate(<Backtest data={data} />)} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
 

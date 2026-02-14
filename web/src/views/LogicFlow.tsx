@@ -58,13 +58,13 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
                   active={coreStatus}
                 />
                 <LogicRule
-                  title="Risk filter"
-                  formula="DXY_SCORE ≥ 1"
+                  title="Risk filter (with 20/30 persistence)"
+                  formula="DXY_SCORE ≥ 1 (requires DXY favorable ≥ 20/30 days)"
                   active={current.DXY_SCORE >= 1}
                 />
                 <LogicRule
-                  title="Exit condition"
-                  formula="DXY_SCORE = 0 AND PRICE_REGIME = 0"
+                  title="Exit condition (with 20/30 persistence)"
+                  formula="DXY_SCORE = 0 (persistence-filtered) AND PRICE_REGIME = 0"
                   active={current.DXY_SCORE === 0 && current.PRICE_REGIME_ON === 0}
                   tone="danger"
                 />
@@ -78,8 +78,14 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
                   <Grid item xs={6}>
                     <MetricChip title="Price Regime" label="PRICE_REGIME" value={current.PRICE_REGIME_ON} />
                   </Grid>
-                  <Grid item xs={12}>
-                    <MetricChip title="USD Regime" label="DXY_SCORE" value={current.DXY_SCORE} />
+                  <Grid item xs={4}>
+                    <MetricChip title="DXY (raw)" label="DXY_SCORE_RAW" value={(current as any).DXY_SCORE_RAW ?? '–'} />
+                  </Grid>
+                  <Grid item xs={4}>
+                    <MetricChip title="DXY Persist" label="DXY_PERSIST" value={(current as any).DXY_PERSIST ?? '–'} />
+                  </Grid>
+                  <Grid item xs={4}>
+                    <MetricChip title="DXY (eff.)" label="DXY_SCORE" value={current.DXY_SCORE} />
                   </Grid>
                 </Grid>
               </Stack>
@@ -92,7 +98,7 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
             <CardHeader
               avatar={<Zap className="h-6 w-6 text-amber-300" />}
               title={<Typography sx={{ fontWeight: 900 }}>Macro Accelerator (MACRO)</Typography>}
-              subheader="High conviction throttle when liquidity + business cycle align and USD is not risk-off."
+              subheader="Intensity modifier: 3× DCA when liquidity + business cycle align and USD is not risk-off. Only active while CORE is ON."
               action={
                 <Chip
                   label={macroStatus ? 'ACTIVE' : 'IDLE'}
@@ -107,7 +113,7 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
               <Stack spacing={1.25}>
                 <LogicRule
                   title="Accelerator formula"
-                  formula="(LIQ + BIZ_CYCLE ≥ 3) AND (DXY ≥ 1)"
+                  formula="(LIQ + BIZ_CYCLE ≥ 3) AND (DXY ≥ 1, persistence-filtered)"
                   active={macroStatus}
                 />
 
@@ -144,7 +150,7 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
             <CardHeader
               avatar={<ToggleRight className="h-7 w-7 text-blue-300" />}
               title={<Typography sx={{ fontWeight: 900 }}>Final Permission (ACCUM)</Typography>}
-              subheader="Final permission to deploy capital (CORE OR MACRO)."
+              subheader="Final permission to deploy capital. ACCUM = CORE. MACRO only modifies DCA intensity (3×) when CORE is already ON."
               action={
                 <Chip
                   label={accumStatus ? 'ON' : 'OFF'}
@@ -183,7 +189,7 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
                         {macroStatus ? 'ENABLED' : 'DISABLED'}
                       </Typography>
                       <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                        Liquidity + cycle tailwind with USD filter.
+                        Intensity modifier: 3× DCA when active alongside CORE.
                       </Typography>
                     </CardContent>
                   </Card>
@@ -206,7 +212,9 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
                         {accumStatus ? 'ON' : 'OFF'}
                       </Typography>
                       <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                        {accumStatus ? 'Permission granted to accumulate.' : 'Capital protection: pause buys.'}
+                        {accumStatus
+                          ? (macroStatus ? 'Permission granted — accelerated (3×) accumulation.' : 'Permission granted to accumulate (base rate).')
+                          : 'Capital protection: pause buys.'}
                       </Typography>
                     </CardContent>
                   </Card>

@@ -41,6 +41,8 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
   const dxyMA50 = (current as any).DXY_MA50 as number | undefined;
   const dxyMA200 = (current as any).DXY_MA200 as number | undefined;
   const dxyRoc20 = (current as any).DXY_ROC20 as number | undefined; // fraction
+  const dxyScoreRaw = (current as any).DXY_SCORE_RAW as number | undefined;
+  const dxyPersist = (current as any).DXY_PERSIST as number | undefined;
 
   const mvrv = current.MVRV;
   const btcMa40w = (current as any).BTC_MA40W as number | undefined;
@@ -256,22 +258,42 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
             icon={<Gauge className="h-6 w-6 text-amber-300" />}
             title="USD Regime (DXY_SCORE)"
             score={dxyScore}
-            description="USD headwind/tailwind using a broad trade‑weighted USD proxy (FRED: DTWEXBGS)"
-            formula="ROC20 thresholds ±0.5% and MA50 vs MA200"
+            description="USD headwind/tailwind using a broad trade‑weighted USD proxy (FRED: DTWEXBGS), with a 20/30 persistence filter."
+            formula="Raw score from ROC20 ± 0.5% + MA crossover → 20/30 persistence filter"
           >
             <Grid container spacing={1.25}>
               <Grid item xs={12}>
                 <RuleRow
                   ok={typeof dxyRoc20 === 'number' && dxyRoc20 < -0.005 && typeof dxyMA50 === 'number' && typeof dxyMA200 === 'number' && dxyMA50 < dxyMA200}
                   label="ROC20 < -0.5% AND MA50 < MA200"
-                  result="Score 2 (USD weakening / supportive)"
+                  result="Raw Score 2 (USD weakening / supportive)"
                 />
               </Grid>
               <Grid item xs={12}>
-                <RuleRow ok={typeof dxyRoc20 === 'number' && dxyRoc20 > 0.005} label="ROC20 > +0.5%" result="Score 0 (USD strengthening / headwind)" tone="danger" />
+                <RuleRow ok={typeof dxyRoc20 === 'number' && dxyRoc20 > 0.005} label="ROC20 > +0.5%" result="Raw Score 0 (USD strengthening / headwind)" tone="danger" />
               </Grid>
               <Grid item xs={12}>
-                <RuleRow ok label="Otherwise" result="Score 1 (Neutral)" muted />
+                <RuleRow ok label="Otherwise" result="Raw Score 1 (Neutral)" muted />
+              </Grid>
+            </Grid>
+
+            <Divider sx={{ my: 2 }} />
+
+            <Grid container spacing={1.25}>
+              <Grid item xs={12}>
+                <RuleRow
+                  ok={typeof dxyPersist === 'number' && dxyPersist === 1}
+                  label="DXY_SCORE_RAW ≥ 1 for ≥ 20/30 days"
+                  result="DXY_PERSIST = 1 → effective score = raw score"
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <RuleRow
+                  ok={typeof dxyPersist === 'number' && dxyPersist === 0}
+                  label="DXY_SCORE_RAW ≥ 1 for < 20/30 days"
+                  result="DXY_PERSIST = 0 → effective score forced to 0"
+                  tone="danger"
+                />
               </Grid>
             </Grid>
 
@@ -289,6 +311,15 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
               </Grid>
               <Grid item xs={6}>
                 <MetricRow label="MA200" value={fmtNum(dxyMA200, 2)} />
+              </Grid>
+              <Grid item xs={4}>
+                <MetricRow label="DXY_SCORE_RAW" value={fmtInt(dxyScoreRaw)} />
+              </Grid>
+              <Grid item xs={4}>
+                <MetricRow label="DXY_PERSIST" value={fmtInt(dxyPersist)} />
+              </Grid>
+              <Grid item xs={4}>
+                <MetricRow label="DXY_SCORE (eff.)" value={fmtInt(dxyScore)} />
               </Grid>
             </Grid>
           </FactorCard>

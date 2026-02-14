@@ -105,6 +105,56 @@ function mergeUnique(a: PricePoint[], b: PricePoint[]): PricePoint[] {
 }
 
 /**
+ * Fetch a BGeometrics JSON series (e.g. lth_sopr, lth_nupl).
+ * Data format: [[timestamp_ms, value], ...]
+ * Returns PricePoint[] sorted by date.
+ */
+async function fetchBGeometrics(file: string): Promise<PricePoint[]> {
+  const isDev = import.meta.env.DEV;
+  const candidates = isDev
+    ? [
+        `/.netlify/functions/bgeometrics?file=${encodeURIComponent(file)}`,
+        `/api/bgeometrics/${encodeURIComponent(file)}`,
+        // Direct fallback for local dev without Netlify Dev
+        `https://charts.bgeometrics.com/files/${file}.json`,
+      ]
+    : [`/api/bgeometrics/${encodeURIComponent(file)}`];
+
+  let lastErr: Error | null = null;
+  for (const url of candidates) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`BGeometrics error: ${response.statusText}`);
+      const data: [number, number | null][] = await response.json();
+      return data
+        .filter(([, v]) => v !== null && Number.isFinite(v))
+        .map(([ts, v]) => ({
+          date: new Date(ts).toISOString().split('T')[0],
+          value: v as number,
+        }));
+    } catch (e: any) {
+      lastErr = e instanceof Error ? e : new Error(String(e));
+    }
+  }
+  console.error(`Error fetching BGeometrics file ${file}:`, lastErr);
+  return [];
+}
+
+/**
+ * Fetch Long-Term Holder SOPR from BGeometrics.
+ */
+export async function fetchLTH_SOPR(): Promise<PricePoint[]> {
+  return fetchBGeometrics('lth_sopr');
+}
+
+/**
+ * Fetch Net Unrealized Profit/Loss (NUPL) from BGeometrics.
+ */
+export async function fetchNUPL(): Promise<PricePoint[]> {
+  return fetchBGeometrics('lth_nupl');
+}
+
+/**
  * Fetch MVRV from Blockchain.info
  */
 export async function fetchMVRV(): Promise<PricePoint[]> {

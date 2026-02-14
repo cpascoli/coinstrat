@@ -15,6 +15,12 @@
   to = "/.netlify/functions/fred/:splat"
   status = 200
 
+# Proxy for BGeometrics on-chain data (LTH SOPR, NUPL)
+[[redirects]]
+  from = "/api/bgeometrics/*"
+  to = "/.netlify/functions/bgeometrics/:splat"
+  status = 200
+
 # Redirects for Single Page Application (SPA) routing
 # IMPORTANT: This must be the LAST redirect rule
 [[redirects]]

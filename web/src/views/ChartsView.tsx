@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-  AreaChart, Area, ReferenceArea 
+  AreaChart, Area, ReferenceArea, ReferenceLine 
 } from 'recharts';
 import { SignalData } from '../App';
 import { format } from 'date-fns';
@@ -14,7 +14,7 @@ interface Props {
 }
 
 type RangeKey = 'all' | '10y' | '5y' | '2y' | '1y';
-type ChartsSection = 'system' | 'valuation' | 'liquidity' | 'business';
+type ChartsSection = 'system' | 'valuation' | 'liquidity' | 'business' | 'global';
 
 type RegimeKey = 'LIQ_SCORE' | 'CYCLE_SCORE';
 type RegimeSpan = { x1: number; x2: number; value: 0 | 1 | 2 };
@@ -233,7 +233,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
   const section: ChartsSection = useMemo(() => {
     const m = location.pathname.match(/^\/charts\/([^/]+)/);
     const seg = (m?.[1] ?? 'system').toLowerCase();
-    if (seg === 'system' || seg === 'valuation' || seg === 'liquidity' || seg === 'business') return seg as ChartsSection;
+    if (seg === 'system' || seg === 'valuation' || seg === 'liquidity' || seg === 'business' || seg === 'global') return seg as ChartsSection;
     return 'system';
   }, [location.pathname]);
 
@@ -245,7 +245,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
     }
     const m = location.pathname.match(/^\/charts\/([^/]+)/);
     const seg = (m?.[1] ?? '').toLowerCase();
-    if (seg && seg !== 'system' && seg !== 'valuation' && seg !== 'liquidity' && seg !== 'business') {
+    if (seg && seg !== 'system' && seg !== 'valuation' && seg !== 'liquidity' && seg !== 'business' && seg !== 'global') {
       navigate('/charts/system', { replace: true });
     }
   }, [location.pathname, navigate]);
@@ -354,9 +354,57 @@ const ChartsView: React.FC<Props> = ({ data }) => {
     }
   };
 
+  // Split LTH_SOPR into profit (>=1, green) and loss (<1, red) series for conditional coloring.
+  // Each segment includes the boundary point from the other side so lines connect seamlessly.
+  const soprChartData = useMemo(() => {
+    return chartData.map((d: any, i: number, arr: any[]) => {
+      const v = d.LTH_SOPR;
+      const isFinite = typeof v === 'number' && Number.isFinite(v);
+      const profit = isFinite && v >= 1;
+      const loss   = isFinite && v < 1;
+      // Check neighbours to duplicate boundary points
+      const prev = i > 0 ? arr[i - 1]?.LTH_SOPR : null;
+      const next = i < arr.length - 1 ? arr[i + 1]?.LTH_SOPR : null;
+      const prevFinite = typeof prev === 'number' && Number.isFinite(prev);
+      const nextFinite = typeof next === 'number' && Number.isFinite(next);
+      // A point is a "bridge" if its neighbour is on the opposite side — include in both series
+      const bridgeToPrev = prevFinite && ((profit && prev < 1) || (loss && prev >= 1));
+      const bridgeToNext = nextFinite && ((profit && next < 1) || (loss && next >= 1));
+      const isBridge = bridgeToPrev || bridgeToNext;
+      return {
+        ...d,
+        LTH_SOPR_PROFIT: (profit || isBridge) && isFinite ? v : null,
+        LTH_SOPR_LOSS:   (loss   || isBridge) && isFinite ? v : null,
+      };
+    });
+  }, [chartData]);
+
+  // Split NUPL into positive (>=0, green) and negative (<0, red) series for conditional coloring.
+  const nuplChartData = useMemo(() => {
+    return chartData.map((d: any, i: number, arr: any[]) => {
+      const v = d.NUPL;
+      const ok = typeof v === 'number' && Number.isFinite(v);
+      const pos = ok && v >= 0;
+      const neg = ok && v < 0;
+      const prev = i > 0 ? arr[i - 1]?.NUPL : null;
+      const next = i < arr.length - 1 ? arr[i + 1]?.NUPL : null;
+      const prevOk = typeof prev === 'number' && Number.isFinite(prev);
+      const nextOk = typeof next === 'number' && Number.isFinite(next);
+      const bridgeToPrev = prevOk && ((pos && prev < 0) || (neg && prev >= 0));
+      const bridgeToNext = nextOk && ((pos && next < 0) || (neg && next >= 0));
+      const isBridge = bridgeToPrev || bridgeToNext;
+      return {
+        ...d,
+        NUPL_POS: (pos || isBridge) && ok ? v : null,
+        NUPL_NEG: (neg || isBridge) && ok ? v : null,
+      };
+    });
+  }, [chartData]);
+
   const liqSpans = useMemo(() => buildRegimeSpans(chartData as any, 'LIQ_SCORE'), [chartData]);
   const cycleSpans = useMemo(() => buildRegimeSpans(chartData as any, 'CYCLE_SCORE'), [chartData]);
   const priceRegimeSpans = useMemo(() => buildBinarySpans(chartData as any, 'PRICE_REGIME_ON'), [chartData]);
+  const dxyPersistSpans = useMemo(() => buildBinarySpans(chartData as any, 'DXY_PERSIST'), [chartData]);
   const systemSpans = useMemo(() => buildSystemSpans(chartData as any), [chartData]);
   const mvrvSpans = useMemo(() => buildMvrvSpans(chartData as any), [chartData]);
 
@@ -404,6 +452,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           <Tab value="system" label="System" sx={{ minHeight: 40 }} />
           <Tab value="valuation" label="Valuation" sx={{ minHeight: 40 }} />
           <Tab value="liquidity" label="Liquidity" sx={{ minHeight: 40 }} />
+          <Tab value="global" label="Global Liq." sx={{ minHeight: 40 }} />
           <Tab value="business" label="Business Cycle" sx={{ minHeight: 40 }} />
         </Tabs>
 
@@ -432,10 +481,10 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
             BTCUSD shaded by the engine’s state machine. 
             <br />
-            CORE is driven by VAL_SCORE + PRICE_REGIME with DXY_SCORE as a gate;
-            MACRO is driven by (LIQ_SCORE + CYCLE_SCORE) with DXY_SCORE as a gate. 
+            CORE is driven by VAL_SCORE + PRICE_REGIME with persistence-filtered DXY_SCORE as a gate;
+            MACRO is driven by (LIQ_SCORE + CYCLE_SCORE) with persistence-filtered DXY_SCORE as a gate. 
             <br />
-            ACCUM is enabled when CORE=1 or MACRO=1.
+            Both PRICE_REGIME and DXY_SCORE use a 20/30-day persistence filter. ACCUM = CORE (sole gatekeeper); MACRO only modifies DCA intensity (3×) when CORE is ON.
           </Typography>
         </Box>
 
@@ -774,6 +823,257 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       </Paper>
       )}
 
+      {/* Long-Term Holder SOPR */}
+      {section === 'valuation' && (
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Box sx={{ mb: 2.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            Long-Term Holder SOPR
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            Spent Output Profit Ratio for long-term holders (coins held &gt; 155 days). 
+            <br />
+            LTH-SOPR &gt; 1 means LTHs are spending coins at a profit; &lt; 1 means they are realising losses. 
+            <br />
+            Historically, sustained LTH-SOPR &lt; 1 has coincided with late-bear capitulation zones — optimal accumulation windows.
+          </Typography>
+        </Box>
+
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="LTH SOPR ≥ 1 (profit)" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="LTH SOPR < 1 (loss)" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
+          <Chip size="small" variant="outlined" label="SOPR = 1 (break-even)" sx={{ borderColor: '#94a3b8', color: '#cbd5e1' }} />
+          <Chip size="small" variant="outlined" label="BTCUSD (right, log)" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
+        </Stack>
+
+        <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart key={`lth-sopr-${range}`} data={soprChartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis yAxisId="sopr" domain={[0, 10]} allowDataOverflow tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => (typeof v === 'number' ? v.toFixed(1) : '')} />
+              <YAxis yAxisId="btc" orientation="right" scale="log" domain={[btcDomain.y1, btcDomain.y2]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
+              <ReferenceLine yAxisId="sopr" y={1} stroke="#94a3b8" strokeDasharray="6 3" strokeWidth={1.5} />
+              <Tooltip content={<CustomTooltip />} />
+              <Line yAxisId="sopr" type="monotone" dataKey="LTH_SOPR_PROFIT" name="LTH SOPR (profit)" stroke="#22c55e" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls={false} />
+              <Line yAxisId="sopr" type="monotone" dataKey="LTH_SOPR_LOSS" name="LTH SOPR (loss)" stroke="#ef4444" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls={false} />
+              <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.5} dot={false} isAnimationActive={false} opacity={0.5} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Box>
+      </Paper>
+      )}
+
+      {/* Net Unrealized Profit / Loss (NUPL) */}
+      {section === 'valuation' && (
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Box sx={{ mb: 2.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            Net Unrealized Profit / Loss (NUPL)
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            NUPL = (Market Cap − Realized Cap) / Market Cap. 
+            <br />
+            Measures collective investor sentiment: high values (&gt; 0.75) signal euphoria / potential tops;
+            low or negative values (&lt; 0) signal capitulation / potential bottoms. 
+            <br />
+            NUPL is a useful complement to MVRV for gauging market-cycle positioning.
+          </Typography>
+        </Box>
+
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="NUPL ≥ 0 (profit)" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="NUPL < 0 (loss)" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
+          <Chip size="small" variant="outlined" label="NUPL = 0 (break-even)" sx={{ borderColor: '#94a3b8', color: '#cbd5e1' }} />
+          <Chip size="small" variant="outlined" label="BTCUSD (right, log)" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
+        </Stack>
+
+        <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart key={`nupl-${range}`} data={nuplChartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis yAxisId="nupl" domain={[-1, 1]} allowDataOverflow tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => (typeof v === 'number' ? v.toFixed(2) : '')} />
+              <YAxis yAxisId="btc" orientation="right" scale="log" domain={[btcDomain.y1, btcDomain.y2]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
+              <ReferenceLine yAxisId="nupl" y={0} stroke="#94a3b8" strokeDasharray="6 3" strokeWidth={1.5} />
+              <ReferenceLine yAxisId="nupl" y={0.75} stroke="#ef4444" strokeDasharray="4 4" strokeWidth={1} label={{ value: 'Euphoria', fill: '#fca5a5', fontSize: 10, position: 'right' }} />
+              <Tooltip content={<CustomTooltip />} />
+              <Line yAxisId="nupl" type="monotone" dataKey="NUPL_POS" name="NUPL (profit)" stroke="#22c55e" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls={false} />
+              <Line yAxisId="nupl" type="monotone" dataKey="NUPL_NEG" name="NUPL (loss)" stroke="#ef4444" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls={false} />
+              <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.5} dot={false} isAnimationActive={false} opacity={0.5} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Box>
+      </Paper>
+      )}
+
+      {/* G3 Global Liquidity: BTC + G3 composite */}
+      {section === 'global' && (
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Box sx={{ mb: 2.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            G3 Central Bank Assets vs BTC
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            Total assets of the three largest central banks (Fed + ECB + BOJ) converted to USD, plotted against BTCUSD.
+            <br />
+            G3 expansion typically signals a favorable liquidity backdrop for risk assets including Bitcoin.
+          </Typography>
+        </Box>
+
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="G3 Assets (USD)" sx={{ borderColor: '#60a5fa', color: '#bfdbfe' }} />
+          <Chip size="small" variant="outlined" label="BTCUSD" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
+        </Stack>
+
+        <Box sx={{ height: { xs: 360, sm: 460, md: 520 }, width: '100%', minWidth: 0 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart key={`g3-btc-${range}`} data={chartData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis
+                yAxisId="btc"
+                scale="log"
+                domain={['auto', 'auto']}
+                tick={{ fontSize: 10, fill: '#94a3b8' }}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(val) => {
+                  if (typeof val !== 'number' || isNaN(val)) return '';
+                  if (val >= 1000) return `$${Math.round(val / 1000)}k`;
+                  return `$${Math.round(val)}`;
+                }}
+              />
+              <YAxis
+                yAxisId="g3"
+                orientation="right"
+                domain={['auto', 'auto']}
+                tick={{ fontSize: 10, fill: '#60a5fa' }}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(val) => {
+                  if (typeof val !== 'number' || isNaN(val)) return '';
+                  return `$${(val / 1e6).toFixed(1)}T`;
+                }}
+              />
+              <Tooltip content={<CustomTooltip />} />
+              <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={2} dot={false} isAnimationActive={false} />
+              <Line yAxisId="g3" type="monotone" dataKey="G3_ASSETS" name="G3 Assets" stroke="#60a5fa" strokeWidth={2} dot={false} isAnimationActive={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Box>
+      </Paper>
+      )}
+
+      {/* G3 Global Liquidity: components breakdown */}
+      {section === 'global' && (
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Box sx={{ mb: 2.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            G3 Components (USD)
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            Individual central bank balance sheets converted to USD.
+            <br />
+            Fed = WALCL. ECB = ECBASSETSW in EUR converted via DEXUSEU. BOJ = JPNASSETS in JPY converted via DEXJPUS.
+          </Typography>
+        </Box>
+
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="Fed (WALCL)" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
+          <Chip size="small" variant="outlined" label="ECB (USD)" sx={{ borderColor: '#a78bfa', color: '#ddd6fe' }} />
+          <Chip size="small" variant="outlined" label="BOJ (USD)" sx={{ borderColor: '#fbbf24', color: '#fde68a' }} />
+        </Stack>
+
+        <Box sx={{ height: 360, width: '100%', minWidth: 0 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart key={`g3-components-${range}`} data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis
+                yAxisId="cb"
+                domain={['auto', 'auto']}
+                tick={{ fontSize: 10, fill: '#94a3b8' }}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(v) => (typeof v === 'number' ? `$${(v / 1e6).toFixed(1)}T` : '')}
+              />
+              <Tooltip content={<CustomTooltip />} />
+              <Line yAxisId="cb" type="monotone" dataKey="FED_USD" name="Fed (WALCL)" stroke="#e5e7eb" strokeWidth={2} dot={false} isAnimationActive={false} />
+              <Line yAxisId="cb" type="monotone" dataKey="ECB_USD" name="ECB (USD)" stroke="#a78bfa" strokeWidth={2} dot={false} isAnimationActive={false} />
+              <Line yAxisId="cb" type="monotone" dataKey="BOJ_USD" name="BOJ (USD)" stroke="#fbbf24" strokeWidth={2} dot={false} isAnimationActive={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Box>
+      </Paper>
+      )}
+
+      {/* G3 Global Liquidity: YoY */}
+      {section === 'global' && (
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Box sx={{ mb: 2.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            G3 Assets YoY Change
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            Year-over-year percent change in the G3 central bank assets composite (USD terms).
+            <br />
+            Positive YoY indicates the global monetary base is expanding; negative indicates contraction.
+          </Typography>
+        </Box>
+
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="G3 YoY (%)" sx={{ borderColor: '#34d399', color: '#bbf7d0' }} />
+        </Stack>
+
+        <Box sx={{ height: 320, width: '100%', minWidth: 0 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart key={`g3-yoy-${range}`} data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis
+                yAxisId="yoy"
+                domain={['auto', 'auto']}
+                tick={{ fontSize: 10, fill: '#94a3b8' }}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(v) => (typeof v === 'number' ? `${v.toFixed(0)}%` : '')}
+              />
+              <Tooltip content={<CustomTooltip />} />
+              <Line
+                yAxisId="yoy"
+                type="monotone"
+                dataKey={(d: any) => {
+                  const v = d?.G3_YOY;
+                  if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+                  return v >= 0 ? v : null;
+                }}
+                name="G3 YoY (expanding)"
+                stroke="#22c55e"
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
+              />
+              <Line
+                yAxisId="yoy"
+                type="monotone"
+                dataKey={(d: any) => {
+                  const v = d?.G3_YOY;
+                  if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+                  return v < 0 ? v : null;
+                }}
+                name="G3 YoY (contracting)"
+                stroke="#ef4444"
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </Box>
+      </Paper>
+      )}
+
       {/* BTC over Business Cycle Score shading */}
       {section === 'business' && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
@@ -892,9 +1192,10 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
             DTWEXBGS (trade‑weighted USD; the DXY proxy) with MA50/MA200 and ROC20 (20‑day % change). 
             <br />
-            DXY_SCORE=0 (headwind) when ROC20 &gt; +0.5%; DXY_SCORE=2 (supportive) when ROC20 &lt; −0.5% and MA50 &lt; MA200; otherwise DXY_SCORE=1 (neutral). 
+            Raw DXY_SCORE: 0 (headwind) when ROC20 &gt; +0.5%; 2 (supportive) when ROC20 &lt; −0.5% and MA50 &lt; MA200; otherwise 1 (neutral). 
             <br />
-            DXY_SCORE gates CORE and MACRO signals (and triggers CORE exit when combined with PRICE_REGIME=0).
+            A 20/30 persistence filter is applied: DXY_SCORE ≥ 1 must hold for ≥ 20 of the last 30 days, otherwise
+            the effective DXY_SCORE is forced to 0. This prevents brief DXY pauses from triggering premature signal entries.
           </Typography>
         </Box>
 
@@ -992,6 +1293,56 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               </LineChart>
             </ResponsiveContainer>
           </Box>
+        </Box>
+      </Paper>
+      )}
+
+      {/* DXY Persistence Regime: BTCUSD shaded by DXY_PERSIST */}
+      {section === 'system' && (
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Box sx={{ mb: 2.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            DXY Persistence Regime
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            BTCUSD shaded by the DXY persistence filter (20/30 days).
+            <br />
+            DXY_PERSIST=1 (green) means the raw DXY_SCORE has been ≥ 1 for at least 20 of the last 30 days —
+            the USD is not a headwind and signals may fire. DXY_PERSIST=0 (red) means the favorable window has not
+            been sustained, forcing the effective DXY_SCORE to 0 and blocking CORE entry.
+          </Typography>
+        </Box>
+
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="Favorable (DXY_PERSIST=1)" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="Headwind (DXY_PERSIST=0)" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
+          <Chip size="small" variant="outlined" label="BTCUSD" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
+        </Stack>
+
+        <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart key={`dxy-persist-${range}`} data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              {dxyPersistSpans.map((s, i) => (
+                <ReferenceArea
+                  key={`dxy-p-${i}-${s.x1}`}
+                  yAxisId="btc"
+                  x1={s.x1}
+                  x2={s.x2}
+                  y1={btcDomain.y1}
+                  y2={btcDomain.y2}
+                  ifOverflow="extendDomain"
+                  fill={s.value === 1 ? '#22c55e' : '#ef4444'}
+                  fillOpacity={0.32}
+                  strokeOpacity={0}
+                />
+              ))}
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis yAxisId="btc" scale="log" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
+              <Tooltip content={<CustomTooltip />} />
+              <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={2} dot={false} isAnimationActive={false} />
+            </LineChart>
+          </ResponsiveContainer>
         </Box>
       </Paper>
       )}

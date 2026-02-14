@@ -207,6 +207,7 @@ const Dashboard: React.FC<Props> = ({ current, history }) => {
                 <SnapshotRow label="Sahm Rule" value={fmtNum(current.SAHM, 2)} score={current.CYCLE_SCORE} />
                 <SnapshotRow label="Yield Curve (10Y-3M)" value={fmtNum(current.YC_M, 2)} score={current.CYCLE_SCORE} />
                 <SnapshotRow label="MVRV" value={fmtNum(current.MVRV, 2)} score={current.VAL_SCORE} />
+                <SnapshotRow label="BTC 40W MA" value={fmtUsd((current as any).BTC_MA40W)} score={current.PRICE_REGIME_ON} />
               </TableBody>
             </Table>
           </TableContainer>
@@ -271,6 +272,12 @@ function fmtPct(x: any): string {
 function fmtTrillions(x: any): string {
   if (typeof x !== 'number' || !isFinite(x)) return 'n/a';
   return `$${(x / 1e6).toFixed(2)}T`;
+}
+
+function fmtUsd(x: any): string {
+  const v = Number(x);
+  if (!Number.isFinite(v)) return 'n/a';
+  return `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
 export default Dashboard;
