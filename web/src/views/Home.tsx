@@ -269,7 +269,7 @@ const Home: React.FC = () => {
             href="https://charts.bgeometrics.com/lth_sopr.html"
             meaning="Spent Output Profit Ratio for coins held > 155 days. LTH SOPR < 1 means long-term holders are selling at a loss (capitulation)."
             usage={[
-              "Valuation amplifier: when MVRV is in fair-value range (1.0–1.8) and LTH SOPR < 1.0, VAL_SCORE is upgraded from 1 to 2 (deep value).",
+              "Valuation amplifier: when MVRV is in entry range (< 1.8) and LTH SOPR < 1.0, VAL_SCORE is upgraded to 2 (strong). Both < 1.0 gives score 3 (extreme).",
             ]}
           />
 
@@ -279,7 +279,7 @@ const Home: React.FC = () => {
             href="https://www.blockchain.com/explorer/charts/mvrv"
             meaning="Market Value to Realized Value ratio (valuation proxy)."
             usage={[
-              "Valuation scoring (VAL_SCORE): MVRV < 1.0 → 2; 1.0–1.8 → 1 (or 2 if LTH SOPR < 1); ≥ 1.8 → 0.",
+              "Valuation scoring (VAL_SCORE): MVRV < 1.0 → 3/2; 1.0–1.8 → 2/1; 1.8–3.5 → 1; ≥ 3.5 → 0 (euphoria).",
             ]}
           />
         </Box>

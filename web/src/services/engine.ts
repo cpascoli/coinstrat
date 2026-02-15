@@ -189,11 +189,17 @@ export async function computeAllSignals(): Promise<SignalData[]> {
     }
   };
 
-  // -- Valuation Score --
-  // MVRV provides the base score. LTH SOPR acts as an amplifier in the fair-value zone:
-  // if MVRV is in fair-value territory (1.0–1.8) AND long-term holders are capitulating
-  // (LTH_SOPR < 1.0), upgrade to deep value (score 2). This uses an economically
-  // grounded threshold (break-even) rather than cycle-fitted numbers, reducing overfitting risk.
+  // -- Valuation Score (4-tier: 0–3) --
+  // Combines MVRV (stock metric) with LTH SOPR (flow metric).
+  // Score 3 = extreme conviction (deep value + capitulation); enters CORE unconditionally.
+  // Score 2 = strong (deep value OR capitulation); enters CORE with price regime confirmation.
+  // Score 1 = fair/neutral; MVRV between entry zone and euphoria. Not sufficient for CORE
+  //           entry, but CORE stays ON through hysteresis during normal bull markets.
+  // Score 0 = euphoria/overheated (MVRV ≥ 3.5); triggers CORE exit when paired with DXY headwind.
+  //
+  // The overheated threshold is set at 3.5 rather than 1.8 because MVRV historically
+  // crosses 1.8 early in bull markets and stays above it for months/years. Cycle peaks
+  // have clustered around 3.5–5+ (2013: ~6, 2017: ~4.5, 2021: ~3.8).
   let lastValScore = 0;
   dailyData.forEach(d => {
     const mvrv = d.MVRV;
@@ -205,15 +211,18 @@ export async function computeAllSignals(): Promise<SignalData[]> {
 
     const sopr = d.LTH_SOPR;
     const soprOk = typeof sopr === 'number' && !isNaN(sopr);
+    const capitulating = soprOk && sopr < 1.0;
 
-    let score = 0;
-    if (mvrv < 1.0) {
-      score = 2; // deep value (MVRV alone)
-    } else if (mvrv < 1.8) {
-      // Fair value zone — check if LTH SOPR confirms capitulation
-      score = (soprOk && sopr < 1.0) ? 2 : 1;
+    let score: number;
+    if (mvrv < 1.0 && capitulating) {
+      score = 3; // extreme deep value: both MVRV and LTH SOPR confirm bottom
+    } else if (mvrv < 1.0 || (mvrv < 1.8 && capitulating)) {
+      score = 2; // strong: deep MVRV alone, or fair MVRV + capitulation
+    } else if (mvrv < 3.5) {
+      score = 1; // fair/neutral: not cheap, not euphoric — normal bull market range
+    } else {
+      score = 0; // euphoria/overheated: MVRV ≥ 3.5 — near cycle peaks
     }
-    // mvrv >= 1.8 → score stays 0 (overheated)
 
     d.VAL_SCORE = score;
     lastValScore = score;
@@ -406,10 +415,16 @@ export async function computeAllSignals(): Promise<SignalData[]> {
     const pr = d.PRICE_REGIME_ON;
 
     if (coreState === 0) {
-      const entryOk = ((val === 2) || (val === 1 && pr === 1)) && dxy >= 1;
+      // Entry: extreme conviction (VAL=3) enters unconditionally;
+      //        VAL >= 1 with uptrend confirmation enters — this allows re-entry
+      //        during bull market pullbacks (score 1 = MVRV < 3.5).
+      //        Both paths require DXY not in headwind.
+      const entryOk = ((val >= 3) || (val >= 1 && pr === 1)) && dxy >= 1;
       if (entryOk) coreState = 1;
     } else {
-      const exitOk = (dxy === 0 && pr === 0);
+      // Exit path 1: bearish regime + valuation not extreme (≤ 2)
+      // Exit path 2: overheated valuation (VAL=0) + USD strengthening (DXY=0)
+      const exitOk = (pr === 0 && val <= 2) || (val === 0 && dxy === 0);
       if (exitOk) coreState = 0;
     }
     d.CORE_ON = coreState;

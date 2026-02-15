@@ -280,7 +280,7 @@ const Documentation: React.FC = () => {
             href="https://www.blockchain.com/explorer/charts/mvrv"
             meaning="Market Value to Realized Value ratio (valuation proxy)."
             usage={[
-              "Valuation scoring (VAL_SCORE): MVRV < 1.0 → 2; 1.0–1.8 → 1; ≥ 1.8 → 0.",
+              "Valuation scoring (VAL_SCORE): MVRV < 1.0 → 3/2; 1.0–1.8 → 2/1; 1.8–3.5 → 1; ≥ 3.5 → 0 (euphoria).",
             ]}
           />
         </Box>

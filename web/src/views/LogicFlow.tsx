@@ -54,7 +54,7 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
               <Stack spacing={1.25}>
                 <LogicRule
                   title="Entry condition"
-                  formula="(VAL_SCORE=2) OR (VAL_SCORE=1 AND PRICE_REGIME=1)  —  Note: VAL=2 if MVRV<1 or (MVRV<1.8 AND LTH_SOPR<1)"
+                  formula="(VAL_SCORE ≥ 3) OR (VAL_SCORE ≥ 1 AND PRICE_REGIME = 1)  —  requires DXY_SCORE ≥ 1"
                   active={coreStatus}
                 />
                 <LogicRule
@@ -63,9 +63,15 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
                   active={current.DXY_SCORE >= 1}
                 />
                 <LogicRule
-                  title="Exit condition (with 20/30 persistence)"
-                  formula="DXY_SCORE = 0 (persistence-filtered) AND PRICE_REGIME = 0"
-                  active={current.DXY_SCORE === 0 && current.PRICE_REGIME_ON === 0}
+                  title="Exit condition 1"
+                  formula="PRICE_REGIME = 0 AND VAL_SCORE ≤ 2 (bearish trend + not extreme conviction)"
+                  active={current.PRICE_REGIME_ON === 0 && current.VAL_SCORE <= 2}
+                  tone="danger"
+                />
+                <LogicRule
+                  title="Exit condition 2"
+                  formula="VAL_SCORE = 0 AND DXY_SCORE = 0 (overheated + USD headwind)"
+                  active={current.VAL_SCORE === 0 && current.DXY_SCORE === 0}
                   tone="danger"
                 />
 

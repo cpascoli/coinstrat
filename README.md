@@ -16,7 +16,7 @@ The web dashboard fetches live data from FRED, Binance, Blockchain.info, and BGe
 
 | Factor | Source | Range | What it measures |
 |--------|--------|-------|------------------|
-| **VAL_SCORE** | MVRV (Blockchain.info) + LTH SOPR (BGeometrics) | 0 / 1 / 2 | On-chain valuation — 2 = deep value (MVRV < 1.0, or MVRV < 1.8 with LTH SOPR < 1.0 capitulation), 1 = fair (MVRV 1.0–1.8, no capitulation), 0 = overheated (MVRV ≥ 1.8) |
+| **VAL_SCORE** | MVRV (Blockchain.info) + LTH SOPR (BGeometrics) | 0 / 1 / 2 / 3 | 4-tier on-chain valuation — 3 = extreme (MVRV < 1.0 AND LTH SOPR < 1.0), 2 = strong (MVRV < 1.0 alone, or MVRV < 1.8 + capitulation), 1 = fair/neutral (MVRV < 3.5, not cheap), 0 = euphoria (MVRV ≥ 3.5, near cycle peaks) |
 | **LIQ_SCORE** | US Net Liquidity (FRED: WALCL − WTREGEN − RRPONTSYD) | 0 / 1 / 2 | Macro liquidity regime — YoY and 13-week momentum of Fed net liquidity |
 | **DXY_SCORE** | USD Index (FRED: DTWEXBGS) | 0 / 1 / 2 | Currency headwind/tailwind — 200-day rate of change of the broad trade-weighted dollar. Includes a **20/30-day persistence filter** to prevent whipsaw entries |
 | **CYCLE_SCORE** | Sahm Rule, Yield Curve, New Orders (FRED) | 0 / 1 / 2 | Business cycle positioning — recession risk vs expansion |
@@ -26,9 +26,9 @@ The web dashboard fetches live data from FRED, Binance, Blockchain.info, and BGe
 
 ```
 CORE_ON (stateful, with hysteresis)
-  Entry:  (VAL_SCORE = 2) OR (VAL_SCORE = 1 AND PRICE_REGIME = 1)
+  Entry:  (VAL_SCORE >= 3) OR (VAL_SCORE >= 1 AND PRICE_REGIME = 1)
           AND DXY_SCORE ≥ 1 (persistence-filtered)
-  Exit:   DXY_SCORE = 0 AND PRICE_REGIME = 0
+  Exit:   (PRICE_REGIME = 0 AND VAL_SCORE ≤ 2) OR (VAL_SCORE = 0 AND DXY_SCORE = 0)
 
 MACRO_ON (stateless)
   (LIQ_SCORE + CYCLE_SCORE ≥ 3) AND (DXY_SCORE ≥ 1)

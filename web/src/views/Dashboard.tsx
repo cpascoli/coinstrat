@@ -75,7 +75,7 @@ const Dashboard: React.FC<Props> = ({ current, history }) => {
       { title: 'Liquidity', value: current.LIQ_SCORE, max: 2, icon: <Activity className="text-blue-300" /> },
       { title: 'Business Cycle', value: current.CYCLE_SCORE, max: 2, icon: <TrendingUp className="text-emerald-300" /> },
       { title: 'USD', value: current.DXY_SCORE, max: 2, icon: <Activity className="text-amber-300" /> },
-      { title: 'Valuation', value: current.VAL_SCORE, max: 2, icon: <Info className="text-violet-300" /> },
+      { title: 'Valuation', value: current.VAL_SCORE, max: 3, icon: <Info className="text-violet-300" /> },
     ],
     [current]
   );
@@ -237,7 +237,7 @@ function ScoreMiniCard(props: { title: string; value: number; max: number; icon:
               / {max}
             </Typography>
           </Typography>
-          <Chip size="small" label={value === 0 ? 'RISK' : value === 1 ? 'NEUTRAL' : 'OPTIMAL'} color={color as any} variant="outlined" />
+          <Chip size="small" label={value === 0 ? 'RISK' : value === 1 ? 'NEUTRAL' : value >= 3 ? 'EXTREME' : 'OPTIMAL'} color={color as any} variant="outlined" />
         </Stack>
       </CardContent>
     </Card>

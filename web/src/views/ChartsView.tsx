@@ -20,7 +20,7 @@ type RegimeKey = 'LIQ_SCORE' | 'CYCLE_SCORE';
 type RegimeSpan = { x1: number; x2: number; value: 0 | 1 | 2 };
 type BinarySpan = { x1: number; x2: number; value: 0 | 1 };
 type SystemSpan = { x1: number; x2: number; value: 0 | 1 | 2 | 3 };
-type MvrvSpan = { x1: number; x2: number; value: 0 | 1 | 2 }; // 2=cheap(green), 1=fair(grey), 0=hot(red)
+type MvrvSpan = { x1: number; x2: number; value: 0 | 1 | 2 | 3 }; // 3=extreme(deep green), 2=strong(green), 1=fair(grey), 0=hot(red)
 
 function buildRegimeSpans(rows: Array<{ ts: number } & Record<string, any>>, key: RegimeKey): RegimeSpan[] {
   const spans: RegimeSpan[] = [];
@@ -151,15 +151,16 @@ function buildMvrvSpans(rows: Array<{ ts: number } & Record<string, any>>): Mvrv
   const spans: MvrvSpan[] = [];
   if (!rows.length) return spans;
 
-  const classify = (row: any): 0 | 1 | 2 | null => {
-    const m = Number(row.MVRV);
-    if (!Number.isFinite(m)) return null;
-    if (m < 1.0) return 2;
-    if (m < 1.8) return 1;
+  const classify = (row: any): 0 | 1 | 2 | 3 | null => {
+    const v = Number(row.VAL_SCORE);
+    if (!Number.isFinite(v)) return null;
+    if (v >= 3) return 3;
+    if (v >= 2) return 2;
+    if (v >= 1) return 1;
     return 0;
   };
 
-  let current: 0 | 1 | 2 | null = null;
+  let current: 0 | 1 | 2 | 3 | null = null;
   let startTs: number | null = null;
 
   for (let i = 0; i < rows.length; i++) {
@@ -213,9 +214,11 @@ function systemColor(v: 0 | 1 | 2 | 3) {
   }
 }
 
-function mvrvColor(v: 0 | 1 | 2) {
-  // 2=cheap(green), 1=fair(grey), 0=hot(red)
+function mvrvColor(v: 0 | 1 | 2 | 3) {
+  // 3=extreme deep value (bright green), 2=strong (green), 1=fair (grey), 0=hot (red)
   switch (v) {
+    case 3:
+      return { fill: '#15803d', alpha: 0.40 }; // deep green, higher opacity for extreme conviction
     case 2:
       return { fill: '#22c55e', alpha: 0.28 };
     case 0:
@@ -722,18 +725,20 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             BTC Valuation (VAL_SCORE)
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            BTCUSD shaded by MVRV valuation bands and plotted with the MVRV ratio (right axis). 
+            BTCUSD shaded by the 4-tier VAL_SCORE and plotted with the MVRV ratio (right axis). 
             <br />
-            VAL_SCORE is bucketed from MVRV: 2 when MVRV is below 1.0 (cheap), 1 when MVRV is 1.0–1.8 (fair), 0 when MVRV is ≥ 1.8 (hot). 
+            Score 3 = extreme (MVRV &lt; 1 + LTH SOPR &lt; 1); Score 2 = strong (deep value or capitulation);
+            Score 1 = fair/neutral (MVRV 1.8–3.5); Score 0 = euphoria (MVRV ≥ 3.5).
             <br />
-            VAL_SCORE feeds CORE_ON entry rules.
+            VAL_SCORE feeds CORE_ON entry/exit rules.
           </Typography>
         </Box>
 
         <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
-          <Chip size="small" variant="outlined" label="Cheap (MVRV < 1.0)" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
-          <Chip size="small" variant="outlined" label="Fair (1.0–1.8)" sx={{ borderColor: '#94a3b8', color: '#cbd5e1' }} />
-          <Chip size="small" variant="outlined" label="Hot (MVRV ≥ 1.8)" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
+          <Chip size="small" variant="outlined" label="Score 3 — Extreme" sx={{ borderColor: '#15803d', color: '#86efac' }} />
+          <Chip size="small" variant="outlined" label="Score 2 — Strong" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="Score 1 — Fair" sx={{ borderColor: '#94a3b8', color: '#cbd5e1' }} />
+          <Chip size="small" variant="outlined" label="Score 0 — Euphoria" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
           <Chip size="small" variant="outlined" label="BTCUSD" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
           <Chip size="small" variant="outlined" label="MVRV" sx={{ borderColor: '#fbbf24', color: '#fde68a' }} />
         </Stack>

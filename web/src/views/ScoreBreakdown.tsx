@@ -67,29 +67,33 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
             icon={<Landmark className="h-6 w-6 text-violet-300" />}
             title="BTC Valuation (VAL_SCORE)"
             score={valScore}
-            description="Bitcoin valuation using MVRV, amplified by LTH SOPR in the fair-value zone."
-            formula="MVRV thresholds + LTH SOPR capitulation upgrade"
+            description="4-tier valuation combining MVRV (stock metric) with LTH SOPR (flow metric). Score 3 = extreme bottom conviction."
+            formula="MVRV + LTH SOPR capitulation thresholds"
           >
             <Grid container spacing={1.25}>
               <Grid item xs={12}>
-                <RuleRow ok={typeof mvrv === 'number' && mvrv < 1.0} label="MVRV < 1.0" result="Score 2 (Deep Value)" />
-              </Grid>
-              <Grid item xs={12}>
                 <RuleRow
-                  ok={typeof mvrv === 'number' && mvrv >= 1.0 && mvrv < 1.8 && typeof lthSopr === 'number' && lthSopr < 1.0}
-                  label="1.0 ≤ MVRV < 1.8 AND LTH SOPR < 1.0"
-                  result="Score 2 (Fair Value + Capitulation → Deep Value)"
+                  ok={typeof mvrv === 'number' && mvrv < 1.0 && typeof lthSopr === 'number' && lthSopr < 1.0}
+                  label="MVRV < 1.0 AND LTH SOPR < 1.0"
+                  result="Score 3 (Extreme Deep Value — unconditional CORE entry)"
                 />
               </Grid>
               <Grid item xs={12}>
                 <RuleRow
-                  ok={typeof mvrv === 'number' && mvrv >= 1.0 && mvrv < 1.8 && (typeof lthSopr !== 'number' || lthSopr >= 1.0)}
-                  label="1.0 ≤ MVRV < 1.8 AND LTH SOPR ≥ 1.0"
-                  result="Score 1 (Fair Value)"
+                  ok={valScore === 2}
+                  label="(MVRV < 1.0 AND SOPR ≥ 1) OR (MVRV < 1.8 AND SOPR < 1)"
+                  result="Score 2 (Strong — CORE entry with PRICE_REGIME)"
                 />
               </Grid>
               <Grid item xs={12}>
-                <RuleRow ok={typeof mvrv === 'number' && mvrv >= 1.8} label="MVRV ≥ 1.8" result="Score 0 (Overheated)" tone="danger" />
+                <RuleRow
+                  ok={valScore === 1}
+                  label="MVRV < 3.5 (and not score 2 or 3)"
+                  result="Score 1 (Fair / Neutral — CORE entry with PRICE_REGIME)"
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <RuleRow ok={typeof mvrv === 'number' && mvrv >= 3.5} label="MVRV ≥ 3.5" result="Score 0 (Euphoria — triggers CORE exit)" tone="danger" />
               </Grid>
             </Grid>
 
@@ -106,7 +110,53 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
           </FactorCard>
         </Grid>
 
-        {/* Liquidity (2nd) */}
+        {/* BTC Regime (2nd) */}
+        <Grid item xs={12} md={6}>
+          <FactorCard
+            icon={<Landmark className="h-6 w-6 text-amber-300" />}
+            title="BTC Regime (PRICE_REGIME)"
+            score={typeof priceRegime === 'number' ? priceRegime : current.PRICE_REGIME_ON}
+            description="Trend filter based on BTCUSD vs the 40-week moving average."
+            formula="PRICE_REGIME = 1 if BTCUSD ≥ BTC_MA40W, else 0"
+          >
+            <Grid container spacing={1.25}>
+              <Grid item xs={12}>
+                <RuleRow
+                  ok={typeof current.BTCUSD === 'number' && typeof btcMa40w === 'number' && current.BTCUSD >= btcMa40w}
+                  label="BTCUSD ≥ BTC_MA40W"
+                  result="PRICE_REGIME = 1 (Bullish)"
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <RuleRow
+                  ok={typeof current.BTCUSD === 'number' && typeof btcMa40w === 'number' && current.BTCUSD < btcMa40w}
+                  label="BTCUSD < BTC_MA40W"
+                  result="PRICE_REGIME = 0 (Bearish)"
+                  tone="danger"
+                />
+              </Grid>
+            </Grid>
+
+            <Divider sx={{ my: 2 }} />
+
+            <Grid container spacing={1.25}>
+              <Grid item xs={6}>
+                <MetricRow label="BTCUSD" value={fmtUsd(current.BTCUSD)} />
+              </Grid>
+              <Grid item xs={6}>
+                <MetricRow label="BTC_MA40W" value={fmtUsd(btcMa40w)} />
+              </Grid>
+              <Grid item xs={6}>
+                <MetricRow label="PRICE_REGIME" value={fmtInt(priceRegime)} />
+              </Grid>
+              <Grid item xs={6}>
+                <MetricRow label="PRICE_REGIME (20/30)" value={fmtInt(current.PRICE_REGIME_ON)} />
+              </Grid>
+            </Grid>
+          </FactorCard>
+        </Grid>
+
+        {/* US Liquidity (3rd) */}
         <Grid item xs={12} md={6}>
           <FactorCard
             icon={<Wind className="h-6 w-6 text-blue-300" />}
@@ -158,7 +208,7 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
           </FactorCard>
         </Grid>
 
-        {/* Business Cycle (3rd) */}
+        {/* Business Cycle (4th) */}
         <Grid item xs={12} md={6}>
           <FactorCard
             icon={<Landmark className="h-6 w-6 text-emerald-300" />}
@@ -216,52 +266,6 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
               </Grid>
               <Grid item xs={12}>
                 <MetricRow label="NO_MOM3 (approx)" value={fmtNum(noMom3, 2)} />
-              </Grid>
-            </Grid>
-          </FactorCard>
-        </Grid>
-
-        {/* BTC Regime (4th) */}
-        <Grid item xs={12} md={6}>
-          <FactorCard
-            icon={<Landmark className="h-6 w-6 text-amber-300" />}
-            title="BTC Regime (PRICE_REGIME)"
-            score={typeof priceRegime === 'number' ? priceRegime : current.PRICE_REGIME_ON}
-            description="Trend filter based on BTCUSD vs the 40-week moving average."
-            formula="PRICE_REGIME = 1 if BTCUSD ≥ BTC_MA40W, else 0"
-          >
-            <Grid container spacing={1.25}>
-              <Grid item xs={12}>
-                <RuleRow
-                  ok={typeof current.BTCUSD === 'number' && typeof btcMa40w === 'number' && current.BTCUSD >= btcMa40w}
-                  label="BTCUSD ≥ BTC_MA40W"
-                  result="PRICE_REGIME = 1 (Bullish)"
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <RuleRow
-                  ok={typeof current.BTCUSD === 'number' && typeof btcMa40w === 'number' && current.BTCUSD < btcMa40w}
-                  label="BTCUSD < BTC_MA40W"
-                  result="PRICE_REGIME = 0 (Bearish)"
-                  tone="danger"
-                />
-              </Grid>
-            </Grid>
-
-            <Divider sx={{ my: 2 }} />
-
-            <Grid container spacing={1.25}>
-              <Grid item xs={6}>
-                <MetricRow label="BTCUSD" value={fmtUsd(current.BTCUSD)} />
-              </Grid>
-              <Grid item xs={6}>
-                <MetricRow label="BTC_MA40W" value={fmtUsd(btcMa40w)} />
-              </Grid>
-              <Grid item xs={6}>
-                <MetricRow label="PRICE_REGIME" value={fmtInt(priceRegime)} />
-              </Grid>
-              <Grid item xs={6}>
-                <MetricRow label="PRICE_REGIME (20/30)" value={fmtInt(current.PRICE_REGIME_ON)} />
               </Grid>
             </Grid>
           </FactorCard>
