@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { LayoutDashboard, BarChart3, Binary, Info, Activity, FlaskConical } from 'lucide-react';
+import { LayoutDashboard, BarChart3, Binary, Info, Activity, FlaskConical, Github } from 'lucide-react';
 import Dashboard from './views/Dashboard';
 import ScoreBreakdown from './views/ScoreBreakdown';
 import LogicFlow from './views/LogicFlow';
@@ -235,11 +235,30 @@ const App: React.FC = () => {
             borderTop: '1px solid',
             borderColor: 'divider',
             textAlign: 'center',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 1.5,
           }}
         >
           <Typography variant="caption" color="text.secondary">
             © {new Date().getFullYear()} Coin Strat. All rights reserved.
           </Typography>
+          <Box
+            component="a"
+            href="https://github.com/cpascoli/coinstrat"
+            target="_blank"
+            rel="noopener noreferrer"
+            sx={{
+              color: 'text.secondary',
+              display: 'inline-flex',
+              '&:hover': { color: 'text.primary' },
+              transition: 'color 0.2s',
+            }}
+            aria-label="GitHub repository"
+          >
+            <Github size={16} />
+          </Box>
         </Box>
       </Container>
 
