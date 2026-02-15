@@ -53,28 +53,27 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
             <CardContent>
               <Stack spacing={1.25}>
                 <LogicRule
-                  title="Entry condition"
-                  formula="(VAL_SCORE ≥ 3) OR (VAL_SCORE ≥ 1 AND PRICE_REGIME = 1)  —  requires DXY_SCORE ≥ 1"
+                  title="Entry condition - extreme value or uptrend, and supportive USD"
+                  formula="(VAL_SCORE ≥ 3) OR (VAL_SCORE ≥ 1 AND PRICE_REGIME = 1)"
                   active={coreStatus}
+                />
+                <LogicRule
+                  title="Exit condition 1 - bearish trend and not extreme value"
+                  formula="PRICE_REGIME = 0 AND VAL_SCORE ≤ 2"
+                  active={current.PRICE_REGIME_ON === 0 && current.VAL_SCORE <= 2}
+                  tone="danger"
+                />
+                <LogicRule
+                  title="Exit condition 2 - overheated and USD headwind"
+                  formula="VAL_SCORE = 0 AND DXY_SCORE = 0"
+                  active={current.VAL_SCORE === 0 && current.DXY_SCORE === 0}
+                  tone="danger"
                 />
                 <LogicRule
                   title="Risk filter (with 20/30 persistence)"
                   formula="DXY_SCORE ≥ 1 (requires DXY favorable ≥ 20/30 days)"
                   active={current.DXY_SCORE >= 1}
                 />
-                <LogicRule
-                  title="Exit condition 1"
-                  formula="PRICE_REGIME = 0 AND VAL_SCORE ≤ 2 (bearish trend + not extreme conviction)"
-                  active={current.PRICE_REGIME_ON === 0 && current.VAL_SCORE <= 2}
-                  tone="danger"
-                />
-                <LogicRule
-                  title="Exit condition 2"
-                  formula="VAL_SCORE = 0 AND DXY_SCORE = 0 (overheated + USD headwind)"
-                  active={current.VAL_SCORE === 0 && current.DXY_SCORE === 0}
-                  tone="danger"
-                />
-
                 <Divider sx={{ my: 1 }} />
 
                 <Grid container spacing={1.25}>

@@ -131,12 +131,15 @@ interface SimState {
 
 /**
  * Decision returned by the strategy logic each DCA period.
- * - buyBtcUsd:  how much USD to spend buying BTC (from cash reserves)
- * - sellBtcUsd: how much USD worth of BTC to sell (proceeds go to cash)
- * - sellAll:    sell entire BTC position (proceeds go to cash)
+ * - extraDeposit: additional USD to inject beyond the regular DCA deposit
+ *                 (used by MACRO 3x to fund accelerated buys)
+ * - buyBtcUsd:    how much USD to spend buying BTC (from cash reserves)
+ * - sellBtcUsd:   how much USD worth of BTC to sell (proceeds go to cash)
+ * - sellAll:      sell entire BTC position (proceeds go to cash)
  * - deployReserves: deploy full cash balance into BTC (lump-sum re-entry)
  */
 interface TradeDecision {
+  extraDeposit: number;
   buyBtcUsd: number;
   sellBtcUsd: number;
   sellAll: boolean;
@@ -171,12 +174,18 @@ function runStrategy(
     if (!Number.isFinite(price) || price <= 0) continue;
 
     if (actionDates.has(d.Date)) {
-      // 1. Deposit DCA amount as cash (equal funding for all strategies)
+      // 1. Deposit DCA amount as cash (base funding, equal across strategies)
       state.cashBalance += config.dcaAmount;
       state.totalDeposited += config.dcaAmount;
 
       // 2. Get the strategy's decision
       const decision = decisionLogic(d, state);
+
+      // 2b. Inject extra capital if the strategy requests it (e.g. MACRO 3x funding)
+      if (decision.extraDeposit > 0) {
+        state.cashBalance += decision.extraDeposit;
+        state.totalDeposited += decision.extraDeposit;
+      }
 
       // 3. Execute sells first (to free up cash)
       if (decision.sellAll) {
@@ -277,6 +286,7 @@ export function runBacktest(
     filtered,
     config,
     (_d, _state) => ({
+      extraDeposit: 0,
       buyBtcUsd: config.dcaAmount,
       sellBtcUsd: 0,
       sellAll: false,
@@ -296,6 +306,7 @@ export function runBacktest(
 
       if (coreOn) {
         return {
+          extraDeposit: 0,
           buyBtcUsd: config.dcaAmount,
           sellBtcUsd: 0,
           sellAll: false,
@@ -307,23 +318,23 @@ export function runBacktest(
       // CORE is OFF — behaviour depends on offSignalMode
       switch (config.offSignalMode) {
         case 'pause':
-          // Cash sits as dry powder (already deposited above)
-          return { buyBtcUsd: 0, sellBtcUsd: 0, sellAll: false, deployReserves: false };
+          return { extraDeposit: 0, buyBtcUsd: 0, sellBtcUsd: 0, sellAll: false, deployReserves: false };
         case 'sell_matching':
-          // Sell DCA-amount worth of BTC (proceeds become more dry powder)
-          return { buyBtcUsd: 0, sellBtcUsd: config.dcaAmount, sellAll: false, deployReserves: false };
+          return { extraDeposit: 0, buyBtcUsd: 0, sellBtcUsd: config.dcaAmount, sellAll: false, deployReserves: false };
         case 'sell_all':
-          // Sell entire BTC position (maximum dry powder)
-          return { buyBtcUsd: 0, sellBtcUsd: 0, sellAll: true, deployReserves: false };
+          return { extraDeposit: 0, buyBtcUsd: 0, sellBtcUsd: 0, sellAll: true, deployReserves: false };
         default:
-          return { buyBtcUsd: 0, sellBtcUsd: 0, sellAll: false, deployReserves: false };
+          return { extraDeposit: 0, buyBtcUsd: 0, sellBtcUsd: 0, sellAll: false, deployReserves: false };
       }
     },
   );
 
   const results = [baseline, coinstrat];
 
-  // 5. Optionally run CoinStrat + MACRO 3x
+  // 5. Optionally run CORE DCA + MACRO 3x
+  //    When MACRO is ON, inject extra capital (2x DCA) to fund the 3x buy.
+  //    This means Total Invested will be higher for this strategy, but
+  //    Total Return % is still a valid comparison metric.
   if (config.macroAccel) {
     const accelerated = runStrategy(
       'CORE DCA + MACRO 3x',
@@ -336,10 +347,12 @@ export function runBacktest(
         const coreJustFlipped = coreOn && !state.prevCoreOn;
 
         if (coreOn) {
-          // MACRO multiplier: spend 3x DCA if MACRO is also ON (capped by cash)
-          const multiplier = macroOn ? config.accelMultiplier : 1;
+          // When MACRO is ON, inject extra capital to fund 3x buy.
+          // Regular deposit covers 1x; extra deposit covers the remaining 2x.
+          const extra = macroOn ? config.dcaAmount * (config.accelMultiplier - 1) : 0;
           return {
-            buyBtcUsd: config.dcaAmount * multiplier,
+            extraDeposit: extra,
+            buyBtcUsd: config.dcaAmount * (macroOn ? config.accelMultiplier : 1),
             sellBtcUsd: 0,
             sellAll: false,
             deployReserves: coreJustFlipped,
@@ -349,13 +362,13 @@ export function runBacktest(
         // CORE is OFF
         switch (config.offSignalMode) {
           case 'pause':
-            return { buyBtcUsd: 0, sellBtcUsd: 0, sellAll: false, deployReserves: false };
+            return { extraDeposit: 0, buyBtcUsd: 0, sellBtcUsd: 0, sellAll: false, deployReserves: false };
           case 'sell_matching':
-            return { buyBtcUsd: 0, sellBtcUsd: config.dcaAmount, sellAll: false, deployReserves: false };
+            return { extraDeposit: 0, buyBtcUsd: 0, sellBtcUsd: config.dcaAmount, sellAll: false, deployReserves: false };
           case 'sell_all':
-            return { buyBtcUsd: 0, sellBtcUsd: 0, sellAll: true, deployReserves: false };
+            return { extraDeposit: 0, buyBtcUsd: 0, sellBtcUsd: 0, sellAll: true, deployReserves: false };
           default:
-            return { buyBtcUsd: 0, sellBtcUsd: 0, sellAll: false, deployReserves: false };
+            return { extraDeposit: 0, buyBtcUsd: 0, sellBtcUsd: 0, sellAll: false, deployReserves: false };
         }
       },
     );
