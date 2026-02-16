@@ -5,13 +5,13 @@
 Four phases, each building on the last. Each phase delivers a shippable product that generates revenue independently, while also feeding into the larger vision.
 
 ```
-Phase 1          Phase 2          Phase 3              Phase 4
-CoinStrat Pro    Telegram Bot     AI Agent              On-Chain Oracle
-+ Signal API     (StackPilot)     Integration           + Power Wallet
-                                  (OpenClaw)            "Macro" Strategy
-Weeks 1–4        Weeks 4–8        Weeks 8–14            Months 4–7
-─────────────────────────────────────────────────────────────────────►
-                     Revenue starts here ───►
+Phase 1             Phase 2            Phase 3                Phase 4
+CoinStrat Pro       OpenClaw Skill     AI Agent + Dogfooding  On-Chain Oracle
++ Signal API        (multi-channel     Wallet                 + Power Wallet
+                     distribution)                            "Macro" Strategy
+Weeks 1–4           Weeks 4–8          Weeks 8–14             Months 4–7
+──────────────────────────────────────────────────────────────────────────►
+                        Revenue starts here ───►
 ```
 
 ---
@@ -23,7 +23,7 @@ Weeks 1–4        Weeks 4–8        Weeks 8–14            Months 4–7
 
 ### 1.1 Signal API (the foundation)
 
-Everything — the web dashboard, the Telegram bot, the AI agents — consumes the same API. Build this first.
+Everything — the web dashboard, the OpenClaw skill, the AI agents — consumes the same API. Build this first.
 
 #### Endpoints
 
@@ -35,6 +35,7 @@ Everything — the web dashboard, the Telegram bot, the AI agents — consumes t
 | `WS` | `/api/v1/signals/stream` | API key (paid) | WebSocket stream, pushes updates when signals change |
 | `POST` | `/api/v1/webhooks` | API key (paid) | Register a webhook URL to receive signal-flip events |
 | `GET` | `/api/v1/backtest` | API key (Pro+) | Run a backtest with custom parameters, return results as JSON |
+| `GET` | `/api/v1/agent/status` | Public | Agent wallet status: BTC held, USDC balance, total deposited, performance vs. blind DCA |
 
 #### Architecture Options
 
@@ -52,7 +53,7 @@ Everything — the web dashboard, the Telegram bot, the AI agents — consumes t
 ### 1.2 Authentication & User Accounts
 
 - **Provider:** Supabase Auth (or Clerk) — supports email/password, Google, GitHub
-- **User model:** email, subscription tier, API key, created_at
+- **User model:** email, subscription tier, API key, created_at, openclaw_linked (boolean)
 - **Session management:** JWT tokens, stored in httpOnly cookies for the web app
 
 ### 1.3 Payment Integration
@@ -83,8 +84,9 @@ Enhance the existing CoinStrat web app with gated features:
 | Score breakdown | Summary | Detailed | Detailed |
 | Logic flow visualisation | Yes | Yes | Yes |
 | Backtest simulator | 1 year | Full range | Full range + custom strategies |
-| Real-time alerts | — | Email + push | Email + push + webhook |
+| Real-time alerts | — | All channels (via OpenClaw or email) | All channels + webhook |
 | API access | 100 calls/day | 1K calls/day | 10K calls/day |
+| Agent wallet dashboard | Summary | Detailed | Detailed + tx history |
 | Custom strategy builder | — | — | Yes |
 
 #### Implementation Notes
@@ -95,7 +97,7 @@ Enhance the existing CoinStrat web app with gated features:
 
 ### 1.5 Weekly Email Digest (Free Tier — Growth Engine)
 
-- **Content:** Current signal status, key metrics snapshot, 1-paragraph market context, CTA to upgrade
+- **Content:** Current signal status, key metrics snapshot, agent wallet update, 1-paragraph market context, CTA to upgrade
 - **Provider:** Resend, Postmark, or Loops (lightweight transactional + marketing email)
 - **Frequency:** Every Monday morning
 - **Sign-up:** Email capture on the landing page (no account required)
@@ -104,121 +106,153 @@ Enhance the existing CoinStrat web app with gated features:
 ### Deliverables Checklist — Phase 1
 
 - [ ] Signal API: `/current`, `/history`, `/scores` endpoints
+- [ ] Agent status endpoint: `/agent/status`
 - [ ] API key generation and rate limiting
 - [ ] Supabase Auth integration (email + Google sign-in)
 - [ ] Stripe Checkout integration (Pro + Pro+ tiers)
 - [ ] USDC payment flow (manual or semi-automated)
 - [ ] Feature gating in web dashboard (free vs. Pro vs. Pro+)
 - [ ] Weekly email digest system
-- [ ] Landing page updates (pricing section, sign-up CTA)
+- [ ] Landing page updates (pricing section, sign-up CTA, agent wallet teaser)
 - [ ] API documentation page (public)
 
 ---
 
-## Phase 2: Telegram Bot (StackPilot / CoinStrat Bot)
+## Phase 2: OpenClaw Skill (Multi-Channel Distribution)
 
 **Timeline:** Weeks 4–8
-**Goal:** Distribution + community hub. Meet users where they already are.
+**Goal:** Distribution across every messaging channel OpenClaw supports, via a single skill. Tap into OpenClaw's 197K+ GitHub stars community.
 
-### 2.1 Bot Framework
+### Why OpenClaw Instead of a Standalone Bot
 
-- **Library:** grammY (TypeScript, Deno-compatible) or Telegraf (Node.js)
-- **Hosting:** Deno Deploy, Cloudflare Workers, or Fly.io (webhook mode, not polling)
-- **Data source:** Consumes the CoinStrat Signal API (same as web dashboard)
+Building a standalone Telegram bot limits distribution to one channel. OpenClaw provides:
 
-### 2.2 Bot Commands
+- **Instant multi-channel reach** — WhatsApp, Telegram, Discord, Slack, Signal, iMessage, Google Chat, Microsoft Teams — all through a single skill
+- **ClawHub distribution** — publishing to OpenClaw's skill marketplace puts CoinStrat in front of 197K+ developers
+- **Persistent memory** — OpenClaw remembers user preferences, DCA history, and portfolio context across sessions
+- **No infrastructure to manage** — the skill runs inside the user's own OpenClaw instance; we only need to serve the API
 
-| Command | Free | Pro | Description |
-|---------|------|-----|-------------|
-| `/signal` | Yes | Yes | Current signal: "CORE: ON, MACRO: OFF → BUY (base DCA)" with colour-coded emoji |
-| `/scores` | Yes | Yes | Current scores: VAL 2, LIQ 1, DXY 2, CYCLE 1 |
-| `/why` | — | Yes | Plain-language explanation of current signal state, powered by LLM (GPT-4o or Claude) interpreting the raw scores |
-| `/alert on` | — | Yes | Enable real-time push when CORE or MACRO flips |
-| `/alert off` | — | Yes | Disable alerts |
-| `/backtest 3y` | — | Yes | Quick backtest summary (total return, max drawdown) for a given period |
-| `/portfolio` | — | Yes | Track DCA buys, show performance vs. blind DCA (user logs buys manually or via exchange API) |
-| `/subscribe` | Yes | — | Link to CoinStrat Pro checkout (Stripe or USDC) |
-| `/help` | Yes | Yes | Command reference |
+### 2.1 CoinStrat OpenClaw Skill
 
-### 2.3 Daily Pulse (Scheduled Message)
+The skill is a `SKILL.md` file (with optional supporting scripts) that teaches an OpenClaw instance how to interact with the CoinStrat API.
 
-- Runs daily at a configurable time (e.g. 08:00 UTC)
-- Posts to a public Telegram channel (e.g. @coinstrat_signals)
-- Format:
+#### Skill Capabilities
+
+| Capability | Free | Pro | Description |
+|------------|------|-----|-------------|
+| Check current signal | Yes | Yes | "What's the CoinStrat signal today?" → CORE ON/OFF, scores, recommendation |
+| Score breakdown | Yes | Yes | "Break down the current scores" → VAL, LIQ, DXY, CYCLE with values and thresholds |
+| Signal alerts | — | Yes | Proactive notification when CORE or MACRO flips (via OpenClaw's cron/heartbeat) |
+| Explain reasoning | — | Yes | "Why is CORE off?" → LLM-powered plain-English explanation using signal data |
+| Quick backtest | — | Yes | "How would CoinStrat have performed over 3 years?" → summary stats |
+| Agent wallet status | Yes | Yes | "How is the CoinStrat agent wallet doing?" → live performance data |
+| Portfolio tracking | — | Yes | "I bought $200 of BTC today" → track buys, compare vs. blind DCA |
+| Power Wallet integration | — | Yes | "Set up my Power Wallet with CoinStrat signals" → guide through wallet creation |
+
+#### Skill Architecture
 
 ```
-📊 CoinStrat Daily Pulse — 2026-02-15
+User's OpenClaw instance
+    │
+    │  "What's the CoinStrat signal?"
+    │
+    ▼
+┌──────────────────────────────────┐
+│  CoinStrat OpenClaw Skill        │
+│  (SKILL.md + helper scripts)     │
+│                                   │
+│  1. Reads user's API key from    │
+│     OpenClaw memory/config       │
+│  2. Calls CoinStrat Signal API   │
+│  3. Formats response for user    │
+│  4. Optionally uses LLM for      │
+│     plain-English explanation    │
+└──────────────┬───────────────────┘
+               │
+               ▼
+    CoinStrat Signal API
+    (Phase 1 infrastructure)
+```
+
+### 2.2 Daily Signal Check (via OpenClaw Cron)
+
+OpenClaw supports cron jobs / heartbeats. The skill registers a daily check:
+
+- Runs daily (e.g., 08:00 UTC)
+- Fetches `/api/v1/signals/current`
+- If signal state changed since yesterday → proactively message the user
+- Format (delivered via whatever channel the user prefers):
+
+```
+📊 CoinStrat Daily — Feb 15, 2026
 
 Signal: 🟢 BUY (CORE ON)
 Intensity: ⚡ ACCELERATED (MACRO ON, 3× DCA)
 
 Scores: VAL 2 | LIQ 2 | DXY 1 | CYCLE 2
-BTC: $98,420 | MVRV: 1.42 | DXY: ▼ falling
+BTC: $98,420 | MVRV: 1.42
+
+Agent wallet: 0.847 BTC ($83,362) — +142% vs. blind DCA
 
 "Macro liquidity expanding, on-chain valuation fair.
 Conditions favour continued accumulation."
-
-🔔 Want real-time alerts? /subscribe
 ```
 
-### 2.4 LLM Integration for `/why` Command
+### 2.3 User Account Linking
 
-- Send current scores + recent changes to an LLM (Claude or GPT-4o)
-- System prompt: "You are CoinStrat's macro analyst. Explain the current signal state in 2-3 sentences, using the score data provided. Be concise, data-driven, and avoid hype."
-- Cache responses for 1 hour to control API costs
+- User provides their CoinStrat API key to their OpenClaw instance (stored in OpenClaw's local config/memory — never sent to us)
+- OpenClaw authenticates against CoinStrat API with the key
+- Pro features unlocked based on API key tier
+- Alternatively: OAuth flow (OpenClaw supports browser actions) for seamless linking
 
-### 2.5 User Linking
+### 2.4 ClawHub Publication
 
-- Telegram users link their CoinStrat Pro account via a one-time token
-- Pro features unlocked in the bot based on subscription status
-- Same Supabase user record, different interface
+- Package the skill for ClawHub (OpenClaw's skill marketplace)
+- Include clear README: what it does, API key setup, example conversations
+- Maintain versioned releases aligned with API changes
 
 ### Deliverables Checklist — Phase 2
 
-- [ ] Bot scaffold with grammY/Telegraf, webhook mode
-- [ ] Core commands: `/signal`, `/scores`, `/help`, `/subscribe`
-- [ ] Pro commands: `/why`, `/alert`, `/backtest`, `/portfolio`
-- [ ] Daily pulse scheduled post to public channel
-- [ ] LLM integration for `/why` (with caching)
-- [ ] User account linking (Telegram ↔ CoinStrat Pro)
-- [ ] Telegram group set up as community hub
-- [ ] Bot deployed to production
+- [ ] CoinStrat OpenClaw skill (SKILL.md + helper scripts)
+- [ ] Free capabilities: signal check, scores, agent wallet status
+- [ ] Pro capabilities: alerts, reasoning, backtest, portfolio tracking
+- [ ] Daily cron job for proactive signal updates
+- [ ] User account linking (API key in OpenClaw config)
+- [ ] Publish to ClawHub with documentation
+- [ ] Telegram group set up as community hub (complementing OpenClaw distribution)
+- [ ] Skill tested across WhatsApp, Telegram, Discord
 
 ---
 
-## Phase 3: AI Agent Integration
+## Phase 3: AI Agent + Dogfooding Wallet
 
 **Timeline:** Weeks 8–14
-**Goal:** Connect CoinStrat intelligence to autonomous on-chain execution. Ride the AI agent narrative.
+**Goal:** Launch the CoinStrat AI agent with a revenue-funded wallet. Connect CoinStrat intelligence to autonomous on-chain execution. Prove the product with skin in the game.
 
-### 3.1 CoinStrat AI Agent (OpenClaw or similar framework)
+### 3.1 CoinStrat AI Agent
 
-Build an autonomous agent that:
-
-1. **Reads** CoinStrat signals via the API (consumer of Phase 1)
-2. **Decides** whether to buy, pause, or accelerate based on CORE/MACRO state
-3. **Executes** on-chain via Power Wallet contracts on Base
-4. **Reports** daily performance updates to Twitter and Telegram
+An autonomous OpenClaw-based agent that reads CoinStrat signals and executes DCA via Power Wallet, funded by a portion of subscription revenue.
 
 #### Agent Architecture
 
 ```
-┌─────────────────────────────────────────────┐
-│              CoinStrat AI Agent              │
-│                                              │
-│  ┌──────────┐   ┌──────────┐   ┌─────────┐ │
-│  │ Signal    │   │ Decision │   │ Execute │ │
-│  │ Reader    │──►│ Engine   │──►│ Module  │ │
-│  │ (API)     │   │ (rules + │   │ (Power  │ │
-│  │           │   │  LLM)    │   │ Wallet) │ │
-│  └──────────┘   └──────────┘   └─────────┘ │
-│                                     │        │
-│                              ┌──────▼──────┐ │
-│                              │  Reporter   │ │
-│                              │ (Twitter +  │ │
-│                              │  Telegram)  │ │
-│                              └─────────────┘ │
-└─────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────┐
+│                 CoinStrat AI Agent                      │
+│                 (OpenClaw instance)                     │
+│                                                         │
+│  ┌──────────┐   ┌──────────┐   ┌──────────────────┐   │
+│  │ Signal    │   │ Decision │   │ Execute           │   │
+│  │ Reader    │──►│ Engine   │──►│ (Power Wallet     │   │
+│  │ (API)     │   │ (rules)  │   │  on Base)         │   │
+│  └──────────┘   └──────────┘   └──────────────────┘   │
+│                                         │               │
+│                          ┌──────────────▼────────────┐ │
+│                          │  Reporter                  │ │
+│                          │  ├── Twitter (@CoinStrat)  │ │
+│                          │  ├── Telegram channel      │ │
+│                          │  └── Transparency dashboard│ │
+│                          └───────────────────────────┘ │
+└───────────────────────────────────────────────────────┘
 ```
 
 #### Decision Logic
@@ -232,38 +266,85 @@ Every day at 09:00 UTC:
      b. Else → execute 1× DCA via Power Wallet
   4. If CORE_ON == false:
      a. Pause DCA (hold USDC in wallet)
-  5. Post daily update to Twitter + Telegram with:
+  5. Post daily update with:
      - Signal state and reasoning
      - Today's action (bought / paused / accelerated)
      - Portfolio value, BTC held, performance vs. blind DCA
      - On-chain tx hash as proof
 ```
 
-### 3.2 Developer Documentation
+### 3.2 Revenue Funding Pipeline
+
+```
+Monthly subscription revenue
+    │
+    ├── 50–70% → Operating account (infra, APIs, development)
+    │
+    └── 30–50% → USDC transfer to agent wallet on Base
+                    │
+                    ├── Logged on transparency dashboard
+                    │   (amount, date, source: "revenue deposit")
+                    │
+                    └── Agent deploys according to CoinStrat signals
+```
+
+#### Implementation
+
+- At each revenue milestone (weekly or monthly), transfer the dogfooding allocation to the agent's Base wallet as USDC
+- The agent's Power Wallet executes DCA according to signals
+- All deposits and trades are logged both on-chain and on the transparency dashboard
+
+### 3.3 Transparency Dashboard
+
+A public page on the CoinStrat Pro website showing the agent's complete history.
+
+#### Dashboard Components
+
+| Component | Description |
+|-----------|-------------|
+| **Wallet address** | Clickable link to Basescan — anyone can independently verify |
+| **Total deposited** | Cumulative USDC deposited from revenue (with dates) |
+| **Current holdings** | BTC held + USDC balance + total portfolio value |
+| **Performance** | Total return %, vs. blind DCA comparison, max drawdown |
+| **Trade log** | Every trade: date, action (buy/pause/accelerate), amount, BTC price, signal state, tx hash |
+| **Signal state history** | When CORE/MACRO flipped, what the agent did, and why |
+| **Revenue allocation** | Current split percentage, total allocated to date |
+
+#### Data Source
+
+- On-chain data (wallet balance, transactions) read directly from Base via RPC
+- Signal state at time of each trade pulled from the Signal API history
+- LLM-generated reasoning cached and displayed alongside each trade
+
+### 3.4 Agent-as-Marketing
+
+- The agent gets its own Twitter presence (e.g., @CoinStrat or dedicated agent account)
+- Daily posts with on-chain proof build credibility
+- Weekly performance summaries posted to Telegram channel and Twitter
+- "Follow the agent, see its track record, then try CoinStrat yourself"
+- Drawdown moments are proactively narrated: "Agent paused buying on [date] because DXY headwinds triggered CORE exit. Portfolio held steady while BTC dropped 12%. Here's the tx proof."
+
+### 3.5 Developer Documentation
 
 Publish docs enabling others to build agents with CoinStrat:
 
 - "Getting Started with the CoinStrat API"
 - "Building an AI Agent that Uses CoinStrat Signals"
+- "Building an OpenClaw Skill with CoinStrat"
 - "Connecting CoinStrat to Power Wallet"
 - Example agent code (TypeScript + Python)
 
-### 3.3 Agent-as-Marketing
-
-- The agent gets its own Twitter account (@CoinStratAgent)
-- Daily posts with on-chain proof build credibility
-- "Follow the agent, see its track record, then build your own with our API"
-- The agent's verifiable performance is more convincing than any ad
-
 ### Deliverables Checklist — Phase 3
 
-- [ ] Agent scaffold on OpenClaw (or chosen framework)
+- [ ] Agent running as OpenClaw instance with CoinStrat skill
 - [ ] Signal reader module (consumes CoinStrat API)
 - [ ] Decision engine (CORE/MACRO rules)
 - [ ] Execution module (interact with Power Wallet contracts on Base)
-- [ ] Reporter module (Twitter + Telegram daily updates)
-- [ ] Agent wallet funded on Base with USDC
-- [ ] Developer docs for API + agent integration
+- [ ] Reporter module (Twitter + Telegram daily updates with tx proof)
+- [ ] Agent wallet funded on Base with first revenue deposit
+- [ ] Transparency dashboard (public page on CoinStrat Pro website)
+- [ ] Revenue funding pipeline (manual initially, automated later)
+- [ ] Developer docs for API + agent + OpenClaw skill integration
 - [ ] Example agent code (TypeScript + Python)
 
 ---
@@ -330,7 +411,11 @@ This becomes the **5th Power Wallet strategy** — and by far the most sophistic
 - `accelMultiplier`: Multiplier when MACRO is ON (default 3)
 - `offSignalMode`: pause | sell_matching | sell_all (same as backtest config)
 
-### 4.3 Oracle as Public Good / Paid Service
+### 4.3 Migrate Agent Wallet to Macro Strategy
+
+Once the Macro strategy is live, the CoinStrat dogfooding agent migrates from the Phase 3 approach (agent calling Power Wallet externally) to the native Macro strategy contract. This simplifies execution and proves the on-chain strategy works end-to-end.
+
+### 4.4 Oracle as Public Good / Paid Service
 
 The oracle is valuable beyond Power Wallet:
 
@@ -347,8 +432,10 @@ The oracle is valuable beyond Power Wallet:
 - [ ] Integration tests (oracle → strategy → Uniswap swap)
 - [ ] Oracle deployment on Base mainnet
 - [ ] Macro strategy deployment on Base mainnet
+- [ ] Migrate dogfooding agent wallet to Macro strategy
 - [ ] Update Power Wallet frontend with Macro strategy option
 - [ ] Update Simulator with Macro strategy backtesting
+- [ ] Update transparency dashboard with on-chain strategy data
 
 ---
 
@@ -356,32 +443,49 @@ The oracle is valuable beyond Power Wallet:
 
 | Component | Technology | Notes |
 |-----------|-----------|-------|
-| **CoinStrat Pro (web)** | React 18, TypeScript, Vite, MUI, Recharts | Existing, add auth + payments |
+| **CoinStrat Pro (web)** | React 18, TypeScript, Vite, MUI, Recharts | Existing, add auth + payments + transparency dashboard |
 | **Signal API** | Netlify Functions → Deno Deploy / Hono | Start simple, scale as needed |
 | **Auth** | Supabase Auth (or Clerk) | Email, Google, GitHub SSO |
-| **Database** | Supabase (Postgres) | Users, API keys, signal cache |
+| **Database** | Supabase (Postgres) | Users, API keys, signal cache, agent trade log |
 | **Payments (fiat)** | Stripe | Checkout, subscriptions, webhooks |
 | **Payments (crypto)** | USDC on Base | Direct transfer or payment contract |
-| **Telegram Bot** | grammY (TypeScript) | Webhook mode on Deno Deploy |
-| **LLM** | Claude API or GPT-4o | For `/why` command and agent reasoning |
-| **AI Agent** | OpenClaw / custom | TypeScript, consumes Signal API |
+| **OpenClaw Skill** | SKILL.md + TypeScript helpers | Published to ClawHub, multi-channel distribution |
+| **AI Agent** | OpenClaw instance | Runs CoinStrat skill + Power Wallet execution |
+| **LLM** | Claude API or GPT-4o | For signal reasoning and agent reporting |
 | **Oracle contract** | Solidity, Hardhat | Deployed on Base |
 | **Macro strategy** | Solidity, Hardhat | Extends Power Wallet architecture |
-| **Hosting** | Netlify (web), Deno Deploy (API + bot) | Low cost, global edge |
+| **Hosting** | Netlify (web), Deno Deploy (API) | Low cost, global edge |
 
 ---
 
 ## Dependencies Between Phases
 
 ```
-Phase 1 ──────► Phase 2 ──────► Phase 3 ──────► Phase 4
-Signal API       Bot consumes    Agent consumes   Oracle pushes
-is foundation    Signal API      Signal API +     signals on-chain,
-for everything                   executes via     strategy reads
-                                 Power Wallet     oracle
+Phase 1 ──────► Phase 2 ──────► Phase 3 ──────────► Phase 4
+Signal API       OpenClaw skill  Agent consumes       Oracle pushes
+is foundation    consumes API,   API, executes via    signals on-chain,
+for everything   multi-channel   Power Wallet,        strategy reads
+                 distribution    funded by revenue    oracle
 ```
 
-- Phase 2 depends on Phase 1 (bot consumes the API)
-- Phase 3 depends on Phase 1 (agent consumes the API) + Power Wallet (execution)
+- Phase 2 depends on Phase 1 (skill consumes the API)
+- Phase 3 depends on Phase 1 (agent consumes the API) + Phase 2 (agent uses OpenClaw framework) + Power Wallet (execution)
 - Phase 4 depends on Phase 1 (keeper runs the same engine) + Power Wallet (strategy contract)
-- Phases 2 and 3 can overlap or run in parallel once the API is live
+- Phases 2 and 3 can overlap once the API is live
+
+---
+
+## Key Milestones
+
+| Week | Milestone | Revenue Impact |
+|------|-----------|---------------|
+| 2 | Signal API live (`/current`, `/history`) | Enables everything |
+| 3 | Stripe + auth integrated | First paid subscribers |
+| 4 | CoinStrat Pro freemium launch | Free users → email list |
+| 6 | OpenClaw skill on ClawHub | Multi-channel distribution |
+| 8 | OpenClaw skill tested + stable | Pro upgrade funnel from all channels |
+| 10 | Agent wallet funded, first trade | Dogfooding begins |
+| 12 | Transparency dashboard live | Trust layer visible |
+| 14 | Agent posting daily updates | Organic marketing engine |
+| 20 | Oracle contract on Base Sepolia | On-chain integration starts |
+| 28 | Macro strategy on Base mainnet | Full stack operational |
