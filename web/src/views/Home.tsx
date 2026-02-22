@@ -282,6 +282,17 @@ const Home: React.FC = () => {
               "Valuation scoring (VAL_SCORE): MVRV < 1.0 → 3/2; 1.0–1.8 → 2/1; 1.8–3.5 → 1; ≥ 3.5 → 0 (euphoria).",
             ]}
           />
+
+          <ReferenceCard
+            title="Supply in Profit"
+            id="SIP (BGeometrics)"
+            href="https://charts.bgeometrics.com/supply_in_profit.html"
+            meaning="Percentage of total BTC supply currently in profit (current price above the price at which coins last moved on-chain)."
+            usage={[
+              "Euphoria Exhaustion exit logic: SIP > 95% for 14+ consecutive days arms the exit (euphoria detected).",
+              "If SIP then drops below 90% and fails to reclaim 95% within 45 days, SIP_EXHAUSTED is confirmed — CORE exit Condition B fires.",
+            ]}
+          />
         </Box>
       </section>
     </div>

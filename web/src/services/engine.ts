@@ -1,5 +1,5 @@
 import { fetchFredSeries, FredObservation } from './fred';
-import { fetchBTCPrice, fetchMVRV, fetchLTH_SOPR, fetchNUPL, PricePoint } from './crypto';
+import { fetchBTCPrice, fetchMVRV, fetchLTH_SOPR, fetchNUPL, fetchSupplyInProfit, PricePoint } from './crypto';
 import { SignalData } from '../App';
 
 /**
@@ -56,7 +56,7 @@ export async function computeAllSignals(): Promise<SignalData[]> {
   const [
     walcl, tga, rrp, dxyRaw, sahm, yc, newOrders, btcPrice, mvrv,
     ecbAssets, bojAssets, eurUsd, jpyUsd,
-    lthSopr, nupl
+    lthSopr, nupl, supplyInProfit
   ] = await Promise.all([
     fetchFredSeries("WALCL"),
     fetchFredSeries("WTREGEN"),
@@ -75,6 +75,7 @@ export async function computeAllSignals(): Promise<SignalData[]> {
     // On-chain valuation metrics from BGeometrics
     fetchLTH_SOPR(),                // Long-Term Holder SOPR, daily
     fetchNUPL(),                    // Net Unrealized Profit/Loss, daily
+    fetchSupplyInProfit(),          // Supply in Profit %, daily (Euphoria Exhaustion exit)
   ]);
 
   // Unit normalization:
@@ -128,6 +129,9 @@ export async function computeAllSignals(): Promise<SignalData[]> {
   // On-chain valuation series (LTH_SOPR used in VAL_SCORE; NUPL display-only)
   fillSeries(lthSopr, "LTH_SOPR");
   fillSeries(nupl, "NUPL");
+
+  // Supply in Profit (%) — used in Euphoria Exhaustion exit logic
+  fillSeries(supplyInProfit, "SIP");
 
   // G3 Global Liquidity raw series
   fillSeries(ecbAssets, "ECB_RAW");   // millions EUR
@@ -408,24 +412,116 @@ export async function computeAllSignals(): Promise<SignalData[]> {
   });
 
   // 4. Final Aggregates (CORE_ON, MACRO_ON, ACCUM_ON)
+  //
+  // CORE exit fires when EITHER condition is met:
+  //
+  //   A) PRICE_REGIME_ON = 0  AND  VAL_SCORE <= 1
+  //      Structural trend-break gated by valuation. VAL <= 1 means valuation
+  //      is fair-to-overheated (MVRV ≥ 1.0). This blocks exits when VAL = 2
+  //      or 3 (deep value / capitulation) so CORE stays ON at bear bottoms.
+  //
+  //   B) Euphoria Exhaustion:
+  //      Phase 1 — ARM: Supply in Profit > 95% for 14+ consecutive days.
+  //      Phase 2 — EXHAUST: SIP drops below 90% and fails to reclaim 95%
+  //                within 45 days. This can fire even while price is still
+  //                above the 40W SMA, giving an earlier exit signal.
+  //
+  // Re-entry requires either deep value (VAL >= 3) or an uptrend
+  // (VAL >= 1 AND PRICE_REGIME = 1) with supportive DXY.
+
+  const SIP_EUPHORIA_THRESHOLD = 95;
+  const SIP_EUPHORIA_MIN_DAYS = 14;
+  const SIP_DROP_THRESHOLD = 90;
+  const SIP_RECLAIM_WINDOW = 45;
+
   let coreState = 0;
+
+  // Euphoria Exhaustion state
+  let euphoriaStreak = 0;        // consecutive days with SIP > 95%
+  let euphoriaFlag = false;      // latching: has euphoria been detected this cycle?
+  let observationStart = -1;     // index when SIP first dropped below 90% after arming
+  let sipExhausted = false;      // Signal A: SIP failed to reclaim within window
+
   dailyData.forEach((d, i) => {
     const val = d.VAL_SCORE;
     const dxy = d.DXY_SCORE;
     const pr = d.PRICE_REGIME_ON;
+    const sip = d.SIP;
+    const sipOk = typeof sip === 'number' && !isNaN(sip);
+
+    // --- Euphoria Exhaustion state machine ---
+
+    // Phase 1: Track euphoria streaks
+    if (sipOk && sip > SIP_EUPHORIA_THRESHOLD) {
+      euphoriaStreak++;
+      if (euphoriaStreak >= SIP_EUPHORIA_MIN_DAYS && !euphoriaFlag) {
+        euphoriaFlag = true;
+      }
+    } else {
+      euphoriaStreak = 0;
+    }
+
+    // Phase 2: Observation window (only when euphoria has been armed)
+    if (euphoriaFlag && sipOk) {
+      if (observationStart === -1 && sip < SIP_DROP_THRESHOLD) {
+        // SIP dropped below 90% — open observation window
+        observationStart = i;
+        sipExhausted = false;
+      }
+
+      if (observationStart >= 0) {
+        // Check if SIP reclaims 95% — reset window (bull still alive)
+        if (sip > SIP_EUPHORIA_THRESHOLD) {
+          observationStart = -1;
+          sipExhausted = false;
+          euphoriaStreak = 1; // re-start counting
+        }
+        // Check if 45 days elapsed without reclaiming
+        else if ((i - observationStart) >= SIP_RECLAIM_WINDOW) {
+          sipExhausted = true;
+        }
+      }
+    }
+
+    // Expose diagnostic fields for the UI
+    d.SIP_EUPHORIA_FLAG = euphoriaFlag ? 1 : 0;
+    d.SIP_EXHAUSTED = sipExhausted ? 1 : 0;
+    d.SIP_OBS_DAYS = observationStart >= 0 ? (i - observationStart) : 0;
+
+    // --- CORE state machine ---
 
     if (coreState === 0) {
       // Entry: extreme conviction (VAL=3) enters unconditionally;
       //        VAL >= 1 with uptrend confirmation enters — this allows re-entry
       //        during bull market pullbacks (score 1 = MVRV < 3.5).
-      //        Both paths require DXY not in headwind.
-      const entryOk = ((val >= 3) || (val >= 1 && pr === 1)) && dxy >= 1;
-      if (entryOk) coreState = 1;
+      //        DXY is NOT gated here — it is used only in the MACRO accelerator.
+      const entryOk = (val >= 3) || (val >= 1 && pr === 1);
+      if (entryOk) {
+        coreState = 1;
+        // Reset euphoria state for the new cycle
+        euphoriaFlag = false;
+        euphoriaStreak = 0;
+        observationStart = -1;
+        sipExhausted = false;
+      }
     } else {
-      // Exit path 1: bearish regime + valuation not extreme (≤ 2)
-      // Exit path 2: overheated valuation (VAL=0) + USD strengthening (DXY=0)
-      const exitOk = (pr === 0 && val <= 2) || (val === 0 && dxy === 0);
-      if (exitOk) coreState = 0;
+      // Exit: EITHER condition is sufficient:
+      //   A) Trend break + overheated valuation:
+      //      PRICE_REGIME_ON = 0 AND VAL_SCORE <= 1.
+      //      VAL 0 = euphoria (MVRV ≥ 3.5), VAL 1 = fair (MVRV 1.8–3.5).
+      //      This prevents exiting at bear-market bottoms where VAL = 2 or 3
+      //      (deep value) — CORE stays ON for accumulation during capitulation.
+      //   B) Euphoria Exhaustion — SIP was armed (>95% for 14+ days) then failed to
+      //      reclaim 95% within 45 days after dropping below 90%.
+      const exitOk = (pr === 0 && val <= 1) || sipExhausted;
+      if (exitOk) {
+        coreState = 0;
+        // Do NOT reset euphoria tracking on exit. The tracking reflects
+        // market state (not our position) and should keep running so the
+        // observation window can reach 45 days and SIP_EXHAUSTED can fire
+        // even after CORE has already exited via Condition A.
+        // All euphoria state is reset on CORE *entry* instead.
+      }
     }
     d.CORE_ON = coreState;
 

@@ -42,6 +42,11 @@ export interface SignalData {
   YC_M?: number;
   NO_YOY?: number;
   MVRV?: number;
+  // Euphoria Exhaustion diagnostics
+  SIP?: number;                // Supply in Profit (%)
+  SIP_EUPHORIA_FLAG?: number;  // 1 if euphoria detected this cycle
+  SIP_EXHAUSTED?: number;      // 1 if failed to reclaim 95% within 45d window
+  SIP_OBS_DAYS?: number;       // Days into observation window (0 if not active)
   [key: string]: any;
 }
 

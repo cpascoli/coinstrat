@@ -195,7 +195,7 @@ function regimeColor(key: RegimeKey, v: 0 | 1 | 2) {
   const palette = {
     0: { fill: '#ef4444', alpha: 0.36 },
     1: { fill: '#94a3b8', alpha: 0.32 },
-    2: { fill: '#22c55e', alpha: 0.34 },
+    2: { fill: '#22c55e', alpha: 0.36 },
   } as const;
   return palette[v];
 }
@@ -208,9 +208,9 @@ function systemColor(v: 0 | 1 | 2 | 3) {
     case 1:
       return { fill: '#94a3b8', alpha: 0.32 };
     case 2:
-      return { fill: '#86efac', alpha: 0.34 };
+      return { fill: '#86efac', alpha: 0.36 };
     case 3:
-      return { fill: '#22c55e', alpha: 0.34 };
+      return { fill: '#22c55e', alpha: 0.36 };
   }
 }
 
@@ -220,9 +220,9 @@ function mvrvColor(v: 0 | 1 | 2 | 3) {
     case 3:
       return { fill: '#15803d', alpha: 0.40 }; // deep green, higher opacity for extreme conviction
     case 2:
-      return { fill: '#22c55e', alpha: 0.28 };
+      return { fill: '#22c55e', alpha: 0.36 };
     case 0:
-      return { fill: '#ef4444', alpha: 0.28 };
+      return { fill: '#ef4444', alpha: 0.36 };
     default:
       return { fill: '#94a3b8', alpha: 0.22 };
   }
@@ -402,6 +402,32 @@ const ChartsView: React.FC<Props> = ({ data }) => {
         NUPL_NEG: (neg || isBridge) && ok ? v : null,
       };
     });
+  }, [chartData]);
+
+  // Euphoria Exhaustion spans: 0 = normal, 1 = armed (euphoria detected), 2 = exhausted
+  const sipSpans = useMemo(() => {
+    const spans: { x1: number; x2: number; value: 0 | 1 | 2 }[] = [];
+    if (!chartData.length) return spans;
+    const mapState = (d: any): 0 | 1 | 2 => {
+      if (Number(d.SIP_EXHAUSTED) === 1) return 2;
+      if (Number(d.SIP_EUPHORIA_FLAG) === 1) return 1;
+      return 0;
+    };
+    let current = mapState(chartData[0]);
+    let startTs = (chartData[0] as any).ts;
+    for (let i = 1; i < chartData.length; i++) {
+      const v = mapState(chartData[i]);
+      const ts = (chartData[i] as any).ts;
+      if (v !== current) {
+        const prevTs = (chartData[i - 1] as any).ts;
+        if (prevTs > startTs) spans.push({ x1: startTs, x2: prevTs, value: current });
+        current = v;
+        startTs = ts;
+      }
+    }
+    const endTs = (chartData[chartData.length - 1] as any).ts;
+    if (endTs > startTs) spans.push({ x1: startTs, x2: endTs, value: current });
+    return spans;
   }, [chartData]);
 
   const liqSpans = useMemo(() => buildRegimeSpans(chartData as any, 'LIQ_SCORE'), [chartData]);
@@ -812,7 +838,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                   y2={btcDomain.y2}
                   ifOverflow="extendDomain"
                   fill={s.value === 1 ? '#22c55e' : '#ef4444'}
-                  fillOpacity={s.value === 1 ? 0.32 : 0.32}
+                  fillOpacity={0.36}
                   strokeOpacity={0}
                 />
               ))}
@@ -905,6 +931,62 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               <Tooltip content={<CustomTooltip />} />
               <Line yAxisId="nupl" type="monotone" dataKey="NUPL_POS" name="NUPL (profit)" stroke="#22c55e" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls={false} />
               <Line yAxisId="nupl" type="monotone" dataKey="NUPL_NEG" name="NUPL (loss)" stroke="#ef4444" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls={false} />
+              <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.5} dot={false} isAnimationActive={false} opacity={0.5} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Box>
+      </Paper>
+      )}
+
+      {/* Supply in Profit (SIP) — Euphoria Exhaustion exit logic */}
+      {section === 'valuation' && (
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Box sx={{ mb: 2.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            Supply in Profit (SIP)
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            Percentage of total BTC supply currently in profit (current price above the price at which coins last moved on-chain).
+            <br />
+            Used in the Euphoria Exhaustion exit logic: when SIP stays above 95% for 14+ days the exit is armed;
+            if SIP then drops below 90% and fails to reclaim 95% within 45 days, exhaustion is confirmed.
+          </Typography>
+        </Box>
+
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="Supply in Profit (%)" sx={{ borderColor: '#a78bfa', color: '#ddd6fe' }} />
+          <Chip size="small" variant="outlined" label="95% Euphoria threshold" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
+          <Chip size="small" variant="outlined" label="90% Drop threshold" sx={{ borderColor: '#f59e0b', color: '#fde68a' }} />
+          <Chip size="small" variant="filled" label="Euphoria armed" sx={{ bgcolor: 'rgba(34,197,94,0.2)', color: '#bbf7d0', fontSize: 11 }} />
+          <Chip size="small" variant="filled" label="SIP exhausted" sx={{ bgcolor: 'rgba(239,68,68,0.25)', color: '#fecaca', fontSize: 11 }} />
+          <Chip size="small" variant="outlined" label="BTCUSD" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
+        </Stack>
+
+        <Box sx={{ height: { xs: 360, sm: 460, md: 520 }, width: '100%', minWidth: 0 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart key={`sip-${range}`} data={chartData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis yAxisId="sip" domain={[0, 100]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => (typeof v === 'number' ? `${v}%` : '')} />
+              <YAxis yAxisId="btc" orientation="right" scale="log" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => { if (typeof v !== 'number' || isNaN(v)) return ''; return v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v.toFixed(0); }} />
+              {sipSpans.filter(s => s.value > 0).map((s, i) => (
+                <ReferenceArea
+                  key={`sip-span-${i}`}
+                  yAxisId="sip"
+                  x1={s.x1}
+                  x2={s.x2}
+                  y1={0}
+                  y2={100}
+                  ifOverflow="extendDomain"
+                  fill={s.value === 2 ? '#ef4444' : '#22c55e'}
+                  fillOpacity={0.36}
+                  strokeOpacity={0}
+                />
+              ))}
+              <ReferenceLine yAxisId="sip" y={95} stroke="#ef4444" strokeDasharray="6 3" strokeWidth={1.5} label={{ value: '95% Euphoria', fill: '#fca5a5', fontSize: 10, position: 'left' }} />
+              <ReferenceLine yAxisId="sip" y={90} stroke="#f59e0b" strokeDasharray="4 4" strokeWidth={1} label={{ value: '90% Drop', fill: '#fde68a', fontSize: 10, position: 'left' }} />
+              <Tooltip content={<CustomTooltip />} />
+              <Line yAxisId="sip" type="monotone" dataKey="SIP" name="Supply in Profit (%)" stroke="#a78bfa" strokeWidth={2} dot={false} isAnimationActive={false} />
               <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.5} dot={false} isAnimationActive={false} opacity={0.5} />
             </LineChart>
           </ResponsiveContainer>
@@ -1337,7 +1419,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                   y2={btcDomain.y2}
                   ifOverflow="extendDomain"
                   fill={s.value === 1 ? '#22c55e' : '#ef4444'}
-                  fillOpacity={0.32}
+                  fillOpacity={0.36}
                   strokeOpacity={0}
                 />
               ))}

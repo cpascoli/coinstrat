@@ -155,6 +155,14 @@ export async function fetchNUPL(): Promise<PricePoint[]> {
 }
 
 /**
+ * Fetch Supply in Profit (%) from BGeometrics.
+ * Used by the Euphoria Exhaustion exit logic.
+ */
+export async function fetchSupplyInProfit(): Promise<PricePoint[]> {
+  return fetchBGeometrics('profit_loss');
+}
+
+/**
  * Fetch MVRV from Blockchain.info
  */
 export async function fetchMVRV(): Promise<PricePoint[]> {

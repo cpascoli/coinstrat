@@ -52,29 +52,43 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
             <Divider />
             <CardContent>
               <Stack spacing={1.25}>
+                <Typography variant="overline" color="text.secondary" sx={{ fontWeight: 700 }}>
+                  Entry Logic (evaluated when CORE is OFF)
+                </Typography>
                 <LogicRule
-                  title="Entry condition - extreme value or uptrend, and supportive USD"
+                  title="Entry condition — extreme value or uptrend"
                   formula="(VAL_SCORE ≥ 3) OR (VAL_SCORE ≥ 1 AND PRICE_REGIME = 1)"
-                  active={coreStatus}
+                  active={
+                    (current.VAL_SCORE >= 3) ||
+                    (current.VAL_SCORE >= 1 && current.PRICE_REGIME_ON === 1)
+                  }
+                />
+
+                <Divider sx={{ my: 0.5 }} />
+
+                <Typography variant="overline" color="text.secondary" sx={{ fontWeight: 700 }}>
+                  Exit Logic (evaluated when CORE is ON) — either condition is sufficient
+                </Typography>
+                <LogicRule
+                  title="Condition A — Trend break + valuation not in deep value"
+                  formula="PRICE_REGIME_ON = 0  AND  VAL_SCORE ≤ 1"
+                  active={current.PRICE_REGIME_ON === 0 && current.VAL_SCORE <= 1}
+                  tone={(current.PRICE_REGIME_ON === 0 && current.VAL_SCORE <= 1) ? 'danger' : 'default'}
                 />
                 <LogicRule
-                  title="Exit condition 1 - bearish trend and not extreme value"
-                  formula="PRICE_REGIME = 0 AND VAL_SCORE ≤ 2"
-                  active={current.PRICE_REGIME_ON === 0 && current.VAL_SCORE <= 2}
+                  title="Condition B — Euphoria Exhaustion (SIP armed then failed to reclaim)"
+                  formula="SIP_EUPHORIA_FLAG = 1 → SIP_EXHAUSTED = 1"
+                  active={(current.SIP_EXHAUSTED ?? 0) === 1}
+                  tone={((current.SIP_EXHAUSTED ?? 0) === 1) ? 'danger' : 'default'}
+                />
+                <LogicRule
+                  title="EXIT triggers when EITHER A OR B is TRUE"
+                  formula="(PRICE_REGIME = 0 AND VAL ≤ 1)  OR  SIP_EXHAUSTED = 1"
+                  active={(current.PRICE_REGIME_ON === 0 && current.VAL_SCORE <= 1) || (current.SIP_EXHAUSTED ?? 0) === 1}
                   tone="danger"
                 />
-                <LogicRule
-                  title="Exit condition 2 - overheated and USD headwind"
-                  formula="VAL_SCORE = 0 AND DXY_SCORE = 0"
-                  active={current.VAL_SCORE === 0 && current.DXY_SCORE === 0}
-                  tone="danger"
-                />
-                <LogicRule
-                  title="Risk filter (with 20/30 persistence)"
-                  formula="DXY_SCORE ≥ 1 (requires DXY favorable ≥ 20/30 days)"
-                  active={current.DXY_SCORE >= 1}
-                />
-                <Divider sx={{ my: 1 }} />
+
+                <Divider sx={{ my: 0.5 }} />
 
                 <Grid container spacing={1.25}>
                   <Grid item xs={4}>
@@ -86,17 +100,20 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
                   <Grid item xs={4}>
                     <MetricChip title="LTH SOPR" label="LTH_SOPR" value={typeof (current as any).LTH_SOPR === 'number' ? ((current as any).LTH_SOPR as number).toFixed(2) : '–'} />
                   </Grid>
-                  <Grid item xs={6}>
+                  <Grid item xs={4}>
                     <MetricChip title="Price Regime" label="PRICE_REGIME" value={current.PRICE_REGIME_ON} />
                   </Grid>
-                  <Grid item xs={6}>
-                    <MetricChip title="DXY (eff.)" label="DXY_SCORE" value={current.DXY_SCORE} />
+                  <Grid item xs={4}>
+                    <MetricChip title="Supply in Profit" label="SIP" value={typeof current.SIP === 'number' ? `${current.SIP.toFixed(1)}%` : '–'} />
                   </Grid>
                   <Grid item xs={4}>
-                    <MetricChip title="DXY (raw)" label="DXY_SCORE_RAW" value={(current as any).DXY_SCORE_RAW ?? '–'} />
+                    <MetricChip title="Euphoria Flag" label="SIP_EUPHORIA" value={(current.SIP_EUPHORIA_FLAG ?? 0) === 1 ? 'ARMED' : 'OFF'} />
                   </Grid>
                   <Grid item xs={4}>
-                    <MetricChip title="DXY Persist" label="DXY_PERSIST" value={(current as any).DXY_PERSIST ?? '–'} />
+                    <MetricChip title="SIP Exhausted" label="SIP_EXHAUST" value={(current.SIP_EXHAUSTED ?? 0) === 1 ? 'YES' : 'NO'} />
+                  </Grid>
+                  <Grid item xs={4}>
+                    <MetricChip title="Obs. Window" label="SIP_OBS_DAYS" value={`${current.SIP_OBS_DAYS ?? 0}d`} />
                   </Grid>
                 </Grid>
               </Stack>
@@ -123,9 +140,14 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
             <CardContent>
               <Stack spacing={1.25}>
                 <LogicRule
-                  title="Accelerator formula"
-                  formula="(LIQ + BIZ_CYCLE ≥ 3) AND (DXY ≥ 1, persistence-filtered)"
-                  active={macroStatus}
+                  title="Liquidity + Business Cycle momentum"
+                  formula="LIQ_SCORE + CYCLE_SCORE ≥ 3"
+                  active={macroScoreSum >= 3}
+                />
+                <LogicRule
+                  title="USD risk filter (with 20/30 persistence)"
+                  formula="DXY_SCORE ≥ 1"
+                  active={current.DXY_SCORE >= 1}
                 />
 
                 <Grid container spacing={1.25}>
