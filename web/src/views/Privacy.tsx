@@ -125,7 +125,7 @@ const Privacy: React.FC = () => (
         'Object to processing of your personal data',
       ]} />
       <P>
-        To exercise any of these rights, contact us at privacy@coinstrat.xyz. We will respond
+        To exercise any of these rights, contact us at support@coinstrat.xyz. We will respond
         within 30 days.
       </P>
     </Section>
@@ -164,7 +164,7 @@ const Privacy: React.FC = () => (
 
     <Section title="12. Contact">
       <P>
-        For privacy-related questions or requests, contact us at privacy@coinstrat.xyz.
+        For privacy-related questions or requests, contact us at support@coinstrat.xyz.
       </P>
     </Section>
   </Box>
