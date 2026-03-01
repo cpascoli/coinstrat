@@ -9,20 +9,75 @@
   [headers.values]
     Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
 
+# --- Data proxy routes ---
+
 # Proxy for FRED API to handle CORS and hide API key
 [[redirects]]
   from = "/api/fred/*"
   to = "/.netlify/functions/fred/:splat"
   status = 200
 
-# Proxy for BGeometrics on-chain data (LTH SOPR, NUPL)
+# Proxy for BGeometrics on-chain data (LTH SOPR, NUPL, SIP)
 [[redirects]]
   from = "/api/bgeometrics/*"
   to = "/.netlify/functions/bgeometrics/:splat"
   status = 200
 
-# Redirects for Single Page Application (SPA) routing
-# IMPORTANT: This must be the LAST redirect rule
+# --- Signal API v1 ---
+
+[[redirects]]
+  from = "/api/v1/signals/current"
+  to = "/.netlify/functions/signal-current"
+  status = 200
+
+[[redirects]]
+  from = "/api/v1/signals/history"
+  to = "/.netlify/functions/signal-history"
+  status = 200
+
+[[redirects]]
+  from = "/api/v1/signals/refresh"
+  to = "/.netlify/functions/signal-refresh"
+  status = 200
+
+# --- Stripe ---
+
+[[redirects]]
+  from = "/api/stripe/checkout"
+  to = "/.netlify/functions/stripe-checkout"
+  status = 200
+
+[[redirects]]
+  from = "/api/stripe/portal"
+  to = "/.netlify/functions/stripe-portal"
+  status = 200
+
+[[redirects]]
+  from = "/api/stripe/webhook"
+  to = "/.netlify/functions/stripe-webhook"
+  status = 200
+
+# --- Admin ---
+
+[[redirects]]
+  from = "/api/admin/users"
+  to = "/.netlify/functions/admin-users"
+  status = 200
+
+# --- Email ---
+
+[[redirects]]
+  from = "/api/email/subscribe"
+  to = "/.netlify/functions/email-subscribe"
+  status = 200
+
+[[redirects]]
+  from = "/api/email/digest"
+  to = "/.netlify/functions/weekly-digest"
+  status = 200
+
+# --- SPA catch-all (MUST be last) ---
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

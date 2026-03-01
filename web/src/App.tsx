@@ -1,23 +1,37 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { LayoutDashboard, BarChart3, Binary, Info, Activity, FlaskConical, Github } from 'lucide-react';
+import { LayoutDashboard, BarChart3, Binary, Info, Activity, FlaskConical, Github, User, LogOut, Shield } from 'lucide-react';
 import Dashboard from './views/Dashboard';
 import ScoreBreakdown from './views/ScoreBreakdown';
 import LogicFlow from './views/LogicFlow';
 import ChartsView from './views/ChartsView';
 import Home from './views/Home';
 import Backtest from './views/Backtest';
+import Profile from './views/Profile';
+import Admin from './views/Admin';
+import ApiDocs from './views/ApiDocs';
+import Terms from './views/Terms';
+import Privacy from './views/Privacy';
 import { computeAllSignals } from './services/engine';
+import { useAuth } from './contexts/AuthContext';
+import AuthModal from './components/AuthModal';
 import {
   AppBar,
   Box,
   BottomNavigation,
   BottomNavigationAction,
+  Button,
   CircularProgress,
   Container,
+  IconButton,
+  Menu,
+  MenuItem,
+  ListItemIcon,
+  ListItemText,
   Paper,
   Toolbar,
   Typography,
   Alert,
+  Avatar,
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import useMediaQuery from '@mui/material/useMediaQuery';
@@ -56,7 +70,10 @@ const App: React.FC = () => {
   const [data, setData] = useState<SignalData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
 
+  const { user, profile, isAdmin, signOut } = useAuth();
   const theme = useTheme();
   const isMdUp = useMediaQuery(theme.breakpoints.up('md'));
   const location = useLocation();
@@ -218,6 +235,51 @@ const App: React.FC = () => {
               ))}
             </Box>
           )}
+
+          {/* Auth / User menu */}
+          <Box sx={{ ml: { xs: 0, md: 1.5 } }}>
+            {user ? (
+              <>
+                <IconButton onClick={(e) => setAnchorEl(e.currentTarget)} size="small">
+                  <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main', fontSize: 14, fontWeight: 700 }}>
+                    {(profile?.email?.[0] ?? 'U').toUpperCase()}
+                  </Avatar>
+                </IconButton>
+                <Menu
+                  anchorEl={anchorEl}
+                  open={Boolean(anchorEl)}
+                  onClose={() => setAnchorEl(null)}
+                  anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                  transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                  PaperProps={{ sx: { minWidth: 180 } }}
+                >
+                  <MenuItem onClick={() => { setAnchorEl(null); navigate('/profile'); }}>
+                    <ListItemIcon><User size={16} /></ListItemIcon>
+                    <ListItemText>Profile</ListItemText>
+                  </MenuItem>
+                  {isAdmin && (
+                    <MenuItem onClick={() => { setAnchorEl(null); navigate('/admin'); }}>
+                      <ListItemIcon><Shield size={16} /></ListItemIcon>
+                      <ListItemText>Admin</ListItemText>
+                    </MenuItem>
+                  )}
+                  <MenuItem onClick={() => { setAnchorEl(null); signOut(); }}>
+                    <ListItemIcon><LogOut size={16} /></ListItemIcon>
+                    <ListItemText>Sign out</ListItemText>
+                  </MenuItem>
+                </Menu>
+              </>
+            ) : (
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => setAuthOpen(true)}
+                sx={{ textTransform: 'none', fontWeight: 700, whiteSpace: 'nowrap' }}
+              >
+                Sign in
+              </Button>
+            )}
+          </Box>
         </Toolbar>
       </AppBar>
 
@@ -229,8 +291,15 @@ const App: React.FC = () => {
           <Route path="/signals" element={gate(<LogicFlow current={lastData as SignalData} />)} />
           <Route path="/charts/*" element={gate(<ChartsView data={data} />)} />
           <Route path="/backtest" element={gate(<Backtest data={data} />)} />
+          <Route path="/profile" element={<Profile />} />
+          <Route path="/admin" element={<Admin />} />
+          <Route path="/api-docs" element={<ApiDocs />} />
+          <Route path="/terms" element={<Terms />} />
+          <Route path="/privacy" element={<Privacy />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
+
+        <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
 
         <Box
           component="footer"
@@ -248,6 +317,24 @@ const App: React.FC = () => {
         >
           <Typography variant="caption" color="text.secondary">
             © {new Date().getFullYear()} Coin Strat. All rights reserved.
+          </Typography>
+          <Typography
+            variant="caption"
+            component="a"
+            href="/terms"
+            onClick={(e: React.MouseEvent) => { e.preventDefault(); navigate('/terms'); }}
+            sx={{ color: 'text.secondary', textDecoration: 'none', '&:hover': { color: 'text.primary' }, cursor: 'pointer' }}
+          >
+            Terms
+          </Typography>
+          <Typography
+            variant="caption"
+            component="a"
+            href="/privacy"
+            onClick={(e: React.MouseEvent) => { e.preventDefault(); navigate('/privacy'); }}
+            sx={{ color: 'text.secondary', textDecoration: 'none', '&:hover': { color: 'text.primary' }, cursor: 'pointer' }}
+          >
+            Privacy
           </Typography>
           <Box
             component="a"

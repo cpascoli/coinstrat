@@ -954,7 +954,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
         </Box>
 
         <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
-          <Chip size="small" variant="outlined" label="Supply in Profit (%)" sx={{ borderColor: '#a78bfa', color: '#ddd6fe' }} />
+          <Chip size="small" variant="outlined" label="Supply in Profit (%)" sx={{ borderColor: '#facc15', color: '#fef08a' }} />
           <Chip size="small" variant="outlined" label="95% Euphoria threshold" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
           <Chip size="small" variant="outlined" label="90% Drop threshold" sx={{ borderColor: '#f59e0b', color: '#fde68a' }} />
           <Chip size="small" variant="filled" label="Euphoria armed" sx={{ bgcolor: 'rgba(34,197,94,0.2)', color: '#bbf7d0', fontSize: 11 }} />
@@ -986,7 +986,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               <ReferenceLine yAxisId="sip" y={95} stroke="#ef4444" strokeDasharray="6 3" strokeWidth={1.5} label={{ value: '95% Euphoria', fill: '#fca5a5', fontSize: 10, position: 'left' }} />
               <ReferenceLine yAxisId="sip" y={90} stroke="#f59e0b" strokeDasharray="4 4" strokeWidth={1} label={{ value: '90% Drop', fill: '#fde68a', fontSize: 10, position: 'left' }} />
               <Tooltip content={<CustomTooltip />} />
-              <Line yAxisId="sip" type="monotone" dataKey="SIP" name="Supply in Profit (%)" stroke="#a78bfa" strokeWidth={2} dot={false} isAnimationActive={false} />
+              <Line yAxisId="sip" type="monotone" dataKey="SIP" name="Supply in Profit (%)" stroke="#facc15" strokeWidth={2} dot={false} isAnimationActive={false} />
               <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.5} dot={false} isAnimationActive={false} opacity={0.5} />
             </LineChart>
           </ResponsiveContainer>

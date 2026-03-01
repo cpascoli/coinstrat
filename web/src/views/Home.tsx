@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
-import { Box, Button, Card, CardContent, CardHeader, Divider, IconButton, Link, Stack, Tooltip, Typography } from '@mui/material';
+import { Box, Button, Card, CardContent, CardHeader, Chip, Divider, IconButton, Link, Stack, TextField, Tooltip, Typography, Alert } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { HeroIllustration } from '../components/HeroIllustration';
+import { Zap, Crown, Check } from 'lucide-react';
 
 const Home: React.FC = () => {
   const navigate = useNavigate();
@@ -175,6 +176,12 @@ const Home: React.FC = () => {
           </Card>
         </Box>
       </section>
+
+      {/* Pricing */}
+      <PricingSection />
+
+      {/* Email signup */}
+      <EmailSignup />
 
       <section className="space-y-6">
         <div className="flex items-center gap-3 border-b pb-2">
@@ -421,6 +428,206 @@ const ReferenceCard = ({
     </CardContent>
   </Card>
 );
+
+/* ── Pricing Section ── */
+
+const PLANS = [
+  {
+    name: 'Free',
+    price: '$0',
+    period: 'forever',
+    color: '#94a3b8',
+    icon: null,
+    features: [
+      'Live dashboard & signals',
+      'Score breakdown',
+      'Charts (30-day history)',
+      'Backtest (1-year window)',
+      'Weekly email digest',
+    ],
+    cta: 'Get started',
+    href: '/dashboard',
+    variant: 'outlined' as const,
+  },
+  {
+    name: 'Pro',
+    price: '$14.99',
+    period: '/month',
+    color: '#60a5fa',
+    icon: <Zap size={18} />,
+    features: [
+      'Everything in Free',
+      'Full chart history',
+      'Full backtest range',
+      'Signal API (1K calls/day)',
+      'Real-time signal alerts by email',
+      'OpenClaw skill access',
+    ],
+    cta: 'Upgrade to Pro',
+    href: '/profile',
+    variant: 'contained' as const,
+  },
+  {
+    name: 'Pro+',
+    price: '$29.99',
+    period: '/month',
+    color: '#a78bfa',
+    icon: <Crown size={18} />,
+    features: [
+      'Everything in Pro',
+      'API (10K calls/day)',
+      'Webhook notifications',
+      'Custom strategy builder',
+      'Priority support',
+    ],
+    cta: 'Upgrade to Pro+',
+    href: '/profile',
+    variant: 'contained' as const,
+  },
+];
+
+const PricingSection: React.FC = () => {
+  const navigate = useNavigate();
+  return (
+    <section className="space-y-6">
+      <div className="flex items-center gap-3 border-b pb-2">
+        <h2 className="text-2xl font-bold text-slate-100">Pricing</h2>
+      </div>
+      <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' } }}>
+        {PLANS.map((plan) => (
+          <Card
+            key={plan.name}
+            sx={{
+              position: 'relative',
+              overflow: 'hidden',
+              borderColor: plan.name === 'Pro' ? plan.color : 'rgba(148,163,184,0.35)',
+              borderWidth: plan.name === 'Pro' ? 2 : 1,
+              background: 'linear-gradient(180deg, rgba(2,6,23,0.35) 0%, rgba(15,23,42,0.65) 100%)',
+              boxShadow: 'none',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            <CardContent sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                {plan.icon}
+                <Typography sx={{ fontWeight: 800, fontSize: 18 }}>{plan.name}</Typography>
+                {plan.name === 'Pro' && (
+                  <Chip label="Popular" size="small" sx={{ bgcolor: `${plan.color}22`, color: plan.color, fontWeight: 700, fontSize: 11 }} />
+                )}
+              </Stack>
+
+              <Box sx={{ mb: 2 }}>
+                <Typography component="span" sx={{ fontWeight: 900, fontSize: 32 }}>{plan.price}</Typography>
+                <Typography component="span" color="text.secondary" sx={{ fontSize: 14 }}>{plan.period}</Typography>
+              </Box>
+
+              <Stack spacing={1} sx={{ mb: 3, flex: 1 }}>
+                {plan.features.map((f) => (
+                  <Stack key={f} direction="row" spacing={1} alignItems="flex-start">
+                    <Check size={16} style={{ color: plan.color, marginTop: 3, flexShrink: 0 }} />
+                    <Typography variant="body2" color="text.secondary">{f}</Typography>
+                  </Stack>
+                ))}
+              </Stack>
+
+              <Button
+                variant={plan.variant}
+                fullWidth
+                onClick={() => navigate(plan.href)}
+                sx={{
+                  textTransform: 'none',
+                  fontWeight: 700,
+                  py: 1.2,
+                  ...(plan.variant === 'contained' && { bgcolor: plan.color, '&:hover': { bgcolor: plan.color, filter: 'brightness(1.15)' } }),
+                }}
+              >
+                {plan.cta}
+              </Button>
+            </CardContent>
+          </Card>
+        ))}
+      </Box>
+    </section>
+  );
+};
+
+/* ── Email Signup ── */
+
+const EmailSignup: React.FC = () => {
+  const [email, setEmail] = useState('');
+  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email) return;
+    setStatus('loading');
+    try {
+      const res = await fetch('/api/email/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, source: 'homepage' }),
+      });
+      setStatus(res.ok ? 'success' : 'error');
+      if (res.ok) setEmail('');
+    } catch {
+      setStatus('error');
+    }
+  };
+
+  return (
+    <Card
+      sx={{
+        background: 'linear-gradient(135deg, rgba(96,165,250,0.08) 0%, rgba(167,139,250,0.08) 100%)',
+        borderColor: 'rgba(96,165,250,0.25)',
+        boxShadow: 'none',
+      }}
+    >
+      <CardContent sx={{ textAlign: 'center', py: 4 }}>
+        <Typography variant="h5" sx={{ fontWeight: 900, mb: 1 }}>Stay in the loop</Typography>
+        <Typography color="text.secondary" sx={{ mb: 3, maxWidth: 480, mx: 'auto' }}>
+          Get a free weekly digest with current signal status, key metrics, and market context — delivered every Monday.
+        </Typography>
+
+        {status === 'success' ? (
+          <Alert severity="success" sx={{ maxWidth: 400, mx: 'auto' }}>
+            You're subscribed. Check your inbox on Monday.
+          </Alert>
+        ) : (
+          <Box
+            component="form"
+            onSubmit={handleSubmit}
+            sx={{ display: 'flex', gap: 1, maxWidth: 420, mx: 'auto' }}
+          >
+            <TextField
+              placeholder="your@email.com"
+              type="email"
+              size="small"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              fullWidth
+              sx={{ '& .MuiOutlinedInput-root': { bgcolor: 'background.paper' } }}
+            />
+            <Button
+              type="submit"
+              variant="contained"
+              disabled={status === 'loading'}
+              sx={{ textTransform: 'none', fontWeight: 700, whiteSpace: 'nowrap', px: 3 }}
+            >
+              {status === 'loading' ? 'Sending…' : 'Subscribe'}
+            </Button>
+          </Box>
+        )}
+        {status === 'error' && (
+          <Alert severity="error" sx={{ mt: 2, maxWidth: 400, mx: 'auto' }}>
+            Something went wrong. Please try again.
+          </Alert>
+        )}
+      </CardContent>
+    </Card>
+  );
+};
 
 export default Home;
 
