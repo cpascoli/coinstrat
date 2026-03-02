@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   Box,
+  CircularProgress,
   Paper,
   Typography,
   Chip,
@@ -22,9 +23,17 @@ const TIER_LABELS: Record<string, { label: string; color: string; icon: React.Re
 };
 
 const Profile: React.FC = () => {
-  const { user, profile, tier, signOut } = useAuth();
+  const { user, profile, tier, loading, signOut } = useAuth();
   const [showKey, setShowKey] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  if (loading) {
+    return (
+      <Paper sx={{ p: 4, textAlign: 'center' }}>
+        <CircularProgress size={24} />
+      </Paper>
+    );
+  }
 
   if (!user || !profile) {
     return (
@@ -118,7 +127,7 @@ const Profile: React.FC = () => {
               startIcon={<Zap size={16} />}
               sx={{ textTransform: 'none', fontWeight: 700 }}
             >
-              Upgrade to Pro — $14.99/mo
+              Upgrade to Pro — $9.99/mo
             </Button>
           </>
         )}

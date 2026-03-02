@@ -53,7 +53,7 @@ BEGIN
   VALUES (
     NEW.id,
     NEW.email,
-    encode(gen_random_bytes(24), 'hex')
+    replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '')
   );
   RETURN NEW;
 END;
