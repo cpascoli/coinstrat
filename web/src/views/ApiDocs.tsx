@@ -59,7 +59,7 @@ const ApiDocs: React.FC = () => {
                 component="h1"
                 sx={{ fontWeight: 900, fontSize: { xs: 28, sm: 36, md: 44 } }}
               >
-                Signal API
+                API Reference
               </Typography>
             </Stack>
 

@@ -65,14 +65,14 @@ function lookbackDate(): string {
   return d.toISOString().split('T')[0];
 }
 
-async function fetchFredTail(seriesId: string): Promise<DataPoint[]> {
+async function fetchFredSeries(seriesId: string, fullHistory = false): Promise<DataPoint[]> {
   const apiKey = process.env.FRED_API_KEY;
   if (!apiKey) throw new Error('FRED_API_KEY not configured');
 
   const url =
     `https://api.stlouisfed.org/fred/series/observations` +
     `?series_id=${seriesId}&api_key=${apiKey}&file_type=json` +
-    `&observation_start=${lookbackDate()}`;
+    (fullHistory ? '' : `&observation_start=${lookbackDate()}`);
 
   const res = await fetch(url);
   if (!res.ok) throw new Error(`FRED ${seriesId}: HTTP ${res.status}`);
@@ -169,7 +169,13 @@ function overlaySeries(
  */
 export async function refreshSignals(
   cachedSignals: SignalRow[],
+  options?: {
+    returnFullDataset?: boolean;
+    fullHistory?: boolean;
+  },
 ): Promise<SignalRow[]> {
+  const returnFullDataset = options?.returnFullDataset ?? false;
+  const fullHistory = options?.fullHistory ?? false;
 
   const lastCachedDate =
     cachedSignals.length > 0 ? cachedSignals[cachedSignals.length - 1].Date : null;
@@ -182,19 +188,19 @@ export async function refreshSignals(
     ecbAssets, bojAssets, eurUsd, jpyUsd,
     lthSopr, nupl, supplyInProfit,
   ] = await Promise.all([
-    fetchFredTail('WALCL'),
-    fetchFredTail('WTREGEN'),
-    fetchFredTail('RRPONTSYD'),
-    fetchFredTail('DTWEXBGS'),
-    fetchFredTail('SAHMREALTIME'),
-    fetchFredTail('T10Y3M'),
-    fetchFredTail('AMTMNO'),
+    fetchFredSeries('WALCL', fullHistory),
+    fetchFredSeries('WTREGEN', fullHistory),
+    fetchFredSeries('RRPONTSYD', fullHistory),
+    fetchFredSeries('DTWEXBGS', fullHistory),
+    fetchFredSeries('SAHMREALTIME', fullHistory),
+    fetchFredSeries('T10Y3M', fullHistory),
+    fetchFredSeries('AMTMNO', fullHistory),
     fetchBtcTail(),
     fetchMVRVTail(),
-    fetchFredTail('ECBASSETSW'),
-    fetchFredTail('JPNASSETS'),
-    fetchFredTail('DEXUSEU'),
-    fetchFredTail('DEXJPUS'),
+    fetchFredSeries('ECBASSETSW', fullHistory),
+    fetchFredSeries('JPNASSETS', fullHistory),
+    fetchFredSeries('DEXUSEU', fullHistory),
+    fetchFredSeries('DEXJPUS', fullHistory),
     fetchBGeometrics('lth_sopr'),
     fetchBGeometrics('lth_nupl'),
     fetchBGeometrics('profit_loss'),
@@ -224,7 +230,9 @@ export async function refreshSignals(
 
   const cachedByDate = new Map(cachedSignals.map((s) => [s.Date, s]));
   const seedKeys = [
-    'BTCUSD', 'DXY', 'SAHM', 'YC_M', 'NO', 'MVRV', 'US_LIQ', 'SIP',
+    'BTCUSD', 'DXY', 'SAHM', 'YC_M', 'NO', 'MVRV', 'US_LIQ', 'SIP', 'LTH_SOPR',
+    'NUPL', 'ECB_RAW', 'BOJ_RAW', 'EURUSD', 'JPYUSD', 'WALCL', 'WTREGEN', 'RRPONTSYD',
+    'G3_ASSETS',
   ];
 
   for (let i = 0; i < allDates.length; i++) {
@@ -477,13 +485,12 @@ export async function refreshSignals(
   // 8. Strip bulky intermediate fields ─────────────────────────────────
 
   const strip = [
-    'WALCL', 'WTREGEN', 'RRPONTSYD', 'ECB_RAW', 'BOJ_RAW',
-    'EURUSD', 'JPYUSD', 'LTH_SOPR', 'NUPL', 'DXY_SCORE_RAW',
+    'DXY_SCORE_RAW',
   ];
   for (const d of daily) { for (const k of strip) delete d[k]; }
 
   // 9. Return only new rows ────────────────────────────────────────────
 
-  if (!lastCachedDate) return daily as SignalRow[];
+  if (returnFullDataset || !lastCachedDate) return daily as SignalRow[];
   return daily.filter((d) => d.Date > lastCachedDate) as SignalRow[];
 }

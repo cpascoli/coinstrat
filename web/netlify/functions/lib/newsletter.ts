@@ -92,13 +92,20 @@ export interface WeeklyContext {
   highlights: string[];
 }
 
+interface NewsCandidate {
+  title: string;
+  url: string;
+  source: string;
+  summary: string;
+  publishedAt: string | null;
+}
+
 interface ComposeIssueInput {
   actorId?: string | null;
   weekOf: string;
   editorNote?: string | null;
   ctaLabel?: string | null;
   ctaHref?: string | null;
-  curatedLinks: CuratedLinkInput[];
 }
 
 interface SendIssueInput {
@@ -112,7 +119,14 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 const fromEmail = process.env.RESEND_FROM_EMAIL || 'digest@coinstrat.xyz';
 const appUrl = process.env.VITE_APP_URL || 'https://coinstrat.xyz';
 const openAiApiKey = process.env.OPENAI_API_KEY;
-const openAiModel = process.env.OPENAI_MODEL || 'gpt-5.1';
+const openAiModel = process.env.OPENAI_MODEL || 'gpt-5.2';
+const newsLookbackDays = Number(process.env.NEWS_LOOKBACK_DAYS || 7);
+
+const NEWS_QUERIES = [
+  `Bitcoin OR BTC (ETF OR treasury OR adoption OR mining OR regulation OR Lightning OR mempool OR macro) when:${newsLookbackDays}d`,
+  `(Bitcoin OR BTC) (site:coindesk.com OR site:bitcoinmagazine.com OR site:cointelegraph.com OR site:decrypt.co) when:${newsLookbackDays}d`,
+  `(bitcoin OR btc) (market OR treasury OR mining OR policy OR adoption OR lightning) when:${newsLookbackDays}d`,
+];
 
 interface SignalRow {
   Date: string;
@@ -128,6 +142,7 @@ interface SignalRow {
   DXY_SCORE?: number;
   CYCLE_SCORE?: number;
   MVRV?: number;
+  LTH_SOPR?: number;
   US_LIQ_YOY?: number;
   US_LIQ_13W_DELTA?: number;
   G3_YOY?: number;
@@ -202,6 +217,18 @@ function scoreLabel(value?: number): string {
   return 'headwind';
 }
 
+function signalStatusLabel(value?: number | string | null): string {
+  return value === 1 ? 'ON' : 'OFF';
+}
+
+function onOffSentence(label: string, value: number | string | null | undefined, explainer: string): string {
+  return `${label}: ${signalStatusLabel(value)} — ${explainer}`;
+}
+
+function scoreSentence(label: string, value: number | string | null | undefined, explainer: string): string {
+  return `${label}: ${value ?? 'n/a'} — ${explainer}`;
+}
+
 function escapeHtml(value: string): string {
   return value
     .replaceAll('&', '&amp;')
@@ -209,6 +236,23 @@ function escapeHtml(value: string): string {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
+}
+
+function decodeXml(value: string): string {
+  return value
+    .replaceAll('&amp;', '&')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&#39;', "'")
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>');
+}
+
+function stripTags(value: string): string {
+  const decoded = decodeXml(value);
+  return decoded
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function buildUnsubscribeUrl(email?: string | null): string {
@@ -222,6 +266,17 @@ function personalizeTemplate(value: string, email?: string | null): string {
 
 function issueSlug(weekOf: string): string {
   return `newsletter-${weekOf}`;
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function nextScheduledAt(settings: NewsletterSettings, weekOf: string): string | null {
@@ -295,6 +350,111 @@ async function loadIssueLinks(issueId: string): Promise<CuratedLinkInput[]> {
 
   if (error) throw new Error(error.message);
   return (data ?? []) as CuratedLinkInput[];
+}
+
+function parseRssItems(xml: string): NewsCandidate[] {
+  const items = xml.match(/<item[\s\S]*?<\/item>/g) ?? [];
+
+  return items.map((item) => {
+    const read = (pattern: RegExp) => {
+      const match = item.match(pattern);
+      return (match?.[1] ?? match?.[2] ?? '').trim();
+    };
+    const title = stripTags(read(/<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>|<title>([\s\S]*?)<\/title>/));
+    const link = decodeXml(read(/<link>([\s\S]*?)<\/link>/));
+    const description = stripTags(read(/<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>|<description>([\s\S]*?)<\/description>/));
+    const source = stripTags(read(/<source[^>]*>([\s\S]*?)<\/source>/)) || 'News';
+    const publishedAt = read(/<pubDate>([\s\S]*?)<\/pubDate>/) || null;
+
+    return {
+      title,
+      url: link,
+      source,
+      summary: description,
+      publishedAt,
+    };
+  }).filter((item) => item.title && item.url);
+}
+
+async function fetchNewsCandidates(query: string): Promise<NewsCandidate[]> {
+  const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`;
+  const response = await fetchWithTimeout(url, {
+    method: 'GET',
+    headers: {
+      'User-Agent': 'CoinStrat Newsletter Bot/1.0',
+    },
+  }, 6000);
+  if (!response.ok) {
+    throw new Error(`News RSS fetch failed: HTTP ${response.status}`);
+  }
+
+  const xml = await response.text();
+  return parseRssItems(xml);
+}
+
+function scoreNewsCandidate(candidate: NewsCandidate): number {
+  const haystack = `${candidate.title} ${candidate.summary}`.toLowerCase();
+  let score = 0;
+
+  const bitcoinTerms = ['bitcoin', 'btc'];
+  const highSignalTerms = [
+    'etf', 'treasury', 'adoption', 'mining', 'regulation', 'policy',
+    'lightning', 'macro', 'market', 'institution', 'custody', 'reserve',
+  ];
+  const lowSignalTerms = ['memecoin', 'nft', 'airdrop', 'dogecoin', 'solana'];
+  const preferredSources = ['coindesk', 'bitcoin magazine', 'cointelegraph', 'decrypt', 'the block'];
+
+  for (const term of bitcoinTerms) {
+    if (haystack.includes(term)) score += 4;
+  }
+  for (const term of highSignalTerms) {
+    if (haystack.includes(term)) score += 2;
+  }
+  for (const term of lowSignalTerms) {
+    if (haystack.includes(term)) score -= 4;
+  }
+  if (preferredSources.some((source) => candidate.source.toLowerCase().includes(source))) {
+    score += 2;
+  }
+
+  return score;
+}
+
+async function sourceWeeklyStories(
+  context: WeeklyContext,
+  existingLinks: CuratedLinkInput[],
+): Promise<CuratedLinkInput[]> {
+  try {
+    const candidateResults = await Promise.allSettled(
+      NEWS_QUERIES.map((query) => fetchNewsCandidates(query)),
+    );
+
+    const allCandidates = candidateResults.flatMap((result) => (
+      result.status === 'fulfilled' ? result.value : []
+    ));
+
+    const deduped = new Map<string, NewsCandidate>();
+    for (const candidate of allCandidates) {
+      const key = candidate.url || candidate.title.toLowerCase();
+      if (!deduped.has(key)) deduped.set(key, candidate);
+    }
+
+    const selected = Array.from(deduped.values())
+      .sort((a, b) => scoreNewsCandidate(b) - scoreNewsCandidate(a))
+      .slice(0, 8)
+      .map((candidate, index) => ({
+        title: candidate.title,
+        url: candidate.url,
+        source: candidate.source,
+        note: candidate.summary || `Bitcoin headline selected for week of ${context.weekOf}.`,
+        sort_order: index,
+      }));
+
+    return selected.length > 0 ? selected : existingLinks;
+  } catch (error) {
+    console.error('[newsletter/sourceWeeklyStories]', error);
+    return existingLinks;
+  }
 }
 
 async function loadLatestSendLog(issueId: string): Promise<NewsletterSendLog | null> {
@@ -475,6 +635,30 @@ async function loadSignals(): Promise<SignalRow[]> {
   return data;
 }
 
+async function fetchSeriesValueOnOrBefore(file: string, date: string): Promise<number | null> {
+  try {
+    const response = await fetch(`https://charts.bgeometrics.com/files/${file}.json`);
+    if (!response.ok) return null;
+
+    const rows = await response.json() as [number, number | null][];
+    let lastValue: number | null = null;
+
+    for (const [timestamp, value] of rows) {
+      if (value == null || !Number.isFinite(value)) continue;
+      const rowDate = new Date(timestamp).toISOString().slice(0, 10);
+      if (rowDate <= date) {
+        lastValue = value;
+      } else {
+        break;
+      }
+    }
+
+    return lastValue;
+  } catch {
+    return null;
+  }
+}
+
 export async function buildWeeklyContext(weekOf: string): Promise<WeeklyContext> {
   const rows = await loadSignals();
   const endOfIssueWindow = addDays(weekOf, 6);
@@ -486,6 +670,16 @@ export async function buildWeeklyContext(weekOf: string): Promise<WeeklyContext>
   const previousRow = latestRowOnOrBefore(rows, addDays(currentRow.Date, -7));
   const current = currentRow;
   const previous = previousRow ?? {};
+  const [currentLthSopr, previousLthSopr] = await Promise.all([
+    typeof current.LTH_SOPR === 'number'
+      ? Promise.resolve(current.LTH_SOPR)
+      : fetchSeriesValueOnOrBefore('lth_sopr', current.Date),
+    typeof previousRow?.LTH_SOPR === 'number'
+      ? Promise.resolve(previousRow.LTH_SOPR)
+      : previousRow?.Date
+        ? fetchSeriesValueOnOrBefore('lth_sopr', previousRow.Date)
+        : Promise.resolve(null),
+  ]);
 
   const stateChanges: string[] = [];
   if (current.CORE_ON !== previousRow?.CORE_ON) {
@@ -525,6 +719,7 @@ export async function buildWeeklyContext(weekOf: string): Promise<WeeklyContext>
       DXY_SCORE: current.DXY_SCORE ?? null,
       CYCLE_SCORE: current.CYCLE_SCORE ?? null,
       MVRV: current.MVRV ?? null,
+      LTH_SOPR: currentLthSopr,
       DXY: current.DXY ?? null,
       SAHM: current.SAHM ?? null,
       YC_M: current.YC_M ?? null,
@@ -535,8 +730,6 @@ export async function buildWeeklyContext(weekOf: string): Promise<WeeklyContext>
       SIP: current.SIP ?? null,
       SIP_EUPHORIA_FLAG: current.SIP_EUPHORIA_FLAG ?? null,
       SIP_EXHAUSTED: current.SIP_EXHAUSTED ?? null,
-      AB_SCORE: current.AB_SCORE ?? null,
-      ABCD_SCORE: current.ABCD_SCORE ?? null,
     },
     previousWeek: {
       Date: previousRow?.Date ?? null,
@@ -550,6 +743,9 @@ export async function buildWeeklyContext(weekOf: string): Promise<WeeklyContext>
       DXY_SCORE: previousRow?.DXY_SCORE ?? null,
       CYCLE_SCORE: previousRow?.CYCLE_SCORE ?? null,
       MVRV: previousRow?.MVRV ?? null,
+      LTH_SOPR: previousLthSopr,
+      SIP: previousRow?.SIP ?? null,
+      BTC_MA40W: previousRow?.BTC_MA40W ?? null,
       US_LIQ_YOY: previousRow?.US_LIQ_YOY ?? null,
       G3_YOY: previousRow?.G3_YOY ?? null,
     },
@@ -560,6 +756,9 @@ export async function buildWeeklyContext(weekOf: string): Promise<WeeklyContext>
       DXY_SCORE: numericDelta(current.DXY_SCORE, previousRow?.DXY_SCORE),
       CYCLE_SCORE: numericDelta(current.CYCLE_SCORE, previousRow?.CYCLE_SCORE),
       MVRV: numericDelta(current.MVRV, previousRow?.MVRV),
+      LTH_SOPR: numericDelta(currentLthSopr ?? undefined, previousLthSopr ?? undefined),
+      SIP: numericDelta(current.SIP, previousRow?.SIP),
+      BTC_MA40W: numericDelta(current.BTC_MA40W, previousRow?.BTC_MA40W),
       US_LIQ_YOY: numericDelta(current.US_LIQ_YOY, previousRow?.US_LIQ_YOY),
       G3_YOY: numericDelta(current.G3_YOY, previousRow?.G3_YOY),
     },
@@ -578,6 +777,44 @@ function fallbackDraft(
   const current = context.current;
   const coreStatus = current.CORE_ON === 1 ? 'ON' : 'OFF';
   const macroStatus = current.MACRO_ON === 1 ? 'ON' : 'OFF';
+  const changedThisWeek = [
+    `MVRV: ${formatNumber(current.MVRV as number | null)} (${formatDelta(context.deltas.MVRV, 2)} vs. last week)`,
+    `LTH SOPR: ${formatNumber(current.LTH_SOPR as number | null, 3)} (${formatDelta(context.deltas.LTH_SOPR, 3)} vs. last week)`,
+    `Supply in Profit: ${formatPercent(current.SIP as number | null)} (${formatDelta(context.deltas.SIP, 1, ' pts')} vs. last week)`,
+    `40-week SMA: ${formatCurrency(current.BTC_MA40W as number | null)} (${formatDelta(context.deltas.BTC_MA40W, 0)} vs. last week)`,
+  ];
+  const stableState = [
+    onOffSentence(
+      'Core Accumulation',
+      current.CORE_ON,
+      'Signals whether long-term valuation and trend conditions support steady accumulation.',
+    ),
+    onOffSentence(
+      'Macro Accelerator',
+      current.MACRO_ON,
+      'Signals whether liquidity and macro conditions justify increasing the pace of accumulation.',
+    ),
+    scoreSentence(
+      'Valuation score',
+      current.VAL_SCORE,
+      'Measures whether bitcoin looks expensive, fair, or attractively priced versus on-chain value.',
+    ),
+    scoreSentence(
+      'Liquidity score',
+      current.LIQ_SCORE,
+      'Measures whether liquidity conditions are becoming a tailwind or headwind for risk assets.',
+    ),
+    scoreSentence(
+      'Dollar score',
+      current.DXY_SCORE,
+      'Measures whether dollar strength is a headwind or tailwind for bitcoin.',
+    ),
+    scoreSentence(
+      'Business Cycle score',
+      current.CYCLE_SCORE,
+      'Measures whether macro growth data points to expansion, caution, or recession risk.',
+    ),
+  ];
 
   return {
     subject: `CoinStrat Weekly — CORE ${coreStatus} | BTC ${formatCurrency(current.BTCUSD as number | null)}`,
@@ -586,38 +823,27 @@ function fallbackDraft(
     summary: `CoinStrat closes the week with BTC at ${formatCurrency(current.BTCUSD as number | null)}. The model is reading valuation as ${scoreLabel(current.VAL_SCORE as number | undefined)}, liquidity as ${scoreLabel(current.LIQ_SCORE as number | undefined)}, and the macro backdrop as ${scoreLabel(current.CYCLE_SCORE as number | undefined)}.`,
     signalSections: [
       {
-        title: 'Signal Snapshot',
-        body: `CORE is ${coreStatus}, MACRO is ${macroStatus}, and ACCUM is ${current.ACCUM_ON === 1 ? 'ON' : 'OFF'}. BTC is ${formatCurrency(current.BTCUSD as number | null)} with the 200-day average at ${formatCurrency(current.BTC_MA200 as number | null)} and the 40-week average at ${formatCurrency(current.BTC_MA40W as number | null)}.`,
-        bullets: context.stateChanges.length > 0 ? context.stateChanges : ['No major regime changes were recorded this week.'],
+        title: 'What changed this week',
+        body: `BTC finished the week at ${formatCurrency(current.BTCUSD as number | null)}. The most useful week-over-week changes are in valuation, trend, and on-chain positioning rather than in the headline regime signals.`,
+        bullets: changedThisWeek,
       },
       {
-        title: 'Macro Backdrop',
-        body: `Liquidity is ${scoreLabel(current.LIQ_SCORE as number | undefined)} with US liquidity YoY at ${formatPercent(current.US_LIQ_YOY as number | null)}. The dollar score is ${current.DXY_SCORE ?? 'n/a'} and the business cycle score is ${current.CYCLE_SCORE ?? 'n/a'}.`,
-        bullets: [
-          `US liquidity YoY: ${formatPercent(current.US_LIQ_YOY as number | null)}`,
-          `DXY: ${formatNumber(current.DXY as number | null)}`,
-          `Sahm Rule: ${formatNumber(current.SAHM as number | null)}`,
-          `Yield curve (10Y-3M): ${formatNumber(current.YC_M as number | null)}`,
-        ],
-      },
-      {
-        title: 'Valuation and Trend',
-        body: `MVRV sits at ${formatNumber(current.MVRV as number | null)}, with price regime ${current.PRICE_REGIME_ON === 1 ? 'supportive' : 'cautious'}. Supply in profit is ${formatPercent(current.SIP as number | null)} and exhaustion is ${current.SIP_EXHAUSTED === 1 ? 'active' : 'not active'}.`,
-        bullets: [
-          `Valuation score: ${current.VAL_SCORE ?? 'n/a'}`,
-          `Price regime: ${current.PRICE_REGIME_ON === 1 ? 'ON' : 'OFF'}`,
-          `Supply in profit: ${formatPercent(current.SIP as number | null)}`,
-        ],
+        title: 'What did not change',
+        body: `The model’s higher-level posture is still being driven by the same broad mix of valuation, liquidity, dollar, and business-cycle inputs.`,
+        bullets: stableState,
       },
       {
         title: 'Why It Matters',
-        body: editorNote?.trim() || 'This week’s read is best used as a portfolio sizing and pacing signal, not a short-term price prediction. Watch for changes in liquidity, valuation, and macro conditions to determine whether accumulation should stay patient or accelerate.',
-        bullets: context.highlights,
+        body: editorNote?.trim() || 'This week’s read is best used as a portfolio sizing and pacing signal, not a short-term price prediction. Watch for changes in valuation, LTH SOPR, supply in profit, and the 40-week trend line to see whether the regime is strengthening or deteriorating.',
+        bullets: [
+          ...context.highlights,
+          ...(context.stateChanges.length > 0 ? context.stateChanges : []),
+        ],
       },
     ],
     curatedLinks: curatedLinks.map((link) => ({
       ...link,
-      commentary: link.note?.trim() || `Worth reading for additional market context alongside the CoinStrat signal stack.`,
+      commentary: link.note?.trim() || 'Relevant Bitcoin context selected for this week’s digest.',
     })),
     cta: {
       label: ctaLabel?.trim() || 'Open Dashboard',
@@ -701,7 +927,7 @@ async function generateNewsletterDraft(
       {
         role: 'system',
         content:
-          'You write the CoinStrat weekly newsletter. Keep it concise, analytical, and grounded in the provided data only. Do not invent facts, do not make financial promises, and prefer what changed / why it matters framing. Return a JSON object with keys: subject, previewText, headline, summary, signalSections, curatedLinks, cta, complianceFooter. signalSections must be an array of { title, body, bullets }. curatedLinks must keep the supplied URLs.',
+          'You write the CoinStrat weekly newsletter. Keep it concise, analytical, and grounded in the provided data only. Do not invent facts, do not make financial promises, and prefer what changed / why it matters framing. Use exactly these section titles in signalSections: "What changed this week", "What did not change", and "Why it matters". In "What changed this week", explicitly include MVRV, LTH SOPR, Supply in Profit, and the 40-week SMA. In "What did not change", use friendly labels like "Core Accumulation", "Macro Accelerator", "Dollar score", and "Business Cycle score" rather than internal field names like CORE_ON, MACRO_ON, ACCUM_ON, or CYCLE_SCORE, and give each item a one-line explainer. Do not mention AB score or ABCD score. Treat curatedLinks as automatically sourced weekly Bitcoin headlines, not manually curated links. Return a JSON object with keys: subject, previewText, headline, summary, signalSections, curatedLinks, cta, complianceFooter. signalSections must be an array of { title, body, bullets }. curatedLinks must keep the supplied URLs and provide concise why-it-matters commentary.',
       },
       {
         role: 'user',
@@ -720,14 +946,14 @@ async function generateNewsletterDraft(
   };
 
   try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${openAiApiKey}`,
       },
       body: JSON.stringify(payload),
-    });
+    }, 15000);
 
     if (!response.ok) {
       throw new Error(`OpenAI: HTTP ${response.status}`);
@@ -776,7 +1002,7 @@ function renderNewsletterContent(issue: {
   const curatedLinksHtml = issue.draft.curatedLinks.length > 0
     ? `
       <div style="background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:20px;margin-bottom:16px;">
-        <h2 style="margin:0 0 12px;font-size:16px;color:#f8fafc;">Curated Reads</h2>
+        <h2 style="margin:0 0 12px;font-size:16px;color:#f8fafc;">Weekly Bitcoin Headlines</h2>
         ${issue.draft.curatedLinks.map((link) => `
           <div style="margin-bottom:14px;">
             <a href="${escapeHtml(link.url)}" style="color:#93c5fd;font-weight:700;text-decoration:none;">${escapeHtml(link.title)}</a>
@@ -840,7 +1066,7 @@ function renderNewsletterContent(issue: {
     ]),
     ...(issue.draft.curatedLinks.length > 0
       ? [
-        'Curated Reads',
+        'Weekly Bitcoin Headlines',
         ...issue.draft.curatedLinks.flatMap((link) => [
           `${link.title} (${link.source})`,
           link.url,
@@ -896,12 +1122,14 @@ export async function composeNewsletterIssue(input: ComposeIssueInput): Promise<
     if (error) throw new Error(error.message);
   }
 
-  await saveCuratedLinks(issueId, input.curatedLinks);
+  if (!issueId) {
+    throw new Error('Failed to resolve newsletter issue id.');
+  }
 
-  const [context, curatedLinks] = await Promise.all([
-    buildWeeklyContext(weekOf),
-    loadIssueLinks(issueId),
-  ]);
+  const context = await buildWeeklyContext(weekOf);
+  const sourcedLinks = await sourceWeeklyStories(context, existing?.curated_links ?? []);
+  await saveCuratedLinks(issueId, sourcedLinks);
+  const curatedLinks = await loadIssueLinks(issueId);
 
   const generation = await generateNewsletterDraft(
     context,
@@ -1159,7 +1387,6 @@ export async function runAutomaticNewsletterSend() {
   const issue = await composeNewsletterIssue({
     actorId: null,
     weekOf,
-    curatedLinks: existingIssue?.curated_links ?? [],
     editorNote: existingIssue?.editor_note ?? null,
     ctaLabel: existingIssue?.cta_label ?? null,
     ctaHref: existingIssue?.cta_href ?? null,

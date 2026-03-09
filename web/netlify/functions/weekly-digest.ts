@@ -48,7 +48,6 @@ export const handler: Handler = async (event) => {
           editorNote: body.editor_note ?? null,
           ctaLabel: body.cta_label ?? null,
           ctaHref: body.cta_href ?? null,
-          curatedLinks: Array.isArray(body.curated_links) ? body.curated_links : [],
         });
 
         return {
