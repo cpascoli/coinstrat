@@ -11,6 +11,7 @@ import Admin from './views/Admin';
 import ApiDocs from './views/ApiDocs';
 import Terms from './views/Terms';
 import Privacy from './views/Privacy';
+import Unsubscribe from './views/Unsubscribe';
 import { computeAllSignals } from './services/engine';
 import { useAuth } from './contexts/AuthContext';
 import AuthModal from './components/AuthModal';
@@ -242,7 +243,7 @@ const App: React.FC = () => {
               <>
                 <IconButton onClick={(e) => setAnchorEl(e.currentTarget)} size="small">
                   <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main', fontSize: 14, fontWeight: 700 }}>
-                    {(profile?.email?.[0] ?? 'U').toUpperCase()}
+                    {(profile?.email?.[0] ?? user?.email?.[0] ?? 'U').toUpperCase()}
                   </Avatar>
                 </IconButton>
                 <Menu
@@ -263,7 +264,7 @@ const App: React.FC = () => {
                       <ListItemText>Admin</ListItemText>
                     </MenuItem>
                   )}
-                  <MenuItem onClick={() => { setAnchorEl(null); signOut(); }}>
+                  <MenuItem onClick={async () => { setAnchorEl(null); await signOut(); navigate('/'); }}>
                     <ListItemIcon><LogOut size={16} /></ListItemIcon>
                     <ListItemText>Sign out</ListItemText>
                   </MenuItem>
@@ -296,6 +297,7 @@ const App: React.FC = () => {
           <Route path="/api-docs" element={<ApiDocs />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />
+          <Route path="/unsubscribe" element={<Unsubscribe />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
 

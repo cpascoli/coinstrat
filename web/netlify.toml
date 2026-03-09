@@ -64,11 +64,21 @@
   to = "/.netlify/functions/admin-users"
   status = 200
 
+[[redirects]]
+  from = "/api/admin/newsletter"
+  to = "/.netlify/functions/admin-newsletter"
+  status = 200
+
 # --- Email ---
 
 [[redirects]]
   from = "/api/email/subscribe"
   to = "/.netlify/functions/email-subscribe"
+  status = 200
+
+[[redirects]]
+  from = "/api/email/unsubscribe"
+  to = "/.netlify/functions/email-unsubscribe"
   status = 200
 
 [[redirects]]

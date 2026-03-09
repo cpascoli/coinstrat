@@ -49,9 +49,18 @@ export const handler: Handler = async (event) => {
       return { statusCode: 500, body: JSON.stringify({ error: error.message }) };
     }
 
+    const { data: subscribers, error: subErr } = await supabase
+      .from('email_subscribers')
+      .select('*')
+      .order('subscribed_at', { ascending: false });
+
+    if (subErr) {
+      return { statusCode: 500, body: JSON.stringify({ error: subErr.message }) };
+    }
+
     return {
       statusCode: 200,
-      body: JSON.stringify({ users }),
+      body: JSON.stringify({ users, subscribers: subscribers ?? [] }),
     };
   }
 

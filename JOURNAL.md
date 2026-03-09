@@ -221,6 +221,100 @@ The exit logic has gone through four iterations: (1) simple threshold, (2) Eupho
 
 ---
 
+## 2026-03-01 – Phase 1: CoinStrat Pro + Signal API (Day 1)
+
+### What was done
+
+**Full-stack authentication & payments infrastructure:**
+
+- **Supabase integration**: Created SQL migration (`001_initial_schema.sql`) with `profiles` table (tier, API key, Stripe IDs, rate limiting), `email_subscribers` table, RLS policies, auto-profile creation trigger via `handle_new_user()`, and `set_updated_at` trigger.
+- **Auth system**: Built `AuthContext` provider (session management, profile fetching, `onAuthStateChange` listener), `AuthModal` component supporting magic link, email+password, Google OAuth, and GitHub OAuth.
+- **Stripe payments**: Created Netlify Functions for `stripe-checkout` (creates Checkout sessions for Pro/Pro+ plans), `stripe-portal` (customer portal for subscription management), and `stripe-webhook` (handles `checkout.session.completed`, `subscription.updated`, `subscription.deleted`, `invoice.payment_failed`).
+- **Signal API**: Built three Netlify Function endpoints — `/signals/current` (public, rate-limited), `/signals/history` (Pro, API key auth, date range filtering), `/signals/refresh` (cron-protected, stores precomputed signals in Netlify Blobs).
+- **Email system**: Integrated Resend for weekly digest emails via `weekly-digest` function and newsletter subscription via `email-subscribe` function.
+- **Admin dashboard**: Created `Admin.tsx` with user list, tier management, and stats cards, protected by `is_admin` flag.
+- **Profile page**: Built `Profile.tsx` with subscription status, API key reveal/copy, upgrade/manage subscription buttons.
+- **Pricing section**: Added pricing cards (Free, Pro $29/mo, Pro+ $79/mo) and email signup form to the Home page.
+- **Legal pages**: Drafted Terms of Service and Privacy Policy pages.
+- **Route setup**: Added routes for `/profile`, `/admin`, `/api-docs`, `/terms`, `/privacy` and AppBar user menu with sign in/out.
+
+### Challenges
+
+1. **`gen_random_bytes()` not available** to the `supabase_auth_admin` role — the trigger function for generating API keys failed on user registration. Fixed by switching to `replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '')`.
+2. **Supabase magic link redirecting to `localhost:3000`** — default Site URL wasn't configured. Fixed by setting Site URL to `https://coinstrat.xyz` and adding redirect URLs in Supabase Dashboard.
+3. **Auth reload glitch** — after page refresh, the user appeared signed out briefly. Root cause: `onAuthStateChange` fires asynchronously and the loading state was set to `false` before the initial session was processed. Fixed with an `initialised` flag in `AuthContext` and a loading spinner in `Profile.tsx`.
+4. **`@netlify/blobs` missing from bundle** — Netlify build failed because the package wasn't in `package.json`. Added via `npm install`.
+5. **TypeScript type errors in Admin.tsx** — `authHeaders` return type didn't satisfy `HeadersInit`. Fixed by using `Record<string, string>`.
+
+### Learnings
+
+- Supabase's `SECURITY DEFINER` functions run with the function creator's permissions, but the underlying SQL functions available depend on the role executing the trigger. `gen_random_bytes()` requires `pgcrypto` extension access which `supabase_auth_admin` may not have, but `gen_random_uuid()` is universally available.
+- Stripe's Checkout + Customer Portal combo is remarkably clean for subscription management — the portal handles upgrades, downgrades, cancellation, and payment method updates with zero custom UI.
+- Magic link auth requires careful URL configuration in three places: Supabase Site URL, Supabase Redirect URLs, and the `emailRedirectTo` parameter in the client-side `signInWithOtp` call.
+
+### Reflections
+
+This was a massive infrastructure day — going from a pure static signal dashboard to a full SaaS stack with auth, payments, email, and API. The architecture decision to keep Supabase for relational data (users, subscriptions) and Netlify Blobs for signal caching feels right: each tool does what it's best at. The hardest part was debugging the Supabase trigger — error messages from `auth.users` INSERT failures are opaque and required digging into Postgres logs.
+
+---
+
+## 2026-03-02 – External Service Setup & API Playground
+
+### What was done
+
+- **GitHub OAuth setup**: Guided through GitHub Developer Settings → OAuth Apps for Supabase auth.
+- **Google OAuth setup**: Guided through GCP Console → OAuth 2.0 Credentials with consent screen configuration.
+- **Stripe configuration**: Set up products (Pro $29/mo, Pro+ $79/mo), webhook endpoint, and environment variables.
+- **AWS WorkMail setup**: Created `support@coinstrat.xyz` inbox for support and privacy enquiries, with MX records configured in Route 53.
+- **Resend email setup**: Configured domain verification with SPF/DKIM records, existing DMARC record validated.
+- **Supabase admin**: Set `is_admin = true` for the owner account.
+- **Custom auth email templates**: Configured Supabase to use Resend SMTP for branded CoinStrat auth emails.
+
+### Challenges
+
+1. **Supabase legacy vs new API keys** — the dashboard now shows "Publishable" and "Secret" keys alongside legacy `anon`/`service_role` keys. Both work, but the naming confused the setup.
+2. **AWS WorkMail domain not found** — needed to add the domain to WorkMail organization first before creating user mailboxes.
+3. **DMARC record conflict** — existing DMARC for WorkMail needed to cover Resend sends too. The existing `p=quarantine` policy was sufficient for both.
+
+### Learnings
+
+- AWS WorkMail is a viable budget email solution (~$4/user/month) for simple support inboxes when you already manage DNS on Route 53.
+- Resend requires domain verification (SPF + DKIM) but respects existing DMARC records without modification.
+- Google OAuth consent screen must be "published" (not just in testing) for external users to authenticate.
+
+### Reflections
+
+External service wiring is the unsexy but critical part of building a SaaS. Each integration (Supabase, Stripe, Resend, AWS WorkMail) has its own auth model, DNS requirements, and dashboard quirks. Documentation helps but the real knowledge comes from hitting the errors and fixing them one by one.
+
+---
+
+## 2026-03-03 – API Playground Redesign
+
+### What was done
+
+- **API Docs rewrite**: Rebuilt the API docs page (`ApiDocs.tsx`) taking inspiration from the thebotcast project's API playground. New architecture:
+  - `web/src/views/api/endpoints.ts` — structured endpoint definitions (groups, params, auth requirements).
+  - `web/src/views/api/EndpointCard.tsx` — collapsible card component with parameter inputs, live request execution, curl generation, and response display.
+  - `web/src/views/ApiDocs.tsx` — main page with tabbed endpoint groups (Public, Pro, Internal), API key input (auto-filled from profile, persisted in localStorage), rate limit documentation, and signal field overview.
+- Three endpoint groups: **Public** (`/signals/current`), **Pro** (`/signals/history`), **Internal** (`/signals/refresh`, `/email/digest`).
+- Internal endpoints show curl but disable "Send request" (protected by CRON_SECRET).
+
+### Challenges
+
+1. **Private repo access** — the thebotcast repo was private, so the inspiration source had to be read from the local filesystem clone.
+2. **Adapting auth model** — thebotcast uses Bearer tokens per role (host/guest/admin), while CoinStrat uses API keys in `X-API-Key` header. Adapted the `EndpointCard` to handle both patterns.
+
+### Learnings
+
+- Separating endpoint definitions into a data structure (`endpoints.ts`) makes the API docs page trivially extensible — adding a new endpoint is just appending an object to an array.
+- Auto-filling the API key from the user's profile reduces friction for Pro users trying out the API.
+
+### Reflections
+
+A good API playground dramatically lowers the barrier to adoption. The thebotcast pattern of tabbed groups + collapsible cards + inline execution is a solid UX template for any API product. The CoinStrat version is simpler (fewer endpoints, simpler auth) but follows the same principles.
+
+---
+
 ## Cumulative Progress
 
 | Area | Status |
@@ -233,14 +327,22 @@ The exit logic has gone through four iterations: (1) simple threshold, (2) Eupho
 | CORE exit logic | Iterating — current: OR(trend break + valuation gate, euphoria exhaustion) |
 | Netlify deployment | Complete with FRED + BGeometrics proxy functions |
 | Business strategy | Documented in STRATEGY.md |
+| Authentication | Complete — magic link, email+password, Google OAuth, GitHub OAuth via Supabase |
+| Payments | Complete — Stripe Checkout + Customer Portal, webhook integration |
+| Signal API | Complete — /current (public), /history (Pro), /refresh (cron) |
+| Email system | Complete — Resend for weekly digest + newsletter, Supabase for auth emails |
+| Admin dashboard | Complete — user list, tier management, stats |
+| API playground | Complete — tabbed endpoint groups, live execution, curl generation |
+| Legal pages | Complete — Terms of Service, Privacy Policy |
+| External services | Supabase, Stripe, Resend, AWS WorkMail all configured |
 | On-chain execution (Power Wallet) | Future work |
-| Signal API | Future work |
 
 ### Key metrics
 
-- **Files created**: ~25 TypeScript/config files
+- **Files created**: ~45 TypeScript/config files
 - **Lines of engine logic**: ~540 (engine.ts) + ~380 (backtest.ts)
+- **Netlify Functions**: 9 (FRED proxy, BGeometrics proxy, Stooq proxy, stripe-checkout, stripe-portal, stripe-webhook, signal-current, signal-history, signal-refresh, weekly-digest, email-subscribe, admin-users)
 - **Data sources integrated**: 6 (FRED, Blockchain.info, BGeometrics ×3, Binance)
 - **BTC price source iterations**: 4 (CoinGecko → Blockchain.info → Stooq → Hybrid)
 - **CORE exit logic iterations**: 4
-- **Bugs found in production**: 3 major (CoinGecko limit, Netlify redirect ordering, BGeometrics allow-list)
+- **Bugs found in production**: 6 major (CoinGecko limit, Netlify redirect ordering, BGeometrics allow-list, gen_random_bytes trigger, magic link redirect, auth reload glitch)

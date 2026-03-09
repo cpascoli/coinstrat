@@ -14,16 +14,19 @@ import {
   Stack,
 } from '@mui/material';
 import { Copy, Eye, EyeOff, ExternalLink, LogOut, Crown, Zap } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
 const TIER_LABELS: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
   free:     { label: 'Free',     color: '#94a3b8', icon: null },
   pro:      { label: 'Pro',      color: '#60a5fa', icon: <Zap size={14} /> },
   pro_plus: { label: 'Pro+',     color: '#a78bfa', icon: <Crown size={14} /> },
+  lifetime: { label: 'Lifetime', color: '#f59e0b', icon: <Crown size={14} /> },
 };
 
 const Profile: React.FC = () => {
   const { user, profile, tier, loading, signOut } = useAuth();
+  const navigate = useNavigate();
   const [showKey, setShowKey] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -56,12 +59,12 @@ const Profile: React.FC = () => {
     }
   };
 
-  const handleUpgrade = async () => {
+  const handleUpgrade = async (targetTier: 'pro' | 'lifetime') => {
     const res = await fetch('/api/stripe/checkout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        tier: tier === 'free' ? 'pro' : 'pro_plus',
+        tier: targetTier,
         userId: user.id,
         email: user.email,
       }),
@@ -121,14 +124,24 @@ const Profile: React.FC = () => {
             <Alert severity="info" sx={{ mb: 2 }}>
               Upgrade to Pro to access the Signal API, real-time alerts, full backtest history, and the OpenClaw skill.
             </Alert>
-            <Button
-              variant="contained"
-              onClick={handleUpgrade}
-              startIcon={<Zap size={16} />}
-              sx={{ textTransform: 'none', fontWeight: 700 }}
-            >
-              Upgrade to Pro — $9.99/mo
-            </Button>
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              <Button
+                variant="contained"
+                onClick={() => handleUpgrade('pro')}
+                startIcon={<Zap size={16} />}
+                sx={{ textTransform: 'none', fontWeight: 700 }}
+              >
+                Upgrade to Pro — $9.99/mo
+              </Button>
+              <Button
+                variant="contained"
+                onClick={() => handleUpgrade('lifetime')}
+                startIcon={<Crown size={16} />}
+                sx={{ textTransform: 'none', fontWeight: 700, bgcolor: '#f59e0b', '&:hover': { bgcolor: '#f59e0b', filter: 'brightness(1.15)' } }}
+              >
+                Lifetime Deal — $99
+              </Button>
+            </Stack>
           </>
         )}
 
@@ -137,14 +150,14 @@ const Profile: React.FC = () => {
             <Typography color="text.secondary" sx={{ mb: 2 }}>
               You're on the <strong>Pro</strong> plan. 1,000 API calls/day, real-time alerts, full backtest.
             </Typography>
-            <Stack direction="row" spacing={1}>
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               <Button
                 variant="contained"
-                onClick={handleUpgrade}
+                onClick={() => handleUpgrade('lifetime')}
                 startIcon={<Crown size={16} />}
-                sx={{ textTransform: 'none', fontWeight: 700 }}
+                sx={{ textTransform: 'none', fontWeight: 700, bgcolor: '#f59e0b', '&:hover': { bgcolor: '#f59e0b', filter: 'brightness(1.15)' } }}
               >
-                Upgrade to Pro+
+                Switch to Lifetime — $99
               </Button>
               <Button
                 variant="outlined"
@@ -156,6 +169,12 @@ const Profile: React.FC = () => {
               </Button>
             </Stack>
           </>
+        )}
+
+        {tier === 'lifetime' && (
+          <Alert severity="success" icon={<Crown size={18} />}>
+            You have <strong>Lifetime</strong> access. All Pro features are unlocked permanently — no recurring payments.
+          </Alert>
         )}
 
         {tier === 'pro_plus' && (
@@ -181,7 +200,7 @@ const Profile: React.FC = () => {
 
         {tier === 'free' ? (
           <Typography color="text.secondary">
-            Upgrade to Pro to get API access.
+            Upgrade to Pro or get a Lifetime Deal to unlock API access.
           </Typography>
         ) : (
           <>
@@ -215,7 +234,7 @@ const Profile: React.FC = () => {
       <Button
         variant="outlined"
         color="error"
-        onClick={signOut}
+        onClick={async () => { await signOut(); navigate('/'); }}
         startIcon={<LogOut size={16} />}
         sx={{ textTransform: 'none', fontWeight: 600 }}
       >

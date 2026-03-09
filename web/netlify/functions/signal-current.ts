@@ -1,5 +1,5 @@
 import type { Handler } from '@netlify/functions';
-import { getStore } from '@netlify/blobs';
+import { signalsStore } from './lib/store';
 
 const CACHE_KEY = 'signals_latest';
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
@@ -14,7 +14,7 @@ export const handler: Handler = async (event) => {
   }
 
   try {
-    const store = getStore('signals');
+    const store = signalsStore();
     const cached = await store.get(CACHE_KEY, { type: 'json' }).catch(() => null) as any;
 
     if (cached && cached.timestamp && (Date.now() - cached.timestamp) < CACHE_TTL_MS) {

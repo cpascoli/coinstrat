@@ -1,233 +1,219 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Box,
-  Paper,
-  Typography,
   Chip,
-  Button,
-  TextField,
-  Alert,
+  Paper,
   Stack,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Divider,
+  Tab,
+  Tabs,
+  TextField,
+  Typography,
 } from '@mui/material';
-import { Lock, Play, Copy } from 'lucide-react';
+import { Lock, Key } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { endpointGroups } from './api/endpoints';
+import EndpointCard from './api/EndpointCard';
 
-const ENDPOINTS = [
-  {
-    method: 'GET',
-    path: '/api/v1/signals/current',
-    auth: 'None (rate-limited)',
-    description: 'Latest signal snapshot: CORE_ON, MACRO_ON, all scores, BTC price, timestamp.',
-  },
-  {
-    method: 'GET',
-    path: '/api/v1/signals/history',
-    auth: 'API Key (Pro)',
-    description: 'Full daily signal history. Query params: from, to (YYYY-MM-DD).',
-  },
-];
+const KEY_STORAGE = 'coinstrat_api_key';
 
 const ApiDocs: React.FC = () => {
-  const { tier, profile } = useAuth();
+  const { profile, tier } = useAuth();
   const hasApiAccess = tier === 'pro' || tier === 'pro_plus';
-  const [selectedEndpoint, setSelectedEndpoint] = useState(ENDPOINTS[0]);
-  const [response, setResponse] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
 
-  const handleTry = async () => {
-    setLoading(true);
-    setResponse(null);
+  const [tabIdx, setTabIdx] = useState(0);
+  const [apiKey, setApiKey] = useState(() => {
     try {
-      const headers: Record<string, string> = {};
-      if (profile?.api_key && selectedEndpoint.path.includes('history')) {
-        headers['X-API-Key'] = profile.api_key;
-      }
-      const res = await fetch(selectedEndpoint.path, { headers });
-      const data = await res.json();
-      setResponse(JSON.stringify(data, null, 2));
-    } catch (err: any) {
-      setResponse(JSON.stringify({ error: err.message }, null, 2));
+      return localStorage.getItem(KEY_STORAGE) ?? '';
+    } catch {
+      return '';
     }
-    setLoading(false);
-  };
+  });
 
-  const curlExample = selectedEndpoint.path.includes('history')
-    ? `curl -H "X-API-Key: YOUR_API_KEY" https://coinstrat.xyz${selectedEndpoint.path}`
-    : `curl https://coinstrat.xyz${selectedEndpoint.path}`;
+  // Auto-fill API key from profile if available
+  useEffect(() => {
+    if (profile?.api_key && !apiKey) {
+      setApiKey(profile.api_key);
+    }
+  }, [profile?.api_key]);  // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(curlExample);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  // Persist key
+  useEffect(() => {
+    try {
+      if (apiKey) localStorage.setItem(KEY_STORAGE, apiKey);
+      else localStorage.removeItem(KEY_STORAGE);
+    } catch { /* ignore */ }
+  }, [apiKey]);
+
+  const group = useMemo(() => endpointGroups[tabIdx], [tabIdx]);
 
   return (
-    <Box sx={{ maxWidth: 800, mx: 'auto' }}>
-      <Typography variant="h5" sx={{ fontWeight: 900, mb: 1 }}>Signal API</Typography>
-      <Typography color="text.secondary" sx={{ mb: 4 }}>
-        Programmatic access to CoinStrat signals. Use API keys for authenticated endpoints.
-      </Typography>
+    <Box sx={{ maxWidth: 880, mx: 'auto' }}>
+      <Stack spacing={3}>
+        {/* Hero */}
+        <Paper sx={{ p: { xs: 3, sm: 4 } }}>
+          <Stack spacing={2.5}>
+            <Stack direction="row" spacing={1.5} alignItems="center">
+              <Key size={28} style={{ color: '#60a5fa' }} />
+              <Typography
+                variant="h3"
+                component="h1"
+                sx={{ fontWeight: 900, fontSize: { xs: 28, sm: 36, md: 44 } }}
+              >
+                Signal API
+              </Typography>
+            </Stack>
 
-      {!hasApiAccess && (
-        <Alert severity="info" icon={<Lock size={18} />} sx={{ mb: 3 }}>
-          API access requires a Pro or Pro+ subscription. The free <code>/signals/current</code> endpoint is available to everyone.
-        </Alert>
-      )}
+            <Typography sx={{ color: 'text.secondary', maxWidth: 640 }}>
+              Programmatic access to CoinStrat signals. Fetch the latest signal snapshot,
+              query full history, and integrate BTC accumulation intelligence into your
+              applications, bots, and agents.
+            </Typography>
 
-      {/* Endpoints table */}
-      <Paper sx={{ mb: 4 }}>
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell sx={{ fontWeight: 700 }}>Method</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>Endpoint</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>Auth</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>Description</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {ENDPOINTS.map((ep) => (
-                <TableRow
-                  key={ep.path}
-                  hover
-                  selected={selectedEndpoint.path === ep.path}
-                  onClick={() => setSelectedEndpoint(ep)}
-                  sx={{ cursor: 'pointer' }}
-                >
-                  <TableCell>
-                    <Chip label={ep.method} size="small" sx={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 11, bgcolor: '#22c55e22', color: '#22c55e' }} />
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: 13 }}>{ep.path}</Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2" color="text.secondary">{ep.auth}</Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2" color="text.secondary">{ep.description}</Typography>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Paper>
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              <Chip
+                label="Base URL: https://coinstrat.xyz"
+                size="small"
+                variant="outlined"
+                sx={{ fontFamily: 'monospace', fontSize: 12 }}
+              />
+              <Chip label="JSON responses" size="small" variant="outlined" />
+              <Chip
+                label="X-API-Key auth"
+                size="small"
+                variant="outlined"
+                icon={<Lock size={12} />}
+              />
+            </Stack>
 
-      {/* Playground */}
-      <Paper sx={{ p: 3 }}>
-        <Typography variant="h6" sx={{ fontWeight: 800, mb: 2 }}>Playground</Typography>
+            {/* Response fields overview */}
+            <Box>
+              <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.75 }}>
+                Signal fields
+              </Typography>
+              <Stack direction="row" spacing={0} alignItems="center" flexWrap="wrap" useFlexGap sx={{ gap: 0.5 }}>
+                {[
+                  { label: 'CORE_ON', hint: 'Accumulate' },
+                  { label: 'MACRO_ON', hint: 'Accelerate' },
+                  { label: 'VAL_SCORE', hint: '0–3' },
+                  { label: 'LIQ_SCORE', hint: '0–2' },
+                  { label: 'DXY_SCORE', hint: '0–2' },
+                  { label: 'CYCLE_SCORE', hint: '0–2' },
+                ].map((s, i, arr) => (
+                  <Stack key={s.label} direction="row" spacing={0.5} alignItems="center">
+                    <Chip
+                      label={`${s.label} (${s.hint})`}
+                      size="small"
+                      sx={{ fontFamily: 'monospace', fontSize: 11, bgcolor: 'rgba(255,255,255,0.06)' }}
+                    />
+                    {i < arr.length - 1 && (
+                      <Typography variant="caption" sx={{ color: 'text.secondary', mx: 0.25 }}>·</Typography>
+                    )}
+                  </Stack>
+                ))}
+              </Stack>
+            </Box>
+          </Stack>
+        </Paper>
 
-        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-          <Chip label={selectedEndpoint.method} size="small" sx={{ fontWeight: 700, fontFamily: 'monospace', bgcolor: '#22c55e22', color: '#22c55e' }} />
-          <Typography sx={{ fontFamily: 'monospace', fontSize: 14, fontWeight: 600 }}>
-            {selectedEndpoint.path}
-          </Typography>
-        </Stack>
-
-        {/* cURL example */}
-        <Box sx={{ mb: 2, position: 'relative' }}>
-          <TextField
-            value={curlExample}
-            fullWidth
-            size="small"
-            InputProps={{
-              readOnly: true,
-              sx: { fontFamily: 'monospace', fontSize: 12, bgcolor: 'background.default' },
-            }}
-          />
-          <Button
-            size="small"
-            onClick={handleCopy}
-            startIcon={<Copy size={14} />}
-            sx={{
-              position: 'absolute',
-              right: 4,
-              top: 4,
-              textTransform: 'none',
-              fontSize: 11,
-              minWidth: 0,
-            }}
+        {/* API Key input */}
+        <Paper sx={{ p: { xs: 2, sm: 2.5 }, bgcolor: 'rgba(0,0,0,0.25)' }}>
+          <Stack
+            direction={{ xs: 'column', sm: 'row' }}
+            spacing={1.5}
+            alignItems={{ xs: 'stretch', sm: 'center' }}
           >
-            {copied ? 'Copied' : 'Copy'}
-          </Button>
+            <Typography variant="body2" sx={{ fontWeight: 700, whiteSpace: 'nowrap', minWidth: 90 }}>
+              API Key
+            </Typography>
+            <TextField
+              size="small"
+              fullWidth
+              placeholder={hasApiAccess ? 'Your API key (auto-filled from profile)' : 'Upgrade to Pro to get an API key'}
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              type="password"
+              sx={{ '& .MuiInputBase-root': { fontFamily: 'monospace', fontSize: 13 } }}
+            />
+            <Typography variant="caption" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
+              Saved in browser
+            </Typography>
+          </Stack>
+        </Paper>
+
+        {/* Endpoint group tabs */}
+        <Box>
+          <Tabs
+            value={tabIdx}
+            onChange={(_, v: number) => setTabIdx(v)}
+            variant="scrollable"
+            scrollButtons="auto"
+            sx={{ '& .MuiTab-root': { fontWeight: 800, textTransform: 'none' }, mb: 2 }}
+          >
+            {endpointGroups.map((g) => (
+              <Tab
+                key={g.role}
+                label={
+                  <Stack direction="row" spacing={0.75} alignItems="center">
+                    <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: g.color }} />
+                    <span>{g.label}</span>
+                    <Chip
+                      label={g.endpoints.length}
+                      size="small"
+                      sx={{ height: 18, fontSize: 11, fontWeight: 700 }}
+                    />
+                  </Stack>
+                }
+              />
+            ))}
+          </Tabs>
+
+          <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
+            {group.description}
+          </Typography>
+
+          <Stack spacing={1}>
+            {group.endpoints.map((ep) => (
+              <EndpointCard key={ep.id} ep={ep} apiKey={apiKey} />
+            ))}
+          </Stack>
         </Box>
 
-        <Button
-          variant="contained"
-          onClick={handleTry}
-          disabled={loading}
-          startIcon={<Play size={16} />}
-          sx={{ textTransform: 'none', fontWeight: 700, mb: 2 }}
-        >
-          {loading ? 'Loading…' : 'Send request'}
-        </Button>
+        {/* Rate limits */}
+        <Paper sx={{ p: 3 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800, mb: 2 }}>Rate Limits</Typography>
+          <Stack spacing={1}>
+            {[
+              { tier: 'Free (no key)', limit: '100 calls/day', scope: '/signals/current only', color: '#94a3b8' },
+              { tier: 'Pro', limit: '1,000 calls/day', scope: 'All endpoints', color: '#60a5fa' },
+              { tier: 'Lifetime', limit: '1,000 calls/day', scope: 'All endpoints (permanent)', color: '#f59e0b' },
+            ].map((r) => (
+              <Stack key={r.tier} direction="row" spacing={2} alignItems="center">
+                <Chip
+                  label={r.tier}
+                  size="small"
+                  sx={{ minWidth: 100, fontWeight: 700, bgcolor: `${r.color}22`, color: r.color, border: `1px solid ${r.color}44` }}
+                />
+                <Typography variant="body2" sx={{ fontWeight: 600, minWidth: 120 }}>{r.limit}</Typography>
+                <Typography variant="body2" color="text.secondary">{r.scope}</Typography>
+              </Stack>
+            ))}
+          </Stack>
+        </Paper>
 
-        {response && (
-          <>
-            <Divider sx={{ my: 2 }} />
-            <Typography variant="body2" sx={{ fontWeight: 700, mb: 1 }}>Response</Typography>
-            <Box
-              sx={{
-                bgcolor: 'background.default',
-                borderRadius: 1,
-                p: 2,
-                maxHeight: 400,
-                overflow: 'auto',
-                border: '1px solid',
-                borderColor: 'divider',
-              }}
-            >
-              <pre style={{ margin: 0, fontSize: 12, fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
-                {response}
-              </pre>
-            </Box>
-          </>
-        )}
-      </Paper>
-
-      {/* Authentication section */}
-      <Paper sx={{ p: 3, mt: 3 }}>
-        <Typography variant="h6" sx={{ fontWeight: 800, mb: 2 }}>Authentication</Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Authenticated endpoints require an API key passed in the <code>X-API-Key</code> header.
-          You can find your API key on your Profile page after upgrading to Pro.
+        {/* Auth footer */}
+        <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+          Authentication: include{' '}
+          <code style={{ background: 'rgba(255,255,255,0.08)', padding: '1px 5px', borderRadius: 4, fontSize: 12 }}>
+            X-API-Key: &lt;your_key&gt;
+          </code>{' '}
+          for Pro endpoints. Find your key on the{' '}
+          <a href="/profile" style={{ color: '#60a5fa' }}>Profile page</a>.
+          Internal endpoints use{' '}
+          <code style={{ background: 'rgba(255,255,255,0.08)', padding: '1px 5px', borderRadius: 4, fontSize: 12 }}>
+            Authorization: Bearer &lt;CRON_SECRET&gt;
+          </code>.
         </Typography>
-
-        <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: 13, bgcolor: 'background.default', p: 2, borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-          {`curl -H "X-API-Key: cs_abc123..." https://coinstrat.xyz/api/v1/signals/history`}
-        </Typography>
-
-        <Divider sx={{ my: 2 }} />
-
-        <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Rate Limits</Typography>
-        <TableContainer>
-          <Table size="small">
-            <TableBody>
-              <TableRow>
-                <TableCell sx={{ fontWeight: 600 }}>Free (no key)</TableCell>
-                <TableCell color="text.secondary">100 calls/day — <code>/signals/current</code> only</TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell sx={{ fontWeight: 600 }}>Pro</TableCell>
-                <TableCell color="text.secondary">1,000 calls/day — all endpoints</TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell sx={{ fontWeight: 600 }}>Pro+</TableCell>
-                <TableCell color="text.secondary">10,000 calls/day — all endpoints + webhooks</TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Paper>
+      </Stack>
     </Box>
   );
 };

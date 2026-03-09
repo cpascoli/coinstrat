@@ -36,16 +36,16 @@ export const handler: Handler = async (event) => {
         const session = stripeEvent.data.object as Stripe.Checkout.Session;
         const userId = session.client_reference_id;
         const customerId = session.customer as string;
-        const subscriptionId = session.subscription as string;
+        const subscriptionId = session.subscription as string | null;
         const tier = session.metadata?.tier ?? 'pro';
 
         if (userId) {
           await supabase.from('profiles').update({
             tier,
             stripe_customer_id: customerId,
-            stripe_subscription_id: subscriptionId,
+            ...(subscriptionId ? { stripe_subscription_id: subscriptionId } : {}),
           }).eq('id', userId);
-          console.log(`[stripe-webhook] User ${userId} upgraded to ${tier}`);
+          console.log(`[stripe-webhook] User ${userId} upgraded to ${tier}${tier === 'lifetime' ? ' (one-time)' : ''}`);
         }
         break;
       }

@@ -1,20 +1,44 @@
 import type { Handler } from '@netlify/functions';
-import { getStore } from '@netlify/blobs';
+import { createClient } from '@supabase/supabase-js';
+import { signalsStore } from './lib/store';
+import { refreshSignals } from './lib/compute';
 
 /**
- * Triggered by the OpenClaw cron to recompute signals and refresh the cache.
- * Expects a shared secret in the Authorization header for protection.
+ * Refresh the signal cache.  Two modes:
  *
- * The actual signal computation runs client-side (engine.ts). This endpoint
- * accepts precomputed signal data as a POST body and stores it in Netlify Blobs.
- * This avoids duplicating the heavy data-fetching logic server-side.
+ *  1. Empty body  → incremental refresh.  Reads the existing cache for
+ *     historical context, fetches only the recent tail from each API,
+ *     computes new signal rows, and appends them to the cache.
+ *     This is the mode a daily cron (e.g. OpenClaw) should use.
  *
- * Flow:
- *   1. OpenClaw agent fetches raw data + runs engine (or calls the site and extracts data)
- *   2. Agent POSTs the computed signal array here
- *   3. This function stores it in Netlify Blobs with a timestamp
+ *  2. Non-empty JSON array body → bulk seed / replace.  Stores the
+ *     provided pre-computed data directly (manual seed via seed-cache.sh).
+ *
+ * Auth: `Bearer <CRON_SECRET>` or a valid admin Supabase JWT.
  */
 const CRON_SECRET = process.env.CRON_SECRET;
+
+async function isAdminJwt(token: string): Promise<boolean> {
+  try {
+    const sb = createClient(
+      process.env.VITE_SUPABASE_URL!,
+      process.env.VITE_SUPABASE_ANON_KEY!,
+    );
+    const { data: { user }, error } = await sb.auth.getUser(token);
+    if (error || !user) return false;
+
+    const admin = createClient(
+      process.env.VITE_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    );
+    const { data } = await admin
+      .from('profiles')
+      .select('is_admin')
+      .eq('id', user.id)
+      .single();
+    return data?.is_admin === true;
+  } catch { return false; }
+}
 
 export const handler: Handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
@@ -25,32 +49,109 @@ export const handler: Handler = async (event) => {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
   }
 
-  // Verify shared secret
   const auth = event.headers['authorization'];
-  if (!CRON_SECRET || auth !== `Bearer ${CRON_SECRET}`) {
+  const token = (auth ?? '').replace('Bearer ', '');
+  const isCron = CRON_SECRET && token === CRON_SECRET;
+  const isAdmin = !isCron && token ? await isAdminJwt(token) : false;
+
+  if (!isCron && !isAdmin) {
     return { statusCode: 403, body: JSON.stringify({ error: 'Forbidden' }) };
   }
 
   try {
-    const signals = JSON.parse(event.body || '[]');
-    if (!Array.isArray(signals) || signals.length === 0) {
-      return { statusCode: 400, body: JSON.stringify({ error: 'Expected non-empty signal array.' }) };
+    const store = signalsStore();
+    const body = (event.body ?? '').trim();
+    const hasPayload = body.length > 2 && body !== '{}';
+
+    if (hasPayload) {
+      // ── Mode 2: bulk seed / replace ────────────────────────────────
+      const signals = JSON.parse(body);
+      if (!Array.isArray(signals) || signals.length === 0) {
+        return {
+          statusCode: 400,
+          body: JSON.stringify({ error: 'Expected non-empty signal array.' }),
+        };
+      }
+
+      await store.setJSON('signals_latest', {
+        timestamp: Date.now(),
+        count: signals.length,
+        data: signals,
+      });
+
+      console.log(`[signal-refresh] Bulk-seeded ${signals.length} rows.`);
+      return {
+        statusCode: 200,
+        body: JSON.stringify({
+          ok: true,
+          mode: 'seed',
+          count: signals.length,
+          cached_at: new Date().toISOString(),
+        }),
+      };
     }
 
-    const store = getStore('signals');
+    // ── Mode 1: incremental refresh ────────────────────────────────
+    const cached = await store
+      .get('signals_latest', { type: 'json' })
+      .catch(() => null) as any;
+
+    const cachedData: any[] = cached?.data ?? [];
+    if (cachedData.length === 0) {
+      return {
+        statusCode: 400,
+        body: JSON.stringify({
+          error:
+            'Cache is empty — cannot run incremental refresh. ' +
+            'Seed the cache first via seed-cache.sh.',
+        }),
+      };
+    }
+
+    const lastDate = cachedData[cachedData.length - 1]?.Date;
+    console.log(
+      `[signal-refresh] Incremental refresh from ${lastDate} ` +
+      `(${cachedData.length} cached rows)…`,
+    );
+
+    const newRows = await refreshSignals(cachedData);
+
+    if (newRows.length === 0) {
+      return {
+        statusCode: 200,
+        body: JSON.stringify({
+          ok: true,
+          mode: 'incremental',
+          new_rows: 0,
+          message: 'Cache is already up-to-date.',
+          cached_at: cached?.timestamp
+            ? new Date(cached.timestamp).toISOString()
+            : null,
+        }),
+      };
+    }
+
+    const combined = [...cachedData, ...newRows];
+
     await store.setJSON('signals_latest', {
       timestamp: Date.now(),
-      count: signals.length,
-      data: signals,
+      count: combined.length,
+      data: combined,
     });
 
-    console.log(`[signal-refresh] Cached ${signals.length} signal records.`);
+    console.log(
+      `[signal-refresh] Appended ${newRows.length} new rows ` +
+      `(${combined.length} total).`,
+    );
 
     return {
       statusCode: 200,
       body: JSON.stringify({
         ok: true,
-        count: signals.length,
+        mode: 'incremental',
+        new_rows: newRows.length,
+        total: combined.length,
+        latest_date: newRows[newRows.length - 1].Date,
         cached_at: new Date().toISOString(),
       }),
     };

@@ -86,6 +86,9 @@ const Home: React.FC = () => {
         </Box>
       </Box>
 
+      {/* Email signup — high visibility, right below the hero */}
+      <EmailSignup />
+
       <section className="space-y-6">
         <div className="flex items-center gap-3 border-b pb-2">
           <h2 className="text-2xl font-bold text-slate-100">System Architecture</h2>
@@ -179,9 +182,6 @@ const Home: React.FC = () => {
 
       {/* Pricing */}
       <PricingSection />
-
-      {/* Email signup */}
-      <EmailSignup />
 
       <section className="space-y-6">
         <div className="flex items-center gap-3 border-b pb-2">
@@ -438,6 +438,7 @@ const PLANS = [
     period: 'forever',
     color: '#94a3b8',
     icon: null,
+    badge: null,
     features: [
       'Live dashboard & signals',
       'Score breakdown',
@@ -448,13 +449,15 @@ const PLANS = [
     cta: 'Get started',
     href: '/dashboard',
     variant: 'outlined' as const,
+    tier: 'free' as const,
   },
   {
     name: 'Pro',
-    price: '$14.99',
+    price: '$9.99',
     period: '/month',
     color: '#60a5fa',
     icon: <Zap size={18} />,
+    badge: null,
     features: [
       'Everything in Free',
       'Full chart history',
@@ -466,23 +469,27 @@ const PLANS = [
     cta: 'Upgrade to Pro',
     href: '/profile',
     variant: 'contained' as const,
+    tier: 'pro' as const,
   },
   {
-    name: 'Pro+',
-    price: '$29.99',
-    period: '/month',
-    color: '#a78bfa',
+    name: 'Lifetime',
+    price: '$99',
+    period: ' one-time',
+    color: '#f59e0b',
     icon: <Crown size={18} />,
+    badge: 'First 100 Supporters',
     features: [
-      'Everything in Pro',
-      'API (10K calls/day)',
-      'Webhook notifications',
-      'Custom strategy builder',
+      'Everything in Pro — forever',
+      'No recurring payments',
+      'Lock in lifetime access',
+      'Signal API (1K calls/day)',
+      'All future Pro features included',
       'Priority support',
     ],
-    cta: 'Upgrade to Pro+',
+    cta: 'Get Lifetime Access',
     href: '/profile',
     variant: 'contained' as const,
+    tier: 'lifetime' as const,
   },
 ];
 
@@ -500,9 +507,11 @@ const PricingSection: React.FC = () => {
             sx={{
               position: 'relative',
               overflow: 'hidden',
-              borderColor: plan.name === 'Pro' ? plan.color : 'rgba(148,163,184,0.35)',
-              borderWidth: plan.name === 'Pro' ? 2 : 1,
-              background: 'linear-gradient(180deg, rgba(2,6,23,0.35) 0%, rgba(15,23,42,0.65) 100%)',
+              borderColor: plan.name === 'Lifetime' ? plan.color : plan.name === 'Pro' ? plan.color : 'rgba(148,163,184,0.35)',
+              borderWidth: (plan.name === 'Pro' || plan.name === 'Lifetime') ? 2 : 1,
+              background: plan.name === 'Lifetime'
+                ? 'linear-gradient(180deg, rgba(245,158,11,0.08) 0%, rgba(15,23,42,0.65) 100%)'
+                : 'linear-gradient(180deg, rgba(2,6,23,0.35) 0%, rgba(15,23,42,0.65) 100%)',
               boxShadow: 'none',
               display: 'flex',
               flexDirection: 'column',
@@ -512,8 +521,8 @@ const PricingSection: React.FC = () => {
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
                 {plan.icon}
                 <Typography sx={{ fontWeight: 800, fontSize: 18 }}>{plan.name}</Typography>
-                {plan.name === 'Pro' && (
-                  <Chip label="Popular" size="small" sx={{ bgcolor: `${plan.color}22`, color: plan.color, fontWeight: 700, fontSize: 11 }} />
+                {plan.badge && (
+                  <Chip label={plan.badge} size="small" sx={{ bgcolor: `${plan.color}22`, color: plan.color, fontWeight: 700, fontSize: 11 }} />
                 )}
               </Stack>
 
@@ -584,14 +593,15 @@ const EmailSignup: React.FC = () => {
       }}
     >
       <CardContent sx={{ textAlign: 'center', py: 4 }}>
-        <Typography variant="h5" sx={{ fontWeight: 900, mb: 1 }}>Stay in the loop</Typography>
-        <Typography color="text.secondary" sx={{ mb: 3, maxWidth: 480, mx: 'auto' }}>
-          Get a free weekly digest with current signal status, key metrics, and market context — delivered every Monday.
+        <Typography variant="h5" sx={{ fontWeight: 900, mb: 1 }}>Free Weekly Signal Report</Typography>
+        <Typography color="text.secondary" sx={{ mb: 3, maxWidth: 540, mx: 'auto' }}>
+          Every Monday, get the latest accumulation signal, macro scores, and a
+          brief market read — straight to your inbox. No spam, unsubscribe anytime.
         </Typography>
 
         {status === 'success' ? (
           <Alert severity="success" sx={{ maxWidth: 400, mx: 'auto' }}>
-            You're subscribed. Check your inbox on Monday.
+            You're in! Your first report arrives next Monday.
           </Alert>
         ) : (
           <Box
@@ -615,7 +625,7 @@ const EmailSignup: React.FC = () => {
               disabled={status === 'loading'}
               sx={{ textTransform: 'none', fontWeight: 700, whiteSpace: 'nowrap', px: 3 }}
             >
-              {status === 'loading' ? 'Sending…' : 'Subscribe'}
+              {status === 'loading' ? 'Joining…' : 'Get the report'}
             </Button>
           </Box>
         )}

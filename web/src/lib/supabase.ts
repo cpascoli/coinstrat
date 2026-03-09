@@ -13,7 +13,7 @@ export const supabase = supabaseUrl && supabaseAnonKey
   ? createClient(supabaseUrl, supabaseAnonKey)
   : null;
 
-export type Tier = 'free' | 'pro' | 'pro_plus';
+export type Tier = 'free' | 'pro' | 'pro_plus' | 'lifetime';
 
 export interface Profile {
   id: string;

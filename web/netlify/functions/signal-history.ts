@@ -1,6 +1,6 @@
 import type { Handler } from '@netlify/functions';
-import { getStore } from '@netlify/blobs';
 import { createClient } from '@supabase/supabase-js';
+import { signalsStore } from './lib/store';
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL!,
@@ -76,7 +76,7 @@ export const handler: Handler = async (event) => {
   }
 
   try {
-    const store = getStore('signals');
+    const store = signalsStore();
     const cached = await store.get('signals_latest', { type: 'json' }).catch(() => null) as any;
 
     if (!cached?.data) {

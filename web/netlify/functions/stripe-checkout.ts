@@ -8,7 +8,10 @@ const SITE_URL = process.env.URL || 'https://coinstrat.netlify.app';
 const PRICE_IDS: Record<string, string | undefined> = {
   pro: process.env.STRIPE_PRO_PRICE_ID,
   pro_plus: process.env.STRIPE_PRO_PLUS_PRICE_ID,
+  lifetime: process.env.STRIPE_LIFETIME_PRICE_ID,
 };
+
+const ONE_TIME_TIERS = new Set(['lifetime']);
 
 export const handler: Handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
@@ -27,8 +30,10 @@ export const handler: Handler = async (event) => {
       return { statusCode: 400, body: JSON.stringify({ error: 'Invalid tier' }) };
     }
 
+    const isOneTime = ONE_TIME_TIERS.has(tier);
+
     const session = await stripe.checkout.sessions.create({
-      mode: 'subscription',
+      mode: isOneTime ? 'payment' : 'subscription',
       payment_method_types: ['card'],
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: `${SITE_URL}/profile?checkout=success`,
