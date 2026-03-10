@@ -29,13 +29,12 @@ import {
   Crown,
   Database,
   Eye,
+  ExternalLink,
   Mail,
   Newspaper,
-  Plus,
   RefreshCw,
   Send,
   Shield,
-  Trash2,
   Users,
   Zap,
 } from 'lucide-react';
@@ -363,10 +362,6 @@ const Admin: React.FC = () => {
         editor_note: editorNote,
         cta_label: ctaLabel,
         cta_href: ctaHref,
-        curated_links: curatedLinks.map((link, index) => ({
-          ...link,
-          sort_order: index,
-        })),
       };
 
       const res = await fetch('/api/admin/newsletter', {
@@ -410,21 +405,6 @@ const Admin: React.FC = () => {
     } finally {
       setNewsletterBusy(false);
     }
-  };
-
-  const updateCuratedLink = (index: number, patch: Partial<CuratedLink>) => {
-    setCuratedLinks((prev) => prev.map((link, idx) => (idx === index ? { ...link, ...patch } : link)));
-  };
-
-  const addCuratedLink = () => {
-    setCuratedLinks((prev) => [...prev, emptyCuratedLink(prev.length)]);
-  };
-
-  const removeCuratedLink = (index: number) => {
-    setCuratedLinks((prev) => {
-      if (prev.length === 1) return [emptyCuratedLink(0)];
-      return prev.filter((_, idx) => idx !== index).map((link, idx) => ({ ...link, sort_order: idx }));
-    });
   };
 
   return (
@@ -674,6 +654,15 @@ const Admin: React.FC = () => {
                   </Button>
                   <Button
                     variant="outlined"
+                    disabled={newsletterBusy || newsletterLoading}
+                    onClick={() => handleNewsletterAction('compose')}
+                    startIcon={<RefreshCw size={14} />}
+                    sx={{ textTransform: 'none', fontWeight: 700 }}
+                  >
+                    Refresh sourced stories
+                  </Button>
+                  <Button
+                    variant="outlined"
                     disabled={newsletterBusy || newsletterLoading || !newsletterIssue?.id}
                     onClick={() => handleNewsletterAction('send_test')}
                     startIcon={<Eye size={14} />}
@@ -813,59 +802,53 @@ const Admin: React.FC = () => {
               <Paper sx={{ p: 2.5 }}>
                 <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
                   <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
-                    Curated Links
+                    Sourced Stories
                   </Typography>
-                  <Button
-                    variant="text"
-                    startIcon={<Plus size={14} />}
-                    onClick={addCuratedLink}
-                    sx={{ textTransform: 'none', fontWeight: 700 }}
-                  >
-                    Add link
-                  </Button>
+                  <Chip
+                    label={`${curatedLinks.filter((link) => link.title && link.url).length} stories`}
+                    size="small"
+                    variant="outlined"
+                  />
                 </Stack>
 
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  CoinStrat now sources weekly Bitcoin headlines automatically. Review them here and use
+                  `Refresh sourced stories` if you want a different selection.
+                </Typography>
+
                 <Stack spacing={2}>
-                  {curatedLinks.map((link, index) => (
-                    <Paper key={`${link.id ?? 'new'}-${index}`} variant="outlined" sx={{ p: 1.5 }}>
-                      <Stack spacing={1.25}>
-                        <Stack direction="row" justifyContent="space-between" alignItems="center">
-                          <Typography variant="caption" color="text.secondary">
-                            Link {index + 1}
-                          </Typography>
-                          <IconButton size="small" onClick={() => removeCuratedLink(index)}>
-                            <Trash2 size={14} />
-                          </IconButton>
-                        </Stack>
-                        <TextField
-                          size="small"
-                          label="Title"
-                          value={link.title}
-                          onChange={(event) => updateCuratedLink(index, { title: event.target.value })}
-                        />
-                        <TextField
-                          size="small"
-                          label="URL"
-                          value={link.url}
-                          onChange={(event) => updateCuratedLink(index, { url: event.target.value })}
-                        />
-                        <TextField
-                          size="small"
-                          label="Source"
-                          value={link.source}
-                          onChange={(event) => updateCuratedLink(index, { source: event.target.value })}
-                        />
-                        <TextField
-                          size="small"
-                          label="Note"
-                          multiline
-                          minRows={2}
-                          value={link.note ?? ''}
-                          onChange={(event) => updateCuratedLink(index, { note: event.target.value })}
-                        />
-                      </Stack>
-                    </Paper>
-                  ))}
+                  {curatedLinks.filter((link) => link.title && link.url).length === 0 ? (
+                    <Alert severity="info">Compose the draft to generate sourced stories.</Alert>
+                  ) : (
+                    curatedLinks
+                      .filter((link) => link.title && link.url)
+                      .map((link, index) => (
+                        <Paper key={`${link.id ?? 'story'}-${index}`} variant="outlined" sx={{ p: 1.5 }}>
+                          <Stack spacing={0.75}>
+                            <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
+                              <Typography sx={{ fontWeight: 700 }}>{link.title}</Typography>
+                              <IconButton
+                                size="small"
+                                component="a"
+                                href={link.url}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                <ExternalLink size={14} />
+                              </IconButton>
+                            </Stack>
+                            <Typography variant="caption" color="text.secondary">
+                              {link.source}
+                            </Typography>
+                            {link.note && (
+                              <Typography variant="body2" color="text.secondary">
+                                {link.note}
+                              </Typography>
+                            )}
+                          </Stack>
+                        </Paper>
+                      ))
+                  )}
                 </Stack>
               </Paper>
             </Stack>

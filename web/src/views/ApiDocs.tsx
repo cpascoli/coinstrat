@@ -11,6 +11,8 @@ import {
 } from '@mui/material';
 import { Lock, Key } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import DocsPager from '../components/DocsPager';
+import DocsSectionNav from '../components/DocsSectionNav';
 import { endpointGroups } from './api/endpoints';
 import EndpointCard from './api/EndpointCard';
 
@@ -49,6 +51,8 @@ const ApiDocs: React.FC = () => {
   return (
     <Box sx={{ maxWidth: 880, mx: 'auto' }}>
       <Stack spacing={3}>
+        <DocsSectionNav />
+
         {/* Hero */}
         <Paper sx={{ p: { xs: 3, sm: 4 } }}>
           <Stack spacing={2.5}>
@@ -213,6 +217,8 @@ const ApiDocs: React.FC = () => {
             Authorization: Bearer &lt;CRON_SECRET&gt;
           </code>.
         </Typography>
+
+        <DocsPager />
       </Stack>
     </Box>
   );

@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import OpenInNewIcon from '@mui/icons-material/OpenInNew';
-import { Box, Button, Card, CardContent, CardHeader, Chip, Divider, IconButton, Link, Stack, TextField, Tooltip, Typography, Alert } from '@mui/material';
+import { Box, Button, Card, CardContent, Chip, Link, Stack, TextField, Typography, Alert } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { HeroIllustration } from '../components/HeroIllustration';
 import { Zap, Crown, Check } from 'lucide-react';
@@ -74,8 +73,8 @@ const Home: React.FC = () => {
               <Button variant="contained" size="medium" onClick={() => navigate('/dashboard')} sx={{ fontWeight: 900 }}>
                 Open Dashboard
               </Button>
-              <Button variant="outlined" size="medium" onClick={() => navigate('/charts/system')} sx={{ fontWeight: 900 }}>
-                View Charts
+              <Button variant="outlined" size="medium" onClick={() => navigate('/docs')} sx={{ fontWeight: 900 }}>
+                Read Docs
               </Button>
             </Stack>
           </Box>
@@ -182,126 +181,6 @@ const Home: React.FC = () => {
 
       {/* Pricing */}
       <PricingSection />
-
-      <section className="space-y-6">
-        <div className="flex items-center gap-3 border-b pb-2">
-          <h2 className="text-2xl font-bold text-slate-100">Data Feeds</h2>
-        </div>
-
-        <p className="text-slate-300 leading-relaxed">
-          The app derives metrics and computes scores from the following 3rd party data feeds
-        </p>
-
-        {/* Use MUI breakpoints for layout so cards reliably become multi-column on desktop */}
-        <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr', lg: '1fr 1fr 1fr' } }}>
-          <ReferenceCard
-            title="Fed Total Assets"
-            id="WALCL"
-            href="https://fred.stlouisfed.org/series/WALCL"
-            meaning="The Federal Reserve’s total assets (balance sheet)."
-            usage={[
-              "Liquidity inputs: used in US net liquidity proxy.",
-              "Derived: US_LIQ = WALCL − WTREGEN − RRPONTSYD (RRP normalized to match units).",
-            ]}
-          />
-
-          <ReferenceCard
-            title="Treasury General Account"
-            id="WTREGEN"
-            href="https://fred.stlouisfed.org/series/WTREGEN"
-            meaning="U.S. Treasury deposits at the Fed (TGA)."
-            usage={[
-              "Liquidity inputs: used in US net liquidity proxy.",
-              "Derived: US_LIQ = WALCL − WTREGEN − RRPONTSYD.",
-            ]}
-          />
-
-          <ReferenceCard
-            title="Overnight Reverse Repo"
-            id="RRPONTSYD"
-            href="https://fred.stlouisfed.org/series/RRPONTSYD"
-            meaning="Daily ON RRP usage reported by the New York Fed"
-            usage={[
-              "Liquidity inputs: used in US net liquidity proxy.",
-              "Derived: US_LIQ = WALCL − WTREGEN − RRPONTSYD.",
-              "Scoring: contributes to LIQ_SCORE via US_LIQ YoY and 13-week delta.",
-            ]}
-          />
-
-          <ReferenceCard
-            title="USD Index"
-            id="DTWEXBGS"
-            href="https://fred.stlouisfed.org/series/DTWEXBGS"
-            meaning="Broad trade‑weighted U.S. dollar index (USD strength proxy; not ICE DXY)."
-            usage={[
-              "USD regime scoring (DXY_SCORE): compute MA50, MA200, and ROC20.",
-              "Rules: ROC20 > +0.5% → score 0; ROC20 < -0.5% and MA50 < MA200 → score 2; else score 1.",
-            ]}
-          />
-
-          <ReferenceCard
-            title="Sahm Rule"
-            id="SAHMREALTIME"
-            href="https://fred.stlouisfed.org/series/SAHMREALTIME"
-            meaning="Monthly Sahm Rule indicator (labor market deterioration proxy)."
-            usage={[
-              "Business cycle scoring (BIZ_CYCLE_SCORE): recession-risk if SAHM ≥ 0.50; expansion if SAHM < 0.35 (with other conditions).",
-            ]}
-          />
-
-          <ReferenceCard
-            title="Yield Curve (10Y − 3M)"
-            id="T10Y3M"
-            href="https://fred.stlouisfed.org/series/T10Y3M"
-            meaning="Daily 10-year minus 3-month Treasury spread (curve slope / recession risk proxy)."
-            usage={[
-              "Business cycle scoring: recession-risk if YC < 0; expansion if YC ≥ 0.75 (with other conditions).",
-            ]}
-          />
-
-          <ReferenceCard
-            title="Manufacturers’ New Orders"
-            id="AMTMNO"
-            href="https://fred.stlouisfed.org/series/AMTMNO"
-            meaning="Monthly manufacturing new orders proxy (demand/industrial momentum)."
-            usage={[
-              "Business cycle scoring: compute NO_YOY (YoY %) and NO_MOM3 (3‑month momentum approximation).",
-              "Recession-risk if NO_YOY < 0 and NO_MOM3 ≤ 0; expansion requires NO_YOY ≥ 0 (with other conditions).",
-            ]}
-          />
-
-          <ReferenceCard
-            title="Long-Term Holder SOPR"
-            id="LTH SOPR (BGeometrics)"
-            href="https://charts.bgeometrics.com/lth_sopr.html"
-            meaning="Spent Output Profit Ratio for coins held > 155 days. LTH SOPR < 1 means long-term holders are selling at a loss (capitulation)."
-            usage={[
-              "Valuation amplifier: when MVRV is in entry range (< 1.8) and LTH SOPR < 1.0, VAL_SCORE is upgraded to 2 (strong). Both < 1.0 gives score 3 (extreme).",
-            ]}
-          />
-
-          <ReferenceCard
-            title="Market Value to Realized Value"
-            id="MVRV"
-            href="https://www.blockchain.com/explorer/charts/mvrv"
-            meaning="Market Value to Realized Value ratio (valuation proxy)."
-            usage={[
-              "Valuation scoring (VAL_SCORE): MVRV < 1.0 → 3/2; 1.0–1.8 → 2/1; 1.8–3.5 → 1; ≥ 3.5 → 0 (euphoria).",
-            ]}
-          />
-
-          <ReferenceCard
-            title="Supply in Profit"
-            id="SIP (BGeometrics)"
-            href="https://charts.bgeometrics.com/supply_in_profit.html"
-            meaning="Percentage of total BTC supply currently in profit (current price above the price at which coins last moved on-chain)."
-            usage={[
-              "Euphoria Exhaustion exit logic: SIP > 95% for 14+ consecutive days arms the exit (euphoria detected).",
-              "If SIP then drops below 90% and fails to reclaim 95% within 45 days, SIP_EXHAUSTED is confirmed — CORE exit Condition B fires.",
-            ]}
-          />
-        </Box>
-      </section>
     </div>
   );
 };
@@ -339,92 +218,6 @@ const DocCard = ({ title, text }: any) => (
       <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.6 }}>
         {text}
       </Typography>
-    </CardContent>
-  </Card>
-);
-
-const ReferenceCard = ({
-  title,
-  id,
-  href,
-  meaning,
-  usage,
-}: {
-  title: string;
-  id: string;
-  href: string;
-  meaning: string;
-  usage: string[];
-}) => (
-  <Card>
-    <CardHeader
-      title={
-        <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 1.5 }}>
-          <Typography sx={{ fontWeight: 900, lineHeight: 1.15 }}>
-            {title} -{' '}
-            <Box
-              component="span"
-              sx={{
-                fontFamily:
-                  'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                fontWeight: 800,
-              }}
-            >
-              {id}
-            </Box>
-          </Typography>
-          <Tooltip title="Open source">
-            <IconButton
-              component="a"
-              href={href}
-              target="_blank"
-              rel="noreferrer"
-              size="small"
-              sx={{
-                color: '#fff',
-                border: '1px solid',
-                borderColor: 'rgba(148,163,184,0.35)',
-                bgcolor: 'rgba(2,6,23,0.18)',
-                '&:hover': { borderColor: 'rgba(148,163,184,0.6)', bgcolor: 'rgba(2,6,23,0.28)' },
-              }}
-              aria-label={`Open ${id} source`}
-            >
-              <OpenInNewIcon sx={{ fontSize: 16, color: '#fff' }} />
-            </IconButton>
-          </Tooltip>
-        </Box>
-      }
-      subheader={
-        <Typography variant="body2" color="text.secondary">
-          {meaning}
-        </Typography>
-      }
-    />
-    <Divider />
-    <CardContent>
-      <Stack spacing={1.25}>
-        <Box
-          sx={{
-            border: '1px solid',
-            borderColor: 'divider',
-            borderRadius: 2,
-            px: 2,
-            py: 1.25,
-            bgcolor: 'rgba(2,6,23,0.10)',
-          }}
-        >
-          <Typography variant="overline" color="text.secondary">
-            How it’s used
-          </Typography>
-          <Stack component="ul" spacing={0.75} sx={{ mt: 0.5, pl: 2 }}>
-            {usage.map((u) => (
-              <Typography component="li" variant="body2" key={u} sx={{ color: 'text.primary' }}>
-                {u}
-              </Typography>
-            ))}
-          </Stack>
-        </Box>
-      </Stack>
     </CardContent>
   </Card>
 );

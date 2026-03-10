@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { LayoutDashboard, BarChart3, Binary, Info, Activity, FlaskConical, Github, User, LogOut, Shield } from 'lucide-react';
+import { LayoutDashboard, BarChart3, Binary, Info, Activity, FlaskConical, Github, User, LogOut, Shield, BookOpen, Database, Key } from 'lucide-react';
 import Dashboard from './views/Dashboard';
 import ScoreBreakdown from './views/ScoreBreakdown';
 import LogicFlow from './views/LogicFlow';
@@ -9,6 +9,11 @@ import Backtest from './views/Backtest';
 import Profile from './views/Profile';
 import Admin from './views/Admin';
 import ApiDocs from './views/ApiDocs';
+import DocsArchitecture from './views/DocsArchitecture';
+import DocsHome from './views/DocsHome';
+import DocsData from './views/DocsData';
+import DocsSignals from './views/DocsSignals';
+import DocsScores from './views/DocsScores';
 import Terms from './views/Terms';
 import Privacy from './views/Privacy';
 import Unsubscribe from './views/Unsubscribe';
@@ -73,6 +78,7 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [docsAnchorEl, setDocsAnchorEl] = useState<null | HTMLElement>(null);
 
   const { user, profile, isAdmin, signOut } = useAuth();
   const theme = useTheme();
@@ -98,8 +104,8 @@ const App: React.FC = () => {
     if (found) return found.key;
     // Treat any /charts/* route as the Charts tab
     if (p.startsWith('/charts')) return 'charts';
-    // Home/About landing page shouldn't highlight a nav item
-    if (p === '/') return false;
+    // Home/docs/reference pages shouldn't highlight a bottom-nav item
+    if (p === '/' || p.startsWith('/docs') || p === '/api-docs') return false;
     return 'dashboard';
   }, [location.pathname, tabs]);
 
@@ -234,7 +240,69 @@ const App: React.FC = () => {
                   </Typography>
                 </Paper>
               ))}
+              <Paper
+                component="button"
+                onClick={() => navigate('/docs')}
+                sx={{
+                  cursor: 'pointer',
+                  px: 1.5,
+                  py: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                  bgcolor: location.pathname.startsWith('/docs') ? 'primary.main' : 'background.paper',
+                  color: location.pathname.startsWith('/docs') ? 'primary.contrastText' : 'text.primary',
+                  borderColor: location.pathname.startsWith('/docs') ? 'primary.main' : 'divider',
+                  '&:hover': { borderColor: 'primary.main' },
+                }}
+              >
+                <BookOpen className="h-5 w-5" />
+                <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                  Docs
+                </Typography>
+              </Paper>
             </Box>
+          )}
+
+          {!isMdUp && (
+            <>
+              <IconButton onClick={(e) => setDocsAnchorEl(e.currentTarget)} size="small" sx={{ mr: 0.5 }}>
+                <BookOpen size={18} />
+              </IconButton>
+              <Menu
+                anchorEl={docsAnchorEl}
+                open={Boolean(docsAnchorEl)}
+                onClose={() => setDocsAnchorEl(null)}
+                anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                PaperProps={{ sx: { minWidth: 200 } }}
+              >
+                <MenuItem onClick={() => { setDocsAnchorEl(null); navigate('/docs'); }}>
+                  <ListItemIcon><BookOpen size={16} /></ListItemIcon>
+                  <ListItemText>Docs Home</ListItemText>
+                </MenuItem>
+                <MenuItem onClick={() => { setDocsAnchorEl(null); navigate('/docs/api'); }}>
+                  <ListItemIcon><Key size={16} /></ListItemIcon>
+                  <ListItemText>API Reference</ListItemText>
+                </MenuItem>
+                <MenuItem onClick={() => { setDocsAnchorEl(null); navigate('/docs/data'); }}>
+                  <ListItemIcon><Database size={16} /></ListItemIcon>
+                  <ListItemText>Data Feeds</ListItemText>
+                </MenuItem>
+                <MenuItem onClick={() => { setDocsAnchorEl(null); navigate('/docs/architecture'); }}>
+                  <ListItemIcon><Activity size={16} /></ListItemIcon>
+                  <ListItemText>Architecture</ListItemText>
+                </MenuItem>
+                <MenuItem onClick={() => { setDocsAnchorEl(null); navigate('/docs/scores'); }}>
+                  <ListItemIcon><BarChart3 size={16} /></ListItemIcon>
+                  <ListItemText>Scores</ListItemText>
+                </MenuItem>
+                <MenuItem onClick={() => { setDocsAnchorEl(null); navigate('/docs/signals'); }}>
+                  <ListItemIcon><Binary size={16} /></ListItemIcon>
+                  <ListItemText>Signals</ListItemText>
+                </MenuItem>
+              </Menu>
+            </>
           )}
 
           {/* Auth / User menu */}
@@ -287,6 +355,12 @@ const App: React.FC = () => {
       <Container maxWidth="lg" sx={{ py: { xs: 2.5, md: 4 } }}>
         <Routes>
           <Route path="/" element={<Home />} />
+          <Route path="/docs" element={<DocsHome />} />
+          <Route path="/docs/api" element={<ApiDocs />} />
+          <Route path="/docs/data" element={<DocsData />} />
+          <Route path="/docs/architecture" element={<DocsArchitecture />} />
+          <Route path="/docs/scores" element={<DocsScores />} />
+          <Route path="/docs/signals" element={<DocsSignals />} />
           <Route path="/dashboard" element={gate(<Dashboard current={lastData as SignalData} history={data} />)} />
           <Route path="/scores" element={gate(<ScoreBreakdown current={lastData as SignalData} />)} />
           <Route path="/signals" element={gate(<LogicFlow current={lastData as SignalData} />)} />
@@ -294,7 +368,7 @@ const App: React.FC = () => {
           <Route path="/backtest" element={gate(<Backtest data={data} />)} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/admin" element={<Admin />} />
-          <Route path="/api-docs" element={<ApiDocs />} />
+          <Route path="/api-docs" element={<Navigate to="/docs/api" replace />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/unsubscribe" element={<Unsubscribe />} />
