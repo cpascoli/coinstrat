@@ -77,6 +77,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/email/confirm"
+  to = "/.netlify/functions/email-confirm"
+  status = 200
+
+[[redirects]]
   from = "/api/email/unsubscribe"
   to = "/.netlify/functions/email-unsubscribe"
   status = 200

@@ -359,19 +359,29 @@ const PricingSection: React.FC = () => {
 const EmailSignup: React.FC = () => {
   const [email, setEmail] = useState('');
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [successMessage, setSuccessMessage] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email) return;
     setStatus('loading');
+    setSuccessMessage('');
     try {
       const res = await fetch('/api/email/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, source: 'homepage' }),
       });
+      const data = await res.json();
       setStatus(res.ok ? 'success' : 'error');
-      if (res.ok) setEmail('');
+      if (res.ok) {
+        setSuccessMessage(
+          data.status === 'already_subscribed'
+            ? 'This email is already subscribed to the Weekly Signal Report.'
+            : 'Check your inbox and confirm your email to activate the Weekly Signal Report.',
+        );
+        setEmail('');
+      }
     } catch {
       setStatus('error');
     }
@@ -394,7 +404,7 @@ const EmailSignup: React.FC = () => {
 
         {status === 'success' ? (
           <Alert severity="success" sx={{ maxWidth: 400, mx: 'auto' }}>
-            You're in! Your first report arrives next Monday.
+            {successMessage}
           </Alert>
         ) : (
           <Box

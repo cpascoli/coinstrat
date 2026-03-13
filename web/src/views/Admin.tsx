@@ -35,6 +35,7 @@ import {
   RefreshCw,
   Send,
   Shield,
+  Trash2,
   Users,
   Zap,
 } from 'lucide-react';
@@ -144,9 +145,11 @@ const Admin: React.FC = () => {
   const [cacheInfo, setCacheInfo] = useState<{
     latestDate: string | null;
     cachedAt: string | null;
-  }>({ latestDate: null, cachedAt: null });
+    stale: boolean | null;
+  }>({ latestDate: null, cachedAt: null, stale: null });
   const [refreshing, setRefreshing] = useState(false);
   const [refreshResult, setRefreshResult] = useState<string | null>(null);
+  const [removingSubscriberEmail, setRemovingSubscriberEmail] = useState<string | null>(null);
 
   const [selectedWeek, setSelectedWeek] = useState(currentMonday());
   const [newsletterLoading, setNewsletterLoading] = useState(true);
@@ -192,16 +195,17 @@ const Admin: React.FC = () => {
     try {
       const res = await fetch('/api/v1/signals/current');
       if (!res.ok) {
-        setCacheInfo({ latestDate: null, cachedAt: null });
+        setCacheInfo({ latestDate: null, cachedAt: null, stale: null });
         return;
       }
       const data = await res.json();
       setCacheInfo({
         latestDate: data.signal?.Date ?? null,
         cachedAt: data.cached_at ?? null,
+        stale: typeof data.stale === 'boolean' ? data.stale : null,
       });
     } catch {
-      setCacheInfo({ latestDate: null, cachedAt: null });
+      setCacheInfo({ latestDate: null, cachedAt: null, stale: null });
     }
   }, []);
 
@@ -291,6 +295,39 @@ const Admin: React.FC = () => {
       setUsers((prev) => prev.map((user) => (user.id === userId ? { ...user, tier: newTier } : user)));
     } else {
       setError('Failed to update tier');
+    }
+  };
+
+  const handleRemoveSubscriber = async (email: string) => {
+    const confirmed = window.confirm(`Remove ${email} from the newsletter subscriber list?`);
+    if (!confirmed) return;
+
+    setError(null);
+    setSuccess(null);
+    setRemovingSubscriberEmail(email);
+
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error ?? 'Failed to remove subscriber');
+      }
+
+      setSuccess(`Removed ${email} from newsletter subscribers.`);
+      setSubscribers((prev) => prev.map((subscriber) => (
+        subscriber.email === email
+          ? { ...subscriber, unsubscribed_at: new Date().toISOString() }
+          : subscriber
+      )));
+    } catch (err: any) {
+      setError(err.message ?? 'Failed to remove subscriber');
+    } finally {
+      setRemovingSubscriberEmail(null);
     }
   };
 
@@ -441,6 +478,36 @@ const Admin: React.FC = () => {
               {cacheInfo.cachedAt ? new Date(cacheInfo.cachedAt).toLocaleString() : '—'}
             </Typography>
           </Box>
+          <Box>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>Cache status</Typography>
+            <Box sx={{ mt: 0.5 }}>
+              <Chip
+                size="small"
+                label={
+                  cacheInfo.stale === null
+                    ? 'Unknown'
+                    : cacheInfo.stale
+                      ? 'Stale snapshot'
+                      : 'Fresh snapshot'
+                }
+                sx={{
+                  fontWeight: 700,
+                  bgcolor:
+                    cacheInfo.stale === null
+                      ? 'rgba(148,163,184,0.12)'
+                      : cacheInfo.stale
+                        ? 'rgba(245,158,11,0.14)'
+                        : 'rgba(34,197,94,0.14)',
+                  color:
+                    cacheInfo.stale === null
+                      ? '#94a3b8'
+                      : cacheInfo.stale
+                        ? '#f59e0b'
+                        : '#22c55e',
+                }}
+              />
+            </Box>
+          </Box>
           <Box sx={{ ml: 'auto' }}>
             <Button
               variant="contained"
@@ -563,6 +630,7 @@ const Admin: React.FC = () => {
                     <TableCell sx={{ fontWeight: 700 }}>Source</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Subscribed</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>Actions</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -597,6 +665,19 @@ const Admin: React.FC = () => {
                           }}
                         />
                       </TableCell>
+                      <TableCell>
+                        <Button
+                          size="small"
+                          color="error"
+                          variant="outlined"
+                          disabled={removingSubscriberEmail === subscriber.email}
+                          onClick={() => handleRemoveSubscriber(subscriber.email)}
+                          startIcon={removingSubscriberEmail === subscriber.email ? <CircularProgress size={14} color="inherit" /> : <Trash2 size={14} />}
+                          sx={{ textTransform: 'none', fontWeight: 700 }}
+                        >
+                          {removingSubscriberEmail === subscriber.email ? 'Removing…' : 'Remove'}
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -613,74 +694,85 @@ const Admin: React.FC = () => {
           )}
 
           <Paper sx={{ p: 2.5 }}>
-            <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ md: 'center' }}>
-              <Stack direction="row" spacing={1} alignItems="center">
-                <Newspaper size={18} />
-                <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>Newsletter Workspace</Typography>
+            <Stack spacing={1.75}>
+              <Stack
+                direction={{ xs: 'column', lg: 'row' }}
+                spacing={2}
+                alignItems={{ lg: 'center' }}
+                justifyContent="space-between"
+              >
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'center' }}>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <Newspaper size={18} />
+                    <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>Newsletter Workspace</Typography>
+                  </Stack>
+
+                  <TextField
+                    type="date"
+                    label="Issue week"
+                    value={selectedWeek}
+                    onChange={(event) => setSelectedWeek(event.target.value)}
+                    size="small"
+                    InputLabelProps={{ shrink: true }}
+                    sx={{ minWidth: 180 }}
+                  />
+                </Stack>
+
+                <Box sx={{ width: '100%', maxWidth: { lg: 620 } }}>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} useFlexGap flexWrap="wrap" justifyContent={{ lg: 'flex-end' }}>
+                    <Button
+                      variant="outlined"
+                      disabled={newsletterBusy || newsletterLoading}
+                      onClick={() => handleNewsletterAction('compose')}
+                      startIcon={newsletterBusy ? <CircularProgress size={14} /> : <RefreshCw size={14} />}
+                      sx={{ textTransform: 'none', fontWeight: 700 }}
+                    >
+                      {newsletterIssue ? 'Regenerate draft' : 'Compose draft'}
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      disabled={newsletterBusy || newsletterLoading}
+                      onClick={() => handleNewsletterAction('compose')}
+                      startIcon={<RefreshCw size={14} />}
+                      sx={{ textTransform: 'none', fontWeight: 700 }}
+                    >
+                      Refresh sourced stories
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      disabled={newsletterBusy || newsletterLoading || !newsletterIssue?.id}
+                      onClick={() => handleNewsletterAction('send_test')}
+                      startIcon={<Eye size={14} />}
+                      sx={{ textTransform: 'none', fontWeight: 700 }}
+                    >
+                      Send test to me
+                    </Button>
+                    <Button
+                      variant="contained"
+                      disabled={newsletterBusy || newsletterLoading || !newsletterIssue?.id}
+                      onClick={() => handleNewsletterAction('send')}
+                      startIcon={<Send size={14} />}
+                      sx={{ textTransform: 'none', fontWeight: 700 }}
+                    >
+                      Send now
+                    </Button>
+                  </Stack>
+                </Box>
               </Stack>
 
-              <TextField
-                type="date"
-                label="Issue week"
-                value={selectedWeek}
-                onChange={(event) => setSelectedWeek(event.target.value)}
-                size="small"
-                InputLabelProps={{ shrink: true }}
-                sx={{ minWidth: 180 }}
-              />
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} useFlexGap flexWrap="wrap">
+                <Chip
+                  label={newsletterIssue ? `Status: ${newsletterIssue.status}` : 'Not yet composed'}
+                  size="small"
+                  color={newsletterIssue?.status === 'sent' ? 'success' : 'default'}
+                />
 
-              <Chip
-                label={newsletterIssue ? `Status: ${newsletterIssue.status}` : 'Not yet composed'}
-                size="small"
-                color={newsletterIssue?.status === 'sent' ? 'success' : 'default'}
-              />
-
-              <Chip
-                label={`Audience: ${recipientCount} recipients`}
-                size="small"
-                variant="outlined"
-              />
-
-              <Box sx={{ ml: 'auto' }}>
-                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                  <Button
-                    variant="outlined"
-                    disabled={newsletterBusy || newsletterLoading}
-                    onClick={() => handleNewsletterAction('compose')}
-                    startIcon={newsletterBusy ? <CircularProgress size={14} /> : <RefreshCw size={14} />}
-                    sx={{ textTransform: 'none', fontWeight: 700 }}
-                  >
-                    {newsletterIssue ? 'Regenerate draft' : 'Compose draft'}
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    disabled={newsletterBusy || newsletterLoading}
-                    onClick={() => handleNewsletterAction('compose')}
-                    startIcon={<RefreshCw size={14} />}
-                    sx={{ textTransform: 'none', fontWeight: 700 }}
-                  >
-                    Refresh sourced stories
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    disabled={newsletterBusy || newsletterLoading || !newsletterIssue?.id}
-                    onClick={() => handleNewsletterAction('send_test')}
-                    startIcon={<Eye size={14} />}
-                    sx={{ textTransform: 'none', fontWeight: 700 }}
-                  >
-                    Send test to me
-                  </Button>
-                  <Button
-                    variant="contained"
-                    disabled={newsletterBusy || newsletterLoading || !newsletterIssue?.id}
-                    onClick={() => handleNewsletterAction('send')}
-                    startIcon={<Send size={14} />}
-                    sx={{ textTransform: 'none', fontWeight: 700 }}
-                  >
-                    Send now
-                  </Button>
-                </Stack>
-              </Box>
+                <Chip
+                  label={`Audience: ${recipientCount} recipients`}
+                  size="small"
+                  variant="outlined"
+                />
+              </Stack>
             </Stack>
           </Paper>
 

@@ -14,6 +14,7 @@ import DocsHome from './views/DocsHome';
 import DocsData from './views/DocsData';
 import DocsSignals from './views/DocsSignals';
 import DocsScores from './views/DocsScores';
+import NewsletterConfirm from './views/NewsletterConfirm';
 import Terms from './views/Terms';
 import Privacy from './views/Privacy';
 import Unsubscribe from './views/Unsubscribe';
@@ -371,6 +372,7 @@ const App: React.FC = () => {
           <Route path="/api-docs" element={<Navigate to="/docs/api" replace />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />
+          <Route path="/newsletter/confirm" element={<NewsletterConfirm />} />
           <Route path="/unsubscribe" element={<Unsubscribe />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>

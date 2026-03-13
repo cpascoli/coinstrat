@@ -1,5 +1,5 @@
 import type { Handler } from '@netlify/functions';
-import { requestNewsletterSubscription } from './lib/newsletter';
+import { confirmNewsletterSubscription } from './lib/newsletter';
 
 function corsHeaders() {
   return {
@@ -11,14 +11,10 @@ function corsHeaders() {
 
 export const handler: Handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
-    return {
-      statusCode: 204,
-      headers: corsHeaders(),
-      body: '',
-    };
+    return { statusCode: 204, headers: corsHeaders(), body: '' };
   }
 
-  if (event.httpMethod !== 'POST') {
+  if (event.httpMethod !== 'GET') {
     return {
       statusCode: 405,
       headers: corsHeaders(),
@@ -27,29 +23,28 @@ export const handler: Handler = async (event) => {
   }
 
   try {
-    const { email, source } = JSON.parse(event.body || '{}');
-
-    if (!email || !email.includes('@')) {
+    const token = event.queryStringParameters?.token ?? '';
+    if (!token) {
       return {
         statusCode: 400,
         headers: corsHeaders(),
-        body: JSON.stringify({ error: 'Valid email required.' }),
+        body: JSON.stringify({ error: 'Missing confirmation token.' }),
       };
     }
 
-    const status = await requestNewsletterSubscription(String(email), source);
+    const email = await confirmNewsletterSubscription(token);
 
     return {
       statusCode: 200,
       headers: corsHeaders(),
-      body: JSON.stringify({ ok: true, status }),
+      body: JSON.stringify({ ok: true, email }),
     };
   } catch (err: any) {
-    console.error('[email-subscribe]', err);
+    console.error('[email-confirm]', err);
     return {
-      statusCode: 500,
+      statusCode: 400,
       headers: corsHeaders(),
-      body: JSON.stringify({ error: err.message }),
+      body: JSON.stringify({ error: err.message ?? 'Unable to confirm subscription.' }),
     };
   }
 };

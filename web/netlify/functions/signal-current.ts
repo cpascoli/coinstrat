@@ -17,26 +17,30 @@ export const handler: Handler = async (event) => {
     const store = signalsStore();
     const cached = await store.get(CACHE_KEY, { type: 'json' }).catch(() => null) as any;
 
-    if (cached && cached.timestamp && (Date.now() - cached.timestamp) < CACHE_TTL_MS) {
-      const latest = cached.data[cached.data.length - 1];
+    if (!cached?.data || !Array.isArray(cached.data) || cached.data.length === 0) {
       return {
-        statusCode: 200,
-        headers: { ...corsHeaders(), 'Cache-Control': 'public, max-age=300' },
+        statusCode: 503,
+        headers: corsHeaders(),
         body: JSON.stringify({
-          signal: latest,
-          cached_at: new Date(cached.timestamp).toISOString(),
-          next_refresh: new Date(cached.timestamp + CACHE_TTL_MS).toISOString(),
+          error: 'Signal cache not yet populated. Trigger a refresh via the cron endpoint.',
         }),
       };
     }
 
+    const latest = cached.data[cached.data.length - 1];
+    const cachedAtMs = typeof cached.timestamp === 'number' ? cached.timestamp : null;
+    const isFresh = cachedAtMs !== null && (Date.now() - cachedAtMs) < CACHE_TTL_MS;
+
     return {
-      statusCode: 503,
-      headers: corsHeaders(),
+      statusCode: 200,
+      headers: { ...corsHeaders(), 'Cache-Control': 'public, max-age=300' },
       body: JSON.stringify({
-        error: 'Signal cache not yet populated. Trigger a refresh via the cron endpoint.',
+        signal: latest,
+        cached_at: cachedAtMs ? new Date(cachedAtMs).toISOString() : null,
+        next_refresh: cachedAtMs ? new Date(cachedAtMs + CACHE_TTL_MS).toISOString() : null,
+        stale: !isFresh,
       }),
-    };
+    }
   } catch (err: any) {
     console.error('[signal-current]', err);
     return {

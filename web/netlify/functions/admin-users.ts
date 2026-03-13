@@ -1,5 +1,6 @@
 import type { Handler } from '@netlify/functions';
 import { createClient } from '@supabase/supabase-js';
+import { unsubscribeEmail } from './lib/newsletter';
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL!,
@@ -80,6 +81,20 @@ export const handler: Handler = async (event) => {
     }
 
     return { statusCode: 200, body: JSON.stringify({ ok: true }) };
+  }
+
+  if (event.httpMethod === 'DELETE') {
+    const { email } = JSON.parse(event.body || '{}');
+    if (!email || !String(email).includes('@')) {
+      return { statusCode: 400, body: JSON.stringify({ error: 'Valid email required' }) };
+    }
+
+    try {
+      await unsubscribeEmail(String(email));
+      return { statusCode: 200, body: JSON.stringify({ ok: true }) };
+    } catch (error: any) {
+      return { statusCode: 500, body: JSON.stringify({ error: error.message ?? 'Failed to remove subscriber' }) };
+    }
   }
 
   return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };

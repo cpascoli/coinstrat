@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { Resend } from 'resend';
 import { signalsStore } from './store';
 import { serviceSupabase } from './auth';
@@ -35,6 +36,7 @@ export interface NewsletterDraft {
   headline: string;
   summary: string;
   signalSections: NewsletterSection[];
+  headlinesNarrative: string;
   curatedLinks: Array<CuratedLinkInput & { commentary?: string }>;
   cta: {
     label: string;
@@ -100,6 +102,18 @@ interface NewsCandidate {
   publishedAt: string | null;
 }
 
+interface ArticleExcerpt {
+  url: string;
+  excerpt: string;
+}
+
+interface NewsSourcePacket {
+  title: string;
+  source: string;
+  url: string;
+  excerpt: string;
+}
+
 interface ComposeIssueInput {
   actorId?: string | null;
   weekOf: string;
@@ -119,7 +133,7 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 const fromEmail = process.env.RESEND_FROM_EMAIL || 'digest@coinstrat.xyz';
 const appUrl = process.env.VITE_APP_URL || 'https://coinstrat.xyz';
 const openAiApiKey = process.env.OPENAI_API_KEY;
-const openAiModel = process.env.OPENAI_MODEL || 'gpt-5.2';
+const openAiModel = process.env.OPENAI_NEWSLETTER_MODEL || process.env.OPENAI_NEWS_MODEL || 'gpt-4.1-mini';
 const newsLookbackDays = Number(process.env.NEWS_LOOKBACK_DAYS || 7);
 
 const NEWS_QUERIES = [
@@ -127,6 +141,11 @@ const NEWS_QUERIES = [
   `(Bitcoin OR BTC) (site:coindesk.com OR site:bitcoinmagazine.com OR site:cointelegraph.com OR site:decrypt.co) when:${newsLookbackDays}d`,
   `(bitcoin OR btc) (market OR treasury OR mining OR policy OR adoption OR lightning) when:${newsLookbackDays}d`,
 ];
+const MAX_ENRICHED_STORIES = 4;
+const ARTICLE_FETCH_TIMEOUT_MS = 3500;
+const ARTICLE_EXCERPT_MAX_CHARS = 1800;
+const PROMPT_EXCERPT_MAX_CHARS = 700;
+const OPENAI_TIMEOUT_MS = 30000;
 
 interface SignalRow {
   Date: string;
@@ -221,12 +240,70 @@ function signalStatusLabel(value?: number | string | null): string {
   return value === 1 ? 'ON' : 'OFF';
 }
 
-function onOffSentence(label: string, value: number | string | null | undefined, explainer: string): string {
-  return `${label}: ${signalStatusLabel(value)} — ${explainer}`;
+function dynamicCoreSentence(value?: number | string | null): string {
+  return `Core Accumulation: ${signalStatusLabel(value)} — ${value === 1
+    ? 'Long-term valuation and trend conditions still support steady accumulation.'
+    : 'Accumulation is paused this week because the model does not have enough value-and-trend confirmation.'}`;
 }
 
-function scoreSentence(label: string, value: number | string | null | undefined, explainer: string): string {
-  return `${label}: ${value ?? 'n/a'} — ${explainer}`;
+function dynamicMacroSentence(value?: number | string | null): string {
+  return `Macro Accelerator: ${signalStatusLabel(value)} — ${value === 1
+    ? 'Liquidity and macro conditions are supportive enough to justify a faster accumulation pace.'
+    : 'The macro accelerator is on hold because liquidity, cycle, or dollar conditions are not supportive enough yet.'}`;
+}
+
+function dynamicValuationSentence(value?: number | string | null): string {
+  switch (value) {
+    case 3:
+      return 'Valuation score: 3 — Bitcoin looks like extreme deep value, with both valuation and holder behavior pointing to capitulation.';
+    case 2:
+      return 'Valuation score: 2 — Bitcoin still looks attractively priced, with meaningful value support but not a full washout.';
+    case 1:
+      return 'Valuation score: 1 — Bitcoin looks broadly fair this week, but not yet in a deep-value zone.';
+    case 0:
+      return 'Valuation score: 0 — Bitcoin looks overheated relative to on-chain value, which argues for caution rather than fresh aggression.';
+    default:
+      return `Valuation score: ${value ?? 'n/a'} — Current valuation context is unavailable.`;
+  }
+}
+
+function dynamicLiquiditySentence(value?: number | string | null): string {
+  switch (value) {
+    case 2:
+      return 'Liquidity score: 2 — Liquidity is expanding and acting as a clear tailwind for risk assets.';
+    case 1:
+      return 'Liquidity score: 1 — Liquidity is improving at the margin, but the tailwind is still early rather than fully established.';
+    case 0:
+      return 'Liquidity score: 0 — Liquidity remains a headwind, so the backdrop is still tighter than ideal for aggressive accumulation.';
+    default:
+      return `Liquidity score: ${value ?? 'n/a'} — Current liquidity context is unavailable.`;
+  }
+}
+
+function dynamicDollarSentence(value?: number | string | null): string {
+  switch (value) {
+    case 2:
+      return 'Dollar score: 2 — The dollar is weakening enough to be a supportive backdrop for Bitcoin this week.';
+    case 1:
+      return 'Dollar score: 1 — The dollar is not a major obstacle right now, but it is not providing a strong tailwind either.';
+    case 0:
+      return 'Dollar score: 0 — Dollar conditions are still a headwind, which keeps overall risk conditions less supportive.';
+    default:
+      return `Dollar score: ${value ?? 'n/a'} — Current dollar-regime context is unavailable.`;
+  }
+}
+
+function dynamicCycleSentence(value?: number | string | null): string {
+  switch (value) {
+    case 2:
+      return 'Business Cycle score: 2 — The macro backdrop still looks expansionary, with growth conditions supportive of risk-taking.';
+    case 1:
+      return 'Business Cycle score: 1 — The economy looks mixed or stabilizing, so the backdrop is neither clearly bullish nor clearly recessionary.';
+    case 0:
+      return 'Business Cycle score: 0 — Recession-risk signals are elevated, which argues for a more defensive stance.';
+    default:
+      return `Business Cycle score: ${value ?? 'n/a'} — Current macro-cycle context is unavailable.`;
+  }
 }
 
 function escapeHtml(value: string): string {
@@ -255,13 +332,241 @@ function stripTags(value: string): string {
     .trim();
 }
 
+function cleanNewsSummary(title: string, summary: string, source: string): string {
+  const normalizedTitle = stripTags(title).trim();
+  const normalizedSource = stripTags(source).trim();
+  let cleaned = stripTags(summary)
+    .replace(/\u00a0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleaned) return '';
+
+  const loweredTitle = normalizedTitle.toLowerCase();
+  const loweredSource = normalizedSource.toLowerCase();
+  const loweredCleaned = cleaned.toLowerCase();
+
+  if (
+    loweredCleaned === loweredTitle ||
+    loweredCleaned === `${loweredTitle} - ${loweredSource}` ||
+    loweredCleaned.includes(`${loweredTitle} ${loweredSource}`) ||
+    loweredCleaned.includes(`${loweredTitle} - ${loweredSource}`)
+  ) {
+    return '';
+  }
+
+  cleaned = cleaned
+    .replace(new RegExp(`^${escapeRegExp(normalizedTitle)}\\s*[-–—]?\\s*`, 'i'), '')
+    .replace(new RegExp(`\\s*[-–—]?\\s*${escapeRegExp(normalizedSource)}$`, 'i'), '')
+    .trim();
+
+  return cleaned;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeWhitespace(value: string): string {
+  return value
+    .replace(/\u00a0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeParagraphs(value: string): string[] {
+  return value
+    .split(/\n\s*\n/)
+    .map((paragraph) => normalizeWhitespace(paragraph))
+    .filter(Boolean);
+}
+
+function dedupeTextParts(parts: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const part of parts) {
+    const normalized = normalizeWhitespace(part);
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(normalized);
+  }
+
+  return result;
+}
+
+function extractMetaContent(html: string, pattern: RegExp): string {
+  const match = html.match(pattern);
+  return normalizeWhitespace(decodeXml(match?.[1] ?? ''));
+}
+
+function extractArticleParagraphs(html: string): string[] {
+  const withoutScripts = html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ');
+
+  const paragraphs = withoutScripts.match(/<p\b[^>]*>[\s\S]*?<\/p>/gi) ?? [];
+
+  return dedupeTextParts(
+    paragraphs
+      .map((paragraph) => stripTags(paragraph))
+      .map((paragraph) => normalizeWhitespace(paragraph))
+      .filter((paragraph) => paragraph.length >= 80)
+      .filter((paragraph) => !/cookie|privacy|sign up|subscribe|advertis/i.test(paragraph)),
+  ).slice(0, 4);
+}
+
+async function fetchArticleExcerpt(candidate: NewsCandidate): Promise<ArticleExcerpt | null> {
+  try {
+    const response = await fetchWithTimeout(candidate.url, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'CoinStrat Newsletter Bot/1.0',
+      },
+    }, ARTICLE_FETCH_TIMEOUT_MS);
+
+    if (!response.ok) return null;
+
+    const html = await response.text();
+    const finalUrl = response.url || candidate.url;
+    const metaDescription = extractMetaContent(
+      html,
+      /<meta[^>]+(?:name=["']description["']|property=["']og:description["'])[^>]+content=["']([\s\S]*?)["'][^>]*>/i,
+    );
+    const paragraphs = extractArticleParagraphs(html);
+    const excerpt = dedupeTextParts([metaDescription, ...paragraphs])
+      .join(' ')
+      .slice(0, ARTICLE_EXCERPT_MAX_CHARS);
+
+    return excerpt ? { url: finalUrl, excerpt } : null;
+  } catch {
+    return null;
+  }
+}
+
 function buildUnsubscribeUrl(email?: string | null): string {
   if (!email) return `${appUrl}/unsubscribe`;
   return `${appUrl}/unsubscribe?email=${encodeURIComponent(email)}`;
 }
 
+function buildNewsletterConfirmUrl(token: string): string {
+  return `${appUrl}/newsletter/confirm?token=${encodeURIComponent(token)}`;
+}
+
 function personalizeTemplate(value: string, email?: string | null): string {
   return value.replaceAll('__UNSUBSCRIBE_URL__', buildUnsubscribeUrl(email));
+}
+
+function fallbackHeadlinesNarrative(
+  curatedLinks: CuratedLinkInput[],
+  referenceDate: string,
+): string {
+  const topSources = Array.from(new Set(curatedLinks.map((link) => link.source).filter(Boolean))).slice(0, 3);
+  const combinedContext = curatedLinks
+    .map((link) => `${link.title} ${link.note ?? ''}`.toLowerCase())
+    .join(' ');
+  const themeSnippets: string[] = [];
+
+  if (/etf|inflow|fund/i.test(combinedContext)) {
+    themeSnippets.push('ETF demand and capital flows remain an important part of the market narrative');
+  }
+  if (/treasury|holdings|reserve|balance sheet|mining/i.test(combinedContext)) {
+    themeSnippets.push('corporate and treasury-style Bitcoin accumulation is still shaping sentiment');
+  }
+  if (/fed|yield|macro|oil|rate|policy/i.test(combinedContext)) {
+    themeSnippets.push('macro conditions remain tightly linked to short-term price direction');
+  }
+  if (/developer|lightning|open-source|adoption/i.test(combinedContext)) {
+    themeSnippets.push('longer-term adoption and ecosystem investment continue in the background');
+  }
+
+  if (themeSnippets.length === 0) {
+    return `This week’s headlines point to a familiar mix of Bitcoin market structure, institutional flows, and macro positioning as of ${referenceDate}.`;
+  }
+
+  const sourceText = topSources.length > 0
+    ? `Across ${topSources.join(', ')}, the dominant themes this week were`
+    : 'The dominant themes this week were';
+
+  return `${sourceText} ${themeSnippets.join(', ')}. Taken together, the selected stories suggest that Bitcoin is still being driven by a blend of institutional positioning, balance-sheet adoption, and macro-sensitive risk appetite rather than by a single isolated catalyst. The backdrop still looks constructive, but it remains highly sensitive to liquidity, rates, and positioning shifts.`;
+}
+
+function buildSignupConfirmationEmail(email: string, token: string): { subject: string; html: string; text: string } {
+  const confirmUrl = buildNewsletterConfirmUrl(token);
+  const unsubscribeUrl = buildUnsubscribeUrl(email);
+
+  const subject = 'Confirm your CoinStrat Weekly subscription';
+  const html = `
+    <!doctype html>
+    <html>
+      <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      </head>
+      <body style="margin:0;padding:0;background:#020617;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;background:#020617;">
+          <tr>
+            <td align="center" style="padding:4px;">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;max-width:760px;border-collapse:separate;background:linear-gradient(135deg,#0b1220 0%,#111827 100%);border:1px solid #1e293b;border-radius:12px;">
+                <tr>
+                  <td style="padding:14px;color:#e2e8f0;">
+                    <div style="margin-bottom:16px;">
+              <div style="font-size:12px;letter-spacing:0.12em;text-transform:uppercase;color:#60a5fa;font-weight:800;">CoinStrat Weekly</div>
+              <h1 style="margin:10px 0 8px;font-size:24px;line-height:1.2;color:#f8fafc;">Welcome to the Weekly Signal Report</h1>
+              <p style="margin:0;color:#94a3b8;font-size:14px;">One click confirms your email address and activates your newsletter subscription.</p>
+                    </div>
+
+                    <div style="background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:14px;margin-bottom:12px;">
+              <p style="margin:0 0 12px;color:#cbd5e1;line-height:1.75;">
+                Thanks for signing up for CoinStrat. Each week you will receive a concise read on the latest accumulation signal, macro and liquidity regime shifts, and the most relevant Bitcoin headlines behind the move.
+              </p>
+              <ul style="margin:0;padding-left:18px;color:#cbd5e1;line-height:1.7;">
+                <li>The latest CoinStrat signal state and what changed during the week</li>
+                <li>Key valuation, liquidity, dollar, and business-cycle context</li>
+                <li>A short roundup of the most relevant Bitcoin market and industry developments</li>
+              </ul>
+                    </div>
+
+                    <div style="text-align:center;margin:16px 0 8px;">
+                      <a href="${escapeHtml(confirmUrl)}" style="display:block;background:#60a5fa;color:#08111f;padding:14px 16px;border-radius:10px;text-decoration:none;font-weight:800;">
+                Confirm my email
+              </a>
+                    </div>
+
+                    <p style="margin:16px 0 8px;color:#64748b;font-size:12px;line-height:1.6;text-align:center;">
+              If you did not intend to subscribe, you can cancel below and your address will be removed from the newsletter list.
+                    </p>
+                    <p style="margin:0;color:#64748b;font-size:12px;text-align:center;">
+              <a href="${escapeHtml(unsubscribeUrl)}" style="color:#94a3b8;">Cancel subscription</a>
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+  `;
+
+  const text = [
+    'CoinStrat Weekly',
+    '',
+    'Welcome to the Weekly Signal Report.',
+    'Confirm your email address to activate your newsletter subscription:',
+    confirmUrl,
+    '',
+    'What to expect each week:',
+    '- The latest CoinStrat signal state and what changed during the week',
+    '- Key valuation, liquidity, dollar, and business-cycle context',
+    '- A short roundup of the most relevant Bitcoin market and industry developments',
+    '',
+    'If you did not intend to subscribe, cancel here:',
+    unsubscribeUrl,
+  ].join('\n');
+
+  return { subject, html, text };
 }
 
 function issueSlug(weekOf: string): string {
@@ -370,7 +675,7 @@ function parseRssItems(xml: string): NewsCandidate[] {
       title,
       url: link,
       source,
-      summary: description,
+      summary: cleanNewsSummary(title, description, source),
       publishedAt,
     };
   }).filter((item) => item.title && item.url);
@@ -383,13 +688,25 @@ async function fetchNewsCandidates(query: string): Promise<NewsCandidate[]> {
     headers: {
       'User-Agent': 'CoinStrat Newsletter Bot/1.0',
     },
-  }, 6000);
+  }, 4500);
   if (!response.ok) {
     throw new Error(`News RSS fetch failed: HTTP ${response.status}`);
   }
 
   const xml = await response.text();
   return parseRssItems(xml);
+}
+
+function buildNewsSourcePackets(curatedLinks: CuratedLinkInput[]): NewsSourcePacket[] {
+  return curatedLinks
+    .map((link) => ({
+      title: link.title.trim(),
+      source: link.source.trim() || 'Source',
+      url: link.url.trim(),
+      excerpt: normalizeWhitespace(link.note ?? '').slice(0, PROMPT_EXCERPT_MAX_CHARS),
+    }))
+    .filter((packet) => packet.title && packet.url && packet.excerpt.length >= 80)
+    .slice(0, MAX_ENRICHED_STORIES);
 }
 
 function scoreNewsCandidate(candidate: NewsCandidate): number {
@@ -441,16 +758,32 @@ async function sourceWeeklyStories(
 
     const selected = Array.from(deduped.values())
       .sort((a, b) => scoreNewsCandidate(b) - scoreNewsCandidate(a))
-      .slice(0, 8)
-      .map((candidate, index) => ({
-        title: candidate.title,
-        url: candidate.url,
-        source: candidate.source,
-        note: candidate.summary || `Bitcoin headline selected for week of ${context.weekOf}.`,
-        sort_order: index,
-      }));
+      .slice(0, 8);
 
-    return selected.length > 0 ? selected : existingLinks;
+    const enrichedResults = await Promise.allSettled(
+      selected.slice(0, MAX_ENRICHED_STORIES).map((candidate) => fetchArticleExcerpt(candidate)),
+    );
+    const enrichedByTitle = new Map<string, ArticleExcerpt>();
+
+    enrichedResults.forEach((result, index) => {
+      if (result.status !== 'fulfilled' || !result.value) return;
+      const candidate = selected[index];
+      if (!candidate) return;
+      enrichedByTitle.set(candidate.title, result.value);
+    });
+
+    const mapped = selected.map((candidate, index) => {
+      const enriched = enrichedByTitle.get(candidate.title);
+      return {
+        title: candidate.title,
+        url: enriched?.url ?? candidate.url,
+        source: candidate.source,
+        note: enriched?.excerpt ?? candidate.summary ?? null,
+        sort_order: index,
+      };
+    });
+
+    return mapped.length > 0 ? mapped : existingLinks;
   } catch (error) {
     console.error('[newsletter/sourceWeeklyStories]', error);
     return existingLinks;
@@ -784,37 +1117,14 @@ function fallbackDraft(
     `40-week SMA: ${formatCurrency(current.BTC_MA40W as number | null)} (${formatDelta(context.deltas.BTC_MA40W, 0)} vs. last week)`,
   ];
   const stableState = [
-    onOffSentence(
-      'Core Accumulation',
-      current.CORE_ON,
-      'Signals whether long-term valuation and trend conditions support steady accumulation.',
-    ),
-    onOffSentence(
-      'Macro Accelerator',
-      current.MACRO_ON,
-      'Signals whether liquidity and macro conditions justify increasing the pace of accumulation.',
-    ),
-    scoreSentence(
-      'Valuation score',
-      current.VAL_SCORE,
-      'Measures whether bitcoin looks expensive, fair, or attractively priced versus on-chain value.',
-    ),
-    scoreSentence(
-      'Liquidity score',
-      current.LIQ_SCORE,
-      'Measures whether liquidity conditions are becoming a tailwind or headwind for risk assets.',
-    ),
-    scoreSentence(
-      'Dollar score',
-      current.DXY_SCORE,
-      'Measures whether dollar strength is a headwind or tailwind for bitcoin.',
-    ),
-    scoreSentence(
-      'Business Cycle score',
-      current.CYCLE_SCORE,
-      'Measures whether macro growth data points to expansion, caution, or recession risk.',
-    ),
+    dynamicCoreSentence(current.CORE_ON),
+    dynamicMacroSentence(current.MACRO_ON),
+    dynamicValuationSentence(current.VAL_SCORE),
+    dynamicLiquiditySentence(current.LIQ_SCORE),
+    dynamicDollarSentence(current.DXY_SCORE),
+    dynamicCycleSentence(current.CYCLE_SCORE),
   ];
+  const headlinesNarrative = fallbackHeadlinesNarrative(curatedLinks, context.referenceDate);
 
   return {
     subject: `CoinStrat Weekly — CORE ${coreStatus} | BTC ${formatCurrency(current.BTCUSD as number | null)}`,
@@ -841,6 +1151,7 @@ function fallbackDraft(
         ],
       },
     ],
+    headlinesNarrative,
     curatedLinks: curatedLinks.map((link) => ({
       ...link,
       commentary: link.note?.trim() || 'Relevant Bitcoin context selected for this week’s digest.',
@@ -886,6 +1197,9 @@ function normalizeDraft(raw: any, fallback: NewsletterDraft): NewsletterDraft {
       : fallback.previewText,
     headline: typeof raw?.headline === 'string' && raw.headline.trim() ? raw.headline.trim() : fallback.headline,
     summary: typeof raw?.summary === 'string' && raw.summary.trim() ? raw.summary.trim() : fallback.summary,
+    headlinesNarrative: typeof raw?.headlinesNarrative === 'string' && raw.headlinesNarrative.trim()
+      ? raw.headlinesNarrative.trim()
+      : fallback.headlinesNarrative,
     signalSections: signalSections.length > 0 ? signalSections : fallback.signalSections,
     curatedLinks,
     cta: {
@@ -910,36 +1224,48 @@ async function generateNewsletterDraft(
   ctaHref: string | null,
 ): Promise<{ draft: NewsletterDraft; provider: string; model: string }> {
   const fallback = fallbackDraft(context, curatedLinks, editorNote, ctaLabel, ctaHref);
+  const newsSourcePackets = buildNewsSourcePackets(curatedLinks);
 
   if (!openAiApiKey) {
-    return {
-      draft: fallback,
-      provider: 'fallback',
-      model: 'deterministic-template',
-    };
+    throw new Error('Newsletter generation failed: OPENAI_API_KEY is not configured.');
+  }
+
+  if (newsSourcePackets.length === 0) {
+    throw new Error('Newsletter generation failed: no article excerpts were available for the selected headlines.');
   }
 
   const payload = {
     model: openAiModel,
-    temperature: 0.7,
+    temperature: 0.4,
     response_format: { type: 'json_object' },
     messages: [
       {
         role: 'system',
         content:
-          'You write the CoinStrat weekly newsletter. Keep it concise, analytical, and grounded in the provided data only. Do not invent facts, do not make financial promises, and prefer what changed / why it matters framing. Use exactly these section titles in signalSections: "What changed this week", "What did not change", and "Why it matters". In "What changed this week", explicitly include MVRV, LTH SOPR, Supply in Profit, and the 40-week SMA. In "What did not change", use friendly labels like "Core Accumulation", "Macro Accelerator", "Dollar score", and "Business Cycle score" rather than internal field names like CORE_ON, MACRO_ON, ACCUM_ON, or CYCLE_SCORE, and give each item a one-line explainer. Do not mention AB score or ABCD score. Treat curatedLinks as automatically sourced weekly Bitcoin headlines, not manually curated links. Return a JSON object with keys: subject, previewText, headline, summary, signalSections, curatedLinks, cta, complianceFooter. signalSections must be an array of { title, body, bullets }. curatedLinks must keep the supplied URLs and provide concise why-it-matters commentary.',
+          'You are writing only the Weekly Bitcoin Headlines section of the CoinStrat newsletter. You will receive a small set of article source packets containing title, source, url, and cleaned excerpts. Use those excerpts to write a compelling, engaging and specific market narrative that stitches the stories together. Focus on actual developments, firms, events, macro drivers, and risks mentioned in the excerpts. Avoid generic crypto-market boilerplate. Do not repeat the headlines verbatim and do not output a list of headlines. Return valid JSON with exactly these keys: `headlinesNarrative` and `curatedLinks`. `headlinesNarrative` must be 160-240 words split into 2 or 3 short paragraphs separated by blank lines. `curatedLinks` must be an array in the same order as the supplied links, where each item has `url` and `commentary`. Each `commentary` must be one short sentence explaining why that link mattered this week.',
       },
       {
         role: 'user',
         content: JSON.stringify({
-          brandVoice: 'Concise analytical newsletter for bitcoin accumulators. Professional, calm, and persuasive. Avoid hype.',
-          weeklyContext: context,
-          curatedLinks,
-          editorNote,
-          cta: {
-            label: ctaLabel ?? 'Open Dashboard',
-            href: ctaHref ?? `${appUrl}/dashboard`,
+          brandVoice: 'Concise analytical newsletter for bitcoin accumulators. Professional, calm, persuasive, and specific. Avoid hype.',
+          weekOf: context.weekOf,
+          referenceDate: context.referenceDate,
+          currentMarket: {
+            BTCUSD: context.current.BTCUSD,
+            VAL_SCORE: context.current.VAL_SCORE,
+            LIQ_SCORE: context.current.LIQ_SCORE,
+            CYCLE_SCORE: context.current.CYCLE_SCORE,
+            DXY_SCORE: context.current.DXY_SCORE,
+            CORE_ON: context.current.CORE_ON,
+            MACRO_ON: context.current.MACRO_ON,
           },
+          highlights: context.highlights.slice(0, 4),
+          links: curatedLinks.map((link) => ({
+            title: link.title,
+            source: link.source,
+            url: link.url,
+          })),
+          newsSourcePackets,
         }),
       },
     ],
@@ -953,32 +1279,69 @@ async function generateNewsletterDraft(
         'Authorization': `Bearer ${openAiApiKey}`,
       },
       body: JSON.stringify(payload),
-    }, 15000);
+    }, OPENAI_TIMEOUT_MS);
 
     if (!response.ok) {
-      throw new Error(`OpenAI: HTTP ${response.status}`);
+      const bodyText = await response.text();
+      const compactBody = normalizeWhitespace(bodyText).slice(0, 400);
+      throw new Error(
+        `Newsletter generation failed: OpenAI HTTP ${response.status}${compactBody ? ` - ${compactBody}` : ''}`,
+      );
     }
 
     const json = await response.json() as any;
     const content = json?.choices?.[0]?.message?.content;
     if (typeof content !== 'string' || !content.trim()) {
-      throw new Error('OpenAI returned an empty draft.');
+      throw new Error('Newsletter generation failed: OpenAI returned an empty draft.');
     }
 
-    const parsed = JSON.parse(content);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      throw new Error(
+        `Newsletter generation failed: OpenAI returned invalid JSON - ${normalizeWhitespace(content).slice(0, 400)}`,
+      );
+    }
+
+    const headlinesNarrative = typeof (parsed as any)?.headlinesNarrative === 'string'
+      ? (parsed as any).headlinesNarrative.trim()
+      : '';
+
+    if (!headlinesNarrative) {
+      throw new Error('Newsletter generation failed: OpenAI response did not include `headlinesNarrative`.');
+    }
+
+    const commentaryByUrl = new Map<string, string>();
+    if (Array.isArray((parsed as any)?.curatedLinks)) {
+      for (const link of (parsed as any).curatedLinks) {
+        if (typeof link?.url !== 'string') continue;
+        const commentary = typeof link?.commentary === 'string' ? link.commentary.trim() : '';
+        if (commentary) commentaryByUrl.set(link.url.trim(), commentary);
+      }
+    }
 
     return {
-      draft: normalizeDraft(parsed, fallback),
+      draft: {
+        ...fallback,
+        headlinesNarrative,
+        curatedLinks: fallback.curatedLinks.map((link) => ({
+          ...link,
+          commentary: commentaryByUrl.get(link.url) ?? link.commentary,
+        })),
+      },
       provider: 'openai',
       model: openAiModel,
     };
   } catch (error) {
     console.error('[newsletter/openai]', error);
-    return {
-      draft: fallback,
-      provider: 'fallback',
-      model: 'deterministic-template',
-    };
+    if (error instanceof Error) {
+      if (error.name === 'AbortError') {
+        throw new Error(`Newsletter generation failed: OpenAI request timed out after ${OPENAI_TIMEOUT_MS}ms using model ${openAiModel}.`);
+      }
+      throw error;
+    }
+    throw new Error('Newsletter generation failed: unknown OpenAI error.');
   }
 }
 
@@ -987,8 +1350,9 @@ function renderNewsletterContent(issue: {
   referenceDate: string;
   draft: NewsletterDraft;
 }): { html: string; text: string } {
+  const headlinesParagraphs = normalizeParagraphs(issue.draft.headlinesNarrative);
   const sectionsHtml = issue.draft.signalSections.map((section) => `
-    <div style="background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:20px;margin-bottom:16px;">
+    <div style="background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:16px;margin-bottom:14px;">
       <h2 style="margin:0 0 10px;font-size:16px;color:#f8fafc;">${escapeHtml(section.title)}</h2>
       <p style="margin:0 0 12px;color:#cbd5e1;line-height:1.7;">${escapeHtml(section.body)}</p>
       ${section.bullets.length > 0 ? `
@@ -1001,13 +1365,15 @@ function renderNewsletterContent(issue: {
 
   const curatedLinksHtml = issue.draft.curatedLinks.length > 0
     ? `
-      <div style="background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:20px;margin-bottom:16px;">
+      <div style="background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:16px;margin-bottom:14px;">
         <h2 style="margin:0 0 12px;font-size:16px;color:#f8fafc;">Weekly Bitcoin Headlines</h2>
+        ${headlinesParagraphs.length > 0
+          ? headlinesParagraphs.map((paragraph, index) => `<p style="margin:0 0 ${index === headlinesParagraphs.length - 1 ? 16 : 12}px;color:#cbd5e1;line-height:1.75;">${escapeHtml(paragraph)}</p>`).join('')
+          : ''}
         ${issue.draft.curatedLinks.map((link) => `
           <div style="margin-bottom:14px;">
             <a href="${escapeHtml(link.url)}" style="color:#93c5fd;font-weight:700;text-decoration:none;">${escapeHtml(link.title)}</a>
             <div style="color:#94a3b8;font-size:12px;margin-top:2px;">${escapeHtml(link.source)}</div>
-            ${link.commentary ? `<p style="margin:6px 0 0;color:#cbd5e1;line-height:1.6;">${escapeHtml(link.commentary)}</p>` : ''}
           </div>
         `).join('')}
       </div>
@@ -1017,36 +1383,47 @@ function renderNewsletterContent(issue: {
   const html = `
     <!doctype html>
     <html>
-      <body style="margin:0;background:#020617;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-        <div style="max-width:620px;margin:0 auto;padding:24px;">
-          <div style="background:linear-gradient(135deg,#0b1220 0%,#111827 100%);border:1px solid #1e293b;border-radius:16px;padding:28px;color:#e2e8f0;">
-            <div style="margin-bottom:24px;">
+      <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      </head>
+      <body style="margin:0;padding:0;background:#020617;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;background:#020617;">
+          <tr>
+            <td align="center" style="padding:4px;">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;max-width:760px;border-collapse:separate;background:linear-gradient(135deg,#0b1220 0%,#111827 100%);border:1px solid #1e293b;border-radius:12px;">
+                <tr>
+                  <td style="padding:14px;color:#e2e8f0;">
+                    <div style="margin-bottom:16px;">
               <div style="font-size:12px;letter-spacing:0.12em;text-transform:uppercase;color:#60a5fa;font-weight:800;">CoinStrat Weekly</div>
-              <h1 style="margin:10px 0 8px;font-size:28px;line-height:1.15;color:#f8fafc;">${escapeHtml(issue.draft.headline)}</h1>
+              <h1 style="margin:10px 0 8px;font-size:24px;line-height:1.2;color:#f8fafc;">${escapeHtml(issue.draft.headline)}</h1>
               <p style="margin:0;color:#94a3b8;font-size:14px;">Week of ${escapeHtml(issue.weekOf)} · data through ${escapeHtml(issue.referenceDate)}</p>
-            </div>
+                    </div>
 
-            <div style="background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:20px;margin-bottom:16px;">
+                    <div style="background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:14px;margin-bottom:12px;">
               <p style="margin:0;color:#cbd5e1;line-height:1.75;">${escapeHtml(issue.draft.summary)}</p>
-            </div>
+                    </div>
 
-            ${sectionsHtml}
-            ${curatedLinksHtml}
+                    ${sectionsHtml}
+                    ${curatedLinksHtml}
 
-            <div style="text-align:center;margin:24px 0 8px;">
-              <a href="${escapeHtml(issue.draft.cta.href)}" style="display:inline-block;background:#60a5fa;color:#08111f;padding:12px 22px;border-radius:10px;text-decoration:none;font-weight:800;">
+                    <div style="text-align:center;margin:16px 0 8px;">
+                      <a href="${escapeHtml(issue.draft.cta.href)}" style="display:block;background:#60a5fa;color:#08111f;padding:14px 16px;border-radius:10px;text-decoration:none;font-weight:800;">
                 ${escapeHtml(issue.draft.cta.label)}
               </a>
-            </div>
+                    </div>
 
-            <p style="margin:24px 0 8px;color:#64748b;font-size:12px;line-height:1.6;text-align:center;">
+                    <p style="margin:16px 0 8px;color:#64748b;font-size:12px;line-height:1.6;text-align:center;">
               ${escapeHtml(issue.draft.complianceFooter)}
-            </p>
-            <p style="margin:0;color:#64748b;font-size:12px;text-align:center;">
+                    </p>
+                    <p style="margin:0;color:#64748b;font-size:12px;text-align:center;">
               <a href="__UNSUBSCRIBE_URL__" style="color:#94a3b8;">Unsubscribe</a>
-            </p>
-          </div>
-        </div>
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
       </body>
     </html>
   `;
@@ -1067,10 +1444,11 @@ function renderNewsletterContent(issue: {
     ...(issue.draft.curatedLinks.length > 0
       ? [
         'Weekly Bitcoin Headlines',
+        ...headlinesParagraphs.flatMap((paragraph) => [paragraph, '']),
+        '',
         ...issue.draft.curatedLinks.flatMap((link) => [
           `${link.title} (${link.source})`,
           link.url,
-          link.commentary ?? '',
           '',
         ]),
       ]
@@ -1183,6 +1561,7 @@ async function collectRecipients(mode: NewsletterAudienceMode): Promise<string[]
     serviceSupabase
       .from('email_subscribers')
       .select('email')
+      .not('confirmed_at', 'is', null)
       .is('unsubscribed_at', null),
     serviceSupabase
       .from('newsletter_suppressions')
@@ -1345,6 +1724,94 @@ export async function getNewsletterDashboardData(weekOf?: string) {
   };
 }
 
+export async function requestNewsletterSubscription(email: string, source?: string | null): Promise<'pending_confirmation' | 'already_subscribed'> {
+  const normalized = normalizeEmail(email);
+  const token = randomBytes(24).toString('hex');
+  const now = new Date().toISOString();
+
+  const { data: existing, error: existingError } = await serviceSupabase
+    .from('email_subscribers')
+    .select('id, email, confirmed_at, unsubscribed_at, source')
+    .eq('email', normalized)
+    .maybeSingle();
+
+  if (existingError) throw new Error(existingError.message);
+
+  if (existing?.confirmed_at && !existing.unsubscribed_at) {
+    return 'already_subscribed';
+  }
+
+  const payload = {
+    email: normalized,
+    source: source?.trim() || existing?.source || 'landing_page',
+    subscribed_at: now,
+    unsubscribed_at: null,
+    confirmed_at: null,
+    confirmation_token: token,
+    confirmation_sent_at: now,
+  };
+
+  const { error: upsertError } = await serviceSupabase
+    .from('email_subscribers')
+    .upsert(payload, { onConflict: 'email' });
+
+  if (upsertError) throw new Error(upsertError.message);
+
+  const message = buildSignupConfirmationEmail(normalized, token);
+  const emailResult = await resend.emails.send({
+    from: formatFromAddress(await getNewsletterSettings()),
+    to: normalized,
+    subject: message.subject,
+    html: message.html,
+    text: message.text,
+  });
+
+  if (emailResult.error) {
+    throw new Error(emailResult.error.message);
+  }
+
+  return 'pending_confirmation';
+}
+
+export async function confirmNewsletterSubscription(token: string): Promise<string> {
+  const trimmed = token.trim();
+  if (!trimmed) throw new Error('Missing confirmation token.');
+
+  const { data: subscriber, error: subscriberError } = await serviceSupabase
+    .from('email_subscribers')
+    .select('email, unsubscribed_at')
+    .eq('confirmation_token', trimmed)
+    .maybeSingle();
+
+  if (subscriberError) throw new Error(subscriberError.message);
+  if (!subscriber || subscriber.unsubscribed_at) {
+    throw new Error('Confirmation link is invalid or no longer active.');
+  }
+
+  const normalized = normalizeEmail(subscriber.email);
+  const now = new Date().toISOString();
+
+  const [{ error: subscriberUpdateError }, { error: suppressionDeleteError }] = await Promise.all([
+    serviceSupabase
+      .from('email_subscribers')
+      .update({
+        confirmed_at: now,
+        unsubscribed_at: null,
+        confirmation_token: null,
+      })
+      .eq('email', normalized),
+    serviceSupabase
+      .from('newsletter_suppressions')
+      .delete()
+      .eq('email', normalized),
+  ]);
+
+  if (subscriberUpdateError) throw new Error(subscriberUpdateError.message);
+  if (suppressionDeleteError) throw new Error(suppressionDeleteError.message);
+
+  return normalized;
+}
+
 export async function unsubscribeEmail(email: string) {
   const normalized = normalizeEmail(email);
 
@@ -1354,7 +1821,10 @@ export async function unsubscribeEmail(email: string) {
       .upsert({ email: normalized, reason: 'unsubscribe' }, { onConflict: 'email' }),
     serviceSupabase
       .from('email_subscribers')
-      .update({ unsubscribed_at: new Date().toISOString() })
+      .update({
+        unsubscribed_at: new Date().toISOString(),
+        confirmation_token: null,
+      })
       .eq('email', normalized),
   ]);
 
