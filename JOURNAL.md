@@ -315,6 +315,113 @@ A good API playground dramatically lowers the barrier to adoption. The thebotcas
 
 ---
 
+## 2026-03-09 – Newsletter Engine Foundation
+
+### What was done
+
+- **Built the newsletter engine backend**: Added a full database-backed newsletter system with settings, weekly issues, curated links, send logs, suppressions, and a new `lifetime` tier migration.
+- **Created reusable server-side content generation utilities**: Introduced shared compute/store/newsletter libraries so the weekly digest, signal refresh, and admin workflows could all use the same signal snapshot and rendering pipeline.
+- **Launched the admin newsletter workspace**: Expanded `Admin.tsx` into a real operator console for drafting issues, previewing content, configuring send windows, managing audience mode, and reviewing send history.
+- **Added self-serve unsubscribe flow**: Created `email-unsubscribe` plus a dedicated unsubscribe page so newsletter recipients can opt out cleanly without manual intervention.
+- **Improved cache tooling and API ergonomics**: Added `seed-cache.sh`, refined signal endpoints around cached data, and refreshed the developer-facing endpoint components to keep docs aligned with the backend.
+
+### Challenges
+
+1. **The original weekly digest flow was too narrow** — it could send an email, but it didn’t have the concept of reusable issues, scheduling, curated links, or send history. The new engine needed proper state and persistence.
+2. **Signal computation had started to sprawl across functions** — centralising the compute path was necessary to avoid subtle divergence between what the dashboard showed, what the API served, and what the newsletter summarised.
+3. **Newsletter operations need admin-safe auth** — the backend had to distinguish between public requests, paid API access, and authenticated admin actions without leaking server-only capability into the client.
+
+### Learnings
+
+- Email features stop being “just another function” as soon as they become a product surface. Once scheduling, previews, logs, and audience selection matter, you really need a small content system, not a single send script.
+- Shared compute and storage helpers pay off quickly in data products. Reusing one canonical signal pipeline is safer than letting every function assemble its own view of the truth.
+
+### Reflections
+
+This was the moment CoinStrat’s email layer stopped being a side feature and started feeling like a real publishing system. The important shift wasn’t just “can we send a newsletter?” but “can we create, review, schedule, audit, and evolve one reliably every week?”
+
+---
+
+## 2026-03-10 – Docs Hub Expansion
+
+### What was done
+
+- **Split documentation out of the homepage**: Moved long-form explanatory content into dedicated docs pages for Home, Data, Architecture, Scores, and Signals.
+- **Built shared documentation navigation**: Added `DocsSectionNav` and `DocsPager` so the docs behave like a connected knowledge base instead of a set of isolated pages.
+- **Reframed the public site structure**: Updated routing so the homepage could stay focused on positioning and conversion while the docs handled model transparency and educational content.
+- **Cleaned up the admin/docs boundary**: Simplified surrounding pages so the new docs system had a clearer role and the product no longer relied on an overloaded landing page to explain everything.
+
+### Challenges
+
+1. **The homepage was trying to do too many jobs at once** — marketing page, product explainer, and technical reference. That made it longer, harder to scan, and harder to maintain.
+2. **Docs need information architecture, not just content** — once there are multiple explanation pages, navigation, sequencing, and cross-linking matter as much as the words on each page.
+
+### Learnings
+
+- Separating “sell the product” from “explain the model” makes both experiences better. The homepage can stay punchy while the docs can go deep without apology.
+- Reusable docs navigation components are worth creating early. They reduce friction every time a new explanatory page is added.
+
+### Reflections
+
+This was a product clarity day more than a pure coding day. CoinStrat is becoming complex enough that good documentation is part of the feature set, not an afterthought bolted onto the landing page.
+
+---
+
+## 2026-03-13 – Newsletter Confirmation & Trust Improvements
+
+### What was done
+
+- **Added double opt-in confirmation for newsletter signups**: Introduced confirmation tokens, `confirmed_at`, and a new `/newsletter/confirm` flow so subscribers explicitly verify their address before receiving broadcasts.
+- **Upgraded subscription endpoints**: Refined `email-subscribe` and added `email-confirm` so signup and confirmation became two explicit steps with clearer state transitions.
+- **Hardened newsletter audience quality**: Updated newsletter sending logic to respect confirmation state and suppressions, improving deliverability and reducing the chance of mailing unverified signups.
+- **Expanded admin visibility**: Enhanced the admin area with better subscriber handling and newsletter operational feedback, making it easier to understand who is actually reachable.
+- **Touched the public signal response path**: Adjusted signal endpoint behaviour alongside the newsletter work so the latest product metadata remained consistent across the app and email flows.
+
+### Challenges
+
+1. **Existing subscribers needed a migration path** — once confirmation was introduced, the system had to avoid treating legitimate existing subscribers as invalid or silently dropping them.
+2. **Email trust is cumulative** — subscription, confirmation, suppression, and unsubscribe all have to work together cleanly or the whole newsletter channel becomes fragile.
+
+### Learnings
+
+- Double opt-in adds friction, but it buys clarity, compliance, and better list quality. For a small but serious product, that trade-off is worth it.
+- Subscriber state should be modelled explicitly. “Subscribed” is not the same thing as “confirmed,” and handling that distinction in the schema simplifies everything downstream.
+
+### Reflections
+
+This session was about treating email like infrastructure, not growth-hack glue. A smaller, cleaner, fully confirmed list is much more valuable than a larger list with fuzzy consent and unreliable delivery.
+
+---
+
+## 2026-03-14 – Free Access Hardening, Pro Alerts & Developer Workspace
+
+### What was done
+
+- **Fixed Free tier access end-to-end**: Reworked auth/session handling so signed-in, verified users consistently unlock the dashboard, charts, signals, and backtests without getting stuck behind stale loading or profile-sync edge cases.
+- **Improved the signed-in product flow**: Updated the homepage, app shell, auth modal interactions, and profile page so Free access is clearly positioned as the base product rather than an accidental subset of paid logic.
+- **Built Pro signal alerts**: Added database tables and backend logic for alert subscriptions, detected state changes, delivery logs, preferences management, and one-click alert unsubscribe links.
+- **Added alert management to the profile**: Expanded `Profile.tsx` with sectional navigation, Pro alert toggles, paid-tier gating, and an OpenClaw skill install snippet powered by the user’s API key.
+- **Evolved API docs into a Developer Workspace**: Repositioned the old API playground into a fuller developer surface with API key management, grouped endpoint testing, rate limits, roadmap copy, and admin newsletter auto-send status.
+- **Refined admin operations**: Fixed admin page reload behaviour, improved the cache status label, and tightened the overall control-surface for operators monitoring live data and outbound email flows.
+
+### Challenges
+
+1. **Free access was really an auth-state problem** — the tricky part wasn’t pricing logic, it was the race between session restoration, profile provisioning, and email verification state.
+2. **Alerting needs idempotency and user control** — detecting signal changes is easy compared with guaranteeing deduplicated sends, storing delivery outcomes, and giving users a trustworthy unsubscribe path.
+3. **The developer surface had outgrown “API docs”** — once API keys, live requests, paid access, admin-only endpoints, and future SDK positioning all live in one place, the UX needs to feel like a workspace, not a static reference page.
+
+### Learnings
+
+- The Free tier is part of onboarding, not just monetisation. If access restoration is flaky, the product feels broken before users ever evaluate the signals.
+- Event tables plus delivery tables are a strong pattern for notifications: one records what changed, the other records who was told about it and whether it succeeded.
+- Developer experience benefits from product thinking too. Good naming, clear auth expectations, and a place to experiment are just as important as the endpoint implementations themselves.
+
+### Reflections
+
+March 14 felt like three product layers maturing at once: acquisition (`Free` access), retention (email alerts), and platform leverage (developer tooling). None of these changed the core signal engine directly, but all of them made CoinStrat feel more like a real product people can use, trust, and build on.
+
+---
+
 ## Cumulative Progress
 
 | Area | Status |
@@ -332,17 +439,21 @@ A good API playground dramatically lowers the barrier to adoption. The thebotcas
 | Signal API | Complete — /current (public), /history (Pro), /refresh (cron) |
 | Email system | Complete — Resend for weekly digest + newsletter, Supabase for auth emails |
 | Admin dashboard | Complete — user list, tier management, stats |
-| API playground | Complete — tabbed endpoint groups, live execution, curl generation |
+| Newsletter engine | Complete — issue drafting, curation, scheduling, auto-send status, unsubscribe and confirmation flows |
+| Documentation pages | Complete — dedicated docs hub for architecture, data feeds, scores, and signal logic |
+| API playground / developer workspace | Complete — endpoint explorer, API key management, rate limits, admin status tooling |
+| Free tier access | Complete — verified users can unlock dashboard, charts, signals, and backtests |
+| Signal alerts | Complete — Pro email alerts, preferences, delivery logging, unsubscribe flow |
 | Legal pages | Complete — Terms of Service, Privacy Policy |
 | External services | Supabase, Stripe, Resend, AWS WorkMail all configured |
 | On-chain execution (Power Wallet) | Future work |
 
 ### Key metrics
 
-- **Files created**: ~45 TypeScript/config files
+- **Files created**: ~75 TypeScript/config/SQL files
 - **Lines of engine logic**: ~540 (engine.ts) + ~380 (backtest.ts)
-- **Netlify Functions**: 9 (FRED proxy, BGeometrics proxy, Stooq proxy, stripe-checkout, stripe-portal, stripe-webhook, signal-current, signal-history, signal-refresh, weekly-digest, email-subscribe, admin-users)
+- **Netlify Functions**: 16 endpoint/proxy functions + shared libraries for auth, compute, newsletter, alerts, and cache access
 - **Data sources integrated**: 6 (FRED, Blockchain.info, BGeometrics ×3, Binance)
 - **BTC price source iterations**: 4 (CoinGecko → Blockchain.info → Stooq → Hybrid)
 - **CORE exit logic iterations**: 4
-- **Bugs found in production**: 6 major (CoinGecko limit, Netlify redirect ordering, BGeometrics allow-list, gen_random_bytes trigger, magic link redirect, auth reload glitch)
+- **Bugs found in production**: 10+ major across data, auth, newsletter, and admin flows
