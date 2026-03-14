@@ -134,7 +134,7 @@ function emptyCuratedLink(index: number): CuratedLink {
 }
 
 const Admin: React.FC = () => {
-  const { isAdmin, session } = useAuth();
+  const { isAdmin, session, loading: authLoading } = useAuth();
   const [tabIdx, setTabIdx] = useState(0);
   const [users, setUsers] = useState<Profile[]>([]);
   const [subscribers, setSubscribers] = useState<EmailSubscriber[]>([]);
@@ -248,14 +248,34 @@ const Admin: React.FC = () => {
     }
   }, [applyIssueToForm, authHeaders]);
 
-  useEffect(() => {
-    fetchUsers();
-    fetchCacheInfo();
-  }, [fetchUsers, fetchCacheInfo]);
+  const activeSubscribers = useMemo(
+    () => subscribers.filter((subscriber) => !subscriber.unsubscribed_at),
+    [subscribers],
+  );
 
   useEffect(() => {
+    fetchCacheInfo();
+  }, [fetchCacheInfo]);
+
+  useEffect(() => {
+    if (authLoading || !isAdmin || !session) return;
+    fetchUsers();
+  }, [authLoading, fetchUsers, isAdmin, session]);
+
+  useEffect(() => {
+    if (authLoading || !isAdmin || !session) return;
     fetchNewsletter(selectedWeek);
-  }, [fetchNewsletter, selectedWeek]);
+  }, [authLoading, fetchNewsletter, isAdmin, selectedWeek, session]);
+
+  if (authLoading) {
+    return (
+      <Paper sx={{ p: 4, textAlign: 'center' }}>
+        <CircularProgress size={28} sx={{ mb: 2 }} />
+        <Typography variant="h6" sx={{ fontWeight: 700 }}>Loading admin workspace</Typography>
+        <Typography color="text.secondary">Checking your account permissions...</Typography>
+      </Paper>
+    );
+  }
 
   if (!isAdmin) {
     return (
@@ -274,11 +294,6 @@ const Admin: React.FC = () => {
     pro_plus: users.filter((user) => user.tier === 'pro_plus').length,
     lifetime: users.filter((user) => user.tier === 'lifetime').length,
   };
-
-  const activeSubscribers = useMemo(
-    () => subscribers.filter((subscriber) => !subscriber.unsubscribed_at),
-    [subscribers],
-  );
 
   const handleTierChange = async (userId: string, newTier: Tier) => {
     setError(null);
