@@ -193,7 +193,10 @@ const Admin: React.FC = () => {
 
   const fetchCacheInfo = useCallback(async () => {
     try {
-      const res = await fetch('/api/v1/signals/current');
+      const params = new URLSearchParams({ t: String(Date.now()) });
+      const res = await fetch(`/api/v1/signals/current?${params.toString()}`, {
+        cache: 'no-store',
+      });
       if (!res.ok) {
         setCacheInfo({ latestDate: null, cachedAt: null, stale: null });
         return;
@@ -362,10 +365,20 @@ const Admin: React.FC = () => {
         setError(data.error ?? 'Refresh failed');
       } else if (data.new_rows === 0) {
         setRefreshResult('Cache is already up-to-date.');
+        setCacheInfo((prev) => ({
+          latestDate: prev.latestDate,
+          cachedAt: data.cached_at ?? prev.cachedAt,
+          stale: data.cached_at ? false : prev.stale,
+        }));
       } else {
         setRefreshResult(
           `Appended ${data.new_rows} new rows (${data.total} total). Latest: ${data.latest_date}`,
         );
+        setCacheInfo({
+          latestDate: data.latest_date ?? null,
+          cachedAt: data.cached_at ?? null,
+          stale: false,
+        });
       }
 
       await fetchCacheInfo();
