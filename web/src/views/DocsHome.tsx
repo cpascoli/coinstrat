@@ -1,18 +1,16 @@
 import React from 'react';
 import { Box, Button, Card, CardContent, Stack, Typography } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
-import { Activity, BarChart3, Binary, BookOpen, Database, Key } from 'lucide-react';
+import { Activity, BarChart3, Binary, Database, Key } from 'lucide-react';
+import DocsPageLayout from '../components/DocsPageLayout';
 import DocsPager from '../components/DocsPager';
-import DocsSectionNav from '../components/DocsSectionNav';
 
 const DocsHome: React.FC = () => {
   const navigate = useNavigate();
 
   return (
-    <Box sx={{ maxWidth: 920, mx: 'auto' }}>
+    <DocsPageLayout>
       <Stack spacing={3}>
-        <DocsSectionNav />
-
         <Box>
           <Typography
             variant="h3"
@@ -67,7 +65,7 @@ const DocsHome: React.FC = () => {
 
         <DocsPager />
       </Stack>
-    </Box>
+    </DocsPageLayout>
   );
 };
 

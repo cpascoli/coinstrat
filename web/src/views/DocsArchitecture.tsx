@@ -1,7 +1,7 @@
 import React from 'react';
 import { Alert, Box, Card, CardContent, Chip, Divider, Stack, Typography } from '@mui/material';
+import DocsPageLayout from '../components/DocsPageLayout';
 import DocsPager from '../components/DocsPager';
-import DocsSectionNav from '../components/DocsSectionNav';
 
 type Stage = {
   title: string;
@@ -76,10 +76,8 @@ const PIPELINE: Stage[] = [
 
 const DocsArchitecture: React.FC = () => {
   return (
-    <Box sx={{ maxWidth: 1040, mx: 'auto' }}>
+    <DocsPageLayout>
       <Stack spacing={3}>
-        <DocsSectionNav />
-
         <Box>
           <Typography
             variant="h3"
@@ -164,7 +162,7 @@ const DocsArchitecture: React.FC = () => {
 
         <DocsPager />
       </Stack>
-    </Box>
+    </DocsPageLayout>
   );
 };
 

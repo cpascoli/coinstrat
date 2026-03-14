@@ -13,7 +13,7 @@ export type Endpoint = {
   path: string;
   summary: string;
   description?: string;
-  auth: 'none' | 'api_key' | 'cron_secret';
+  auth: 'none' | 'api_key' | 'admin_jwt' | 'cron_secret';
   params?: ParamField[];
 };
 
@@ -48,7 +48,7 @@ export const endpointGroups: EndpointGroup[] = [
     role: 'pro',
     label: 'Pro',
     description:
-      'Requires an API key (X-API-Key header). Available to Pro (1,000 calls/day) and Pro+ (10,000 calls/day) subscribers.',
+      'Requires an API key (X-API-Key header). Available to Pro and Lifetime (1,000 calls/day) plus Pro+ (10,000 calls/day) subscribers.',
     color: '#60a5fa',
     endpoints: [
       {
@@ -57,7 +57,7 @@ export const endpointGroups: EndpointGroup[] = [
         path: '/api/v1/signals/history',
         summary: 'Full signal history',
         description:
-          'Returns the complete daily signal history. Optionally filter by date range using the "from" and "to" query parameters (YYYY-MM-DD format). Includes all scores, signals, BTC price, and diagnostic fields for every day.',
+          'Returns the complete daily signal history. Optionally filter by date range using the "from" and "to" query parameters (YYYY-MM-DD format). Includes all scores, signals, BTC price, and diagnostic fields for every day, and returns X-RateLimit-* headers so clients can track remaining quota.',
         auth: 'api_key',
         params: [
           {
@@ -82,9 +82,9 @@ export const endpointGroups: EndpointGroup[] = [
   },
   {
     role: 'internal',
-    label: 'Internal',
+    label: 'Admin',
     description:
-      'Protected by a shared CRON_SECRET. Used by the OpenClaw cron agent to refresh the signal cache and trigger the weekly digest.',
+      'Available to admins in the browser via their signed-in session token, and to server-side automation via CRON_SECRET.',
     color: '#f59e0b',
     endpoints: [
       {
@@ -94,7 +94,7 @@ export const endpointGroups: EndpointGroup[] = [
         summary: 'Refresh signal cache',
         description:
           'Runs an incremental server-side refresh by default and appends any new signal rows to the Netlify Blob cache. It also accepts a precomputed signal array for manual seeding.',
-        auth: 'cron_secret',
+        auth: 'admin_jwt',
       },
       {
         id: 'weekly-digest',
@@ -103,7 +103,7 @@ export const endpointGroups: EndpointGroup[] = [
         summary: 'Send weekly digest email',
         description:
           'Runs the weekly newsletter workflow. The daily cron checks newsletter settings, composes the issue for the current week, and broadcasts it on the configured weekday and UTC hour.',
-        auth: 'cron_secret',
+        auth: 'admin_jwt',
       },
     ],
   },

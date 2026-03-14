@@ -2,9 +2,15 @@ import React, { useState } from 'react';
 import { Box, Button, Card, CardContent, Chip, Link, Stack, TextField, Typography, Alert } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { HeroIllustration } from '../components/HeroIllustration';
-import { Zap, Crown, Check } from 'lucide-react';
+import { ArrowRight, Mail, Sparkles, Zap, Crown, Check } from 'lucide-react';
 
-const Home: React.FC = () => {
+interface HomeProps {
+  hasFreeAccess?: boolean;
+  isAuthenticated?: boolean;
+  onOpenAuth?: (redirectTo?: string) => void;
+}
+
+const Home: React.FC<HomeProps> = ({ hasFreeAccess = false, isAuthenticated = false, onOpenAuth }) => {
   const navigate = useNavigate();
   return (
     <div className="mx-auto max-w-4xl space-y-12">
@@ -70,11 +76,26 @@ const Home: React.FC = () => {
             </Box>
 
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} sx={{ mt: 5, alignItems: { sm: 'center' } }}>
-              <Button variant="contained" size="medium" onClick={() => navigate('/dashboard')} sx={{ fontWeight: 900 }}>
-                Open Dashboard
+              <Button
+                variant="contained"
+                size="medium"
+                onClick={() => {
+                  if (hasFreeAccess) {
+                    navigate('/dashboard');
+                    return;
+                  }
+                  if (isAuthenticated) {
+                    navigate('/profile');
+                    return;
+                  }
+                  onOpenAuth?.('/dashboard');
+                }}
+                sx={{ fontWeight: 900 }}
+              >
+                {hasFreeAccess ? 'Open Dashboard' : isAuthenticated ? 'Open Profile' : 'Sign In'}
               </Button>
               <Button variant="outlined" size="medium" onClick={() => navigate('/docs')} sx={{ fontWeight: 900 }}>
-                Read Docs
+                Learn More
               </Button>
             </Stack>
           </Box>
@@ -180,7 +201,7 @@ const Home: React.FC = () => {
       </section>
 
       {/* Pricing */}
-      <PricingSection />
+      <PricingSection hasFreeAccess={hasFreeAccess} isAuthenticated={isAuthenticated} onOpenAuth={onOpenAuth} />
     </div>
   );
 };
@@ -285,7 +306,11 @@ const PLANS = [
   },
 ];
 
-const PricingSection: React.FC = () => {
+const PricingSection: React.FC<{ hasFreeAccess?: boolean; isAuthenticated?: boolean; onOpenAuth?: (redirectTo?: string) => void }> = ({
+  hasFreeAccess = false,
+  isAuthenticated = false,
+  onOpenAuth,
+}) => {
   const navigate = useNavigate();
   return (
     <section className="space-y-6">
@@ -335,7 +360,25 @@ const PricingSection: React.FC = () => {
               <Button
                 variant={plan.variant}
                 fullWidth
-                onClick={() => navigate(plan.href)}
+                onClick={() => {
+                  if (plan.tier === 'free' && !hasFreeAccess) {
+                    if (isAuthenticated) {
+                      navigate('/profile');
+                    } else {
+                      onOpenAuth?.('/dashboard');
+                    }
+                    return;
+                  }
+                  if (plan.tier !== 'free' && !hasFreeAccess) {
+                    if (isAuthenticated) {
+                      navigate('/profile');
+                    } else {
+                      onOpenAuth?.('/profile');
+                    }
+                    return;
+                  }
+                  navigate(plan.href);
+                }}
                 sx={{
                   textTransform: 'none',
                   fontWeight: 700,
@@ -389,53 +432,136 @@ const EmailSignup: React.FC = () => {
   return (
     <Card
       sx={{
-        background: 'linear-gradient(135deg, rgba(96,165,250,0.08) 0%, rgba(167,139,250,0.08) 100%)',
-        borderColor: 'rgba(96,165,250,0.25)',
+        position: 'relative',
+        overflow: 'hidden',
+        background:
+          'radial-gradient(circle at top left, rgba(96,165,250,0.16), transparent 34%), radial-gradient(circle at top right, rgba(167,139,250,0.14), transparent 28%), linear-gradient(180deg, rgba(15,23,42,0.92) 0%, rgba(15,23,42,0.78) 100%)',
+        borderColor: 'rgba(96,165,250,0.28)',
         boxShadow: 'none',
+        '&::before': {
+          content: '""',
+          position: 'absolute',
+          inset: 0,
+          height: 3,
+          background:
+            'linear-gradient(90deg, rgba(96,165,250,0.9), rgba(167,139,250,0.8), rgba(34,197,94,0.8))',
+        },
       }}
     >
-      <CardContent sx={{ textAlign: 'center', py: 4 }}>
-        <Typography variant="h5" sx={{ fontWeight: 900, mb: 1 }}>Free Weekly Signal Report</Typography>
-        <Typography color="text.secondary" sx={{ mb: 3, maxWidth: 540, mx: 'auto' }}>
-          Every Monday, get the latest accumulation signal, macro scores, and a
-          brief market read — straight to your inbox. No spam, unsubscribe anytime.
-        </Typography>
+      <CardContent sx={{ py: { xs: 3.5, md: 4 }, px: { xs: 2.5, md: 4 } }}>
+        <Box
+          sx={{
+            display: 'grid',
+            gap: 3,
+            gridTemplateColumns: { xs: '1fr', md: '1.15fr 0.95fr' },
+            alignItems: 'center',
+          }}
+        >
+          <Box>
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
+              <Chip
+                icon={<Mail size={14} />}
+                label="Newsletter"
+                size="small"
+                variant="outlined"
+                sx={{
+                  bgcolor: 'rgba(96,165,250,0.14)',
+                  color: '#bfdbfe',
+                  borderColor: 'rgba(96,165,250,0.3)',
+                  fontWeight: 800,
+                }}
+              />
+              <Chip
+                icon={<Sparkles size={14} />}
+                label="Free"
+                size="small"
+                variant="outlined"
+                sx={{
+                  bgcolor: 'rgba(34,197,94,0.14)',
+                  color: '#bbf7d0',
+                  borderColor: 'rgba(34,197,94,0.3)',
+                  fontWeight: 800,
+                }}
+              />
+            </Stack>
 
-        {status === 'success' ? (
-          <Alert severity="success" sx={{ maxWidth: 400, mx: 'auto' }}>
-            {successMessage}
-          </Alert>
-        ) : (
-          <Box
-            component="form"
-            onSubmit={handleSubmit}
-            sx={{ display: 'flex', gap: 1, maxWidth: 420, mx: 'auto' }}
-          >
-            <TextField
-              placeholder="your@email.com"
-              type="email"
-              size="small"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              fullWidth
-              sx={{ '& .MuiOutlinedInput-root': { bgcolor: 'background.paper' } }}
-            />
-            <Button
-              type="submit"
-              variant="contained"
-              disabled={status === 'loading'}
-              sx={{ textTransform: 'none', fontWeight: 700, whiteSpace: 'nowrap', px: 3 }}
-            >
-              {status === 'loading' ? 'Joining…' : 'Get the report'}
-            </Button>
+            <Typography variant="h4" sx={{ fontWeight: 950, mb: 1.25, fontSize: { xs: 28, sm: 34 } }}>
+              Free Weekly Signal Report
+            </Typography>
+            <Typography color="text.secondary" sx={{ mb: 2.25, maxWidth: 560, lineHeight: 1.75 }}>
+              Start every Monday with the latest CoinStrat signal, the macro and liquidity backdrop,
+              and a concise Bitcoin market brief built from the stories that actually moved the week.
+            </Typography>
+
+            {/* <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} useFlexGap flexWrap="wrap">
+              {[
+                'Monday morning delivery',
+                'Signal snapshot + score context',
+                'Concise Bitcoin market read',
+              ].map((item) => (
+                <Chip
+                  key={item}
+                  label={item}
+                  variant="outlined"
+                  sx={{
+                    borderColor: 'rgba(148,163,184,0.28)',
+                    color: 'text.secondary',
+                    bgcolor: 'rgba(2,6,23,0.24)',
+                    fontWeight: 700,
+                  }}
+                />
+              ))}
+            </Stack> */}
           </Box>
-        )}
-        {status === 'error' && (
-          <Alert severity="error" sx={{ mt: 2, maxWidth: 400, mx: 'auto' }}>
-            Something went wrong. Please try again.
-          </Alert>
-        )}
+
+          <Box
+            sx={{
+              border: '1px solid',
+              borderColor: 'rgba(148,163,184,0.18)',
+              borderRadius: 1,
+              bgcolor: 'rgba(2,6,23,0.44)',
+              p: { xs: 2.5, sm: 3.5 },
+            }}
+          >
+            <Typography sx={{ fontWeight: 800, mb: 0.75 }}>Get the report in your inbox</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Double opt-in, no spam, unsubscribe anytime.
+            </Typography>
+
+            {status === 'success' ? (
+              <Alert severity="success">
+                {successMessage}
+              </Alert>
+            ) : (
+              <Box component="form" onSubmit={handleSubmit} sx={{ display: 'grid', gap: 1.25 }}>
+                <TextField
+                  placeholder="your@email.com"
+                  type="email"
+                  size="medium"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  fullWidth
+                  sx={{ '& .MuiOutlinedInput-root': { bgcolor: 'background.paper' } }}
+                />
+                <Button
+                  type="submit"
+                  variant="contained"
+                  disabled={status === 'loading'}
+                  endIcon={<ArrowRight size={16} />}
+                  sx={{ textTransform: 'none', fontWeight: 800, py: 1.25 }}
+                >
+                  {status === 'loading' ? 'Joining…' : 'Get the free report'}
+                </Button>
+              </Box>
+            )}
+            {status === 'error' && (
+              <Alert severity="error" sx={{ mt: 1.5 }}>
+                Something went wrong. Please try again.
+              </Alert>
+            )}
+          </Box>
+        </Box>
       </CardContent>
     </Card>
   );

@@ -1,8 +1,8 @@
 import React from 'react';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { Box, Card, CardContent, CardHeader, Divider, IconButton, Stack, Tooltip, Typography } from '@mui/material';
+import DocsPageLayout from '../components/DocsPageLayout';
 import DocsPager from '../components/DocsPager';
-import DocsSectionNav from '../components/DocsSectionNav';
 
 type DataFeed = {
   title: string;
@@ -158,10 +158,8 @@ const DATA_FEEDS: DataFeed[] = [
 
 const DocsData: React.FC = () => {
   return (
-    <Box sx={{ maxWidth: 1120, mx: 'auto' }}>
+    <DocsPageLayout>
       <Stack spacing={3}>
-        <DocsSectionNav />
-
         <Box>
           <Typography
             variant="h3"
@@ -184,7 +182,7 @@ const DocsData: React.FC = () => {
 
         <DocsPager />
       </Stack>
-    </Box>
+    </DocsPageLayout>
   );
 };
 

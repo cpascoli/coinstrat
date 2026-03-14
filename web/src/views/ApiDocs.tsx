@@ -11,16 +11,16 @@ import {
 } from '@mui/material';
 import { Lock, Key } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import DocsPageLayout from '../components/DocsPageLayout';
 import DocsPager from '../components/DocsPager';
-import DocsSectionNav from '../components/DocsSectionNav';
 import { endpointGroups } from './api/endpoints';
 import EndpointCard from './api/EndpointCard';
 
 const KEY_STORAGE = 'coinstrat_api_key';
 
 const ApiDocs: React.FC = () => {
-  const { profile, tier } = useAuth();
-  const hasApiAccess = tier === 'pro' || tier === 'pro_plus';
+  const { profile, tier, isAdmin } = useAuth();
+  const hasApiAccess = tier === 'pro' || tier === 'pro_plus' || tier === 'lifetime';
 
   const [tabIdx, setTabIdx] = useState(0);
   const [apiKey, setApiKey] = useState(() => {
@@ -46,13 +46,25 @@ const ApiDocs: React.FC = () => {
     } catch { /* ignore */ }
   }, [apiKey]);
 
-  const group = useMemo(() => endpointGroups[tabIdx], [tabIdx]);
+  const visibleEndpointGroups = useMemo(
+    () => endpointGroups.filter((group) => group.role !== 'internal' || isAdmin),
+    [isAdmin],
+  );
+
+  useEffect(() => {
+    if (tabIdx >= visibleEndpointGroups.length) {
+      setTabIdx(0);
+    }
+  }, [tabIdx, visibleEndpointGroups.length]);
+
+  const group = useMemo(
+    () => visibleEndpointGroups[tabIdx] ?? visibleEndpointGroups[0],
+    [tabIdx, visibleEndpointGroups],
+  );
 
   return (
-    <Box sx={{ maxWidth: 880, mx: 'auto' }}>
+    <DocsPageLayout>
       <Stack spacing={3}>
-        <DocsSectionNav />
-
         {/* Hero */}
         <Paper sx={{ p: { xs: 3, sm: 4 } }}>
           <Stack spacing={2.5}>
@@ -87,6 +99,7 @@ const ApiDocs: React.FC = () => {
                 variant="outlined"
                 icon={<Lock size={12} />}
               />
+              <Chip label="X-RateLimit-* headers" size="small" variant="outlined" />
             </Stack>
 
             {/* Response fields overview */}
@@ -142,6 +155,9 @@ const ApiDocs: React.FC = () => {
               Saved in browser
             </Typography>
           </Stack>
+          <Typography variant="caption" sx={{ color: 'text.secondary', mt: 1.25, display: 'block' }}>
+            Pro and Lifetime include 1,000 calls/day. Pro+ includes 10,000 calls/day.
+          </Typography>
         </Paper>
 
         {/* Endpoint group tabs */}
@@ -153,7 +169,7 @@ const ApiDocs: React.FC = () => {
             scrollButtons="auto"
             sx={{ '& .MuiTab-root': { fontWeight: 800, textTransform: 'none' }, mb: 2 }}
           >
-            {endpointGroups.map((g) => (
+            {visibleEndpointGroups.map((g) => (
               <Tab
                 key={g.role}
                 label={
@@ -176,7 +192,7 @@ const ApiDocs: React.FC = () => {
           </Typography>
 
           <Stack spacing={1}>
-            {group.endpoints.map((ep) => (
+            {group?.endpoints.map((ep) => (
               <EndpointCard key={ep.id} ep={ep} apiKey={apiKey} />
             ))}
           </Stack>
@@ -204,13 +220,26 @@ const ApiDocs: React.FC = () => {
           </Stack>
         </Paper>
 
+        <Paper sx={{ p: 3 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800, mb: 2 }}>Roadmap</Typography>
+          <Stack spacing={1}>
+            <Typography variant="body2" color="text.secondary">
+              Near-term improvements planned for the Signal API:
+            </Typography>
+            <Typography variant="body2" color="text.secondary">OpenAPI schema for easier client generation.</Typography>
+            <Typography variant="body2" color="text.secondary">Copy-paste JavaScript and Python examples for each endpoint.</Typography>
+            <Typography variant="body2" color="text.secondary">A usage endpoint for quota introspection and billing UX.</Typography>
+            <Typography variant="body2" color="text.secondary">Richer history filters and state-change endpoints for automation workflows.</Typography>
+          </Stack>
+        </Paper>
+
         {/* Auth footer */}
         <Typography variant="body2" sx={{ color: 'text.secondary' }}>
           Authentication: include{' '}
           <code style={{ background: 'rgba(255,255,255,0.08)', padding: '1px 5px', borderRadius: 4, fontSize: 12 }}>
             X-API-Key: &lt;your_key&gt;
           </code>{' '}
-          for Pro endpoints. Find your key on the{' '}
+          for paid API endpoints. Find your key on the{' '}
           <a href="/profile" style={{ color: '#60a5fa' }}>Profile page</a>.
           Internal endpoints use{' '}
           <code style={{ background: 'rgba(255,255,255,0.08)', padding: '1px 5px', borderRadius: 4, fontSize: 12 }}>
@@ -220,7 +249,7 @@ const ApiDocs: React.FC = () => {
 
         <DocsPager />
       </Stack>
-    </Box>
+    </DocsPageLayout>
   );
 };
 

@@ -22,9 +22,10 @@ const METHOD_COLOR: Record<string, string> = {
 interface Props {
   ep: Endpoint;
   apiKey: string;
+  sessionToken?: string | null;
 }
 
-const EndpointCard: React.FC<Props> = ({ ep, apiKey }) => {
+const EndpointCard: React.FC<Props> = ({ ep, apiKey, sessionToken }) => {
   const [open, setOpen] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
   const [response, setResponse] = useState<string | null>(null);
@@ -67,6 +68,8 @@ const EndpointCard: React.FC<Props> = ({ ep, apiKey }) => {
     if (ep.auth === 'api_key') {
       const key = apiKey || '<YOUR_API_KEY>';
       parts.push(`  -H "X-API-Key: ${key}"`);
+    } else if (ep.auth === 'admin_jwt') {
+      parts.push(`  -H "Authorization: Bearer <YOUR_SESSION_JWT>"`);
     } else if (ep.auth === 'cron_secret') {
       parts.push(`  -H "Authorization: Bearer <CRON_SECRET>"`);
     }
@@ -81,6 +84,9 @@ const EndpointCard: React.FC<Props> = ({ ep, apiKey }) => {
       if (ep.auth === 'api_key' && apiKey) {
         headers['X-API-Key'] = apiKey;
       }
+      if (ep.auth === 'admin_jwt' && sessionToken) {
+        headers.Authorization = `Bearer ${sessionToken}`;
+      }
       const res = await fetch(resolvedPath, { method: ep.method, headers });
       const text = await res.text();
       try {
@@ -93,7 +99,7 @@ const EndpointCard: React.FC<Props> = ({ ep, apiKey }) => {
     } finally {
       setLoading(false);
     }
-  }, [ep.method, ep.auth, resolvedPath, apiKey]);
+  }, [ep.method, ep.auth, resolvedPath, apiKey, sessionToken]);
 
   const copyCurl = useCallback(async () => {
     await navigator.clipboard.writeText(curl);
@@ -106,7 +112,23 @@ const EndpointCard: React.FC<Props> = ({ ep, apiKey }) => {
       ? 'Public'
       : ep.auth === 'api_key'
         ? 'API Key'
+        : ep.auth === 'admin_jwt'
+          ? 'Admin Session'
         : 'Cron Secret';
+
+  const cannotSend =
+    ep.auth === 'cron_secret'
+    || (ep.auth === 'api_key' && !apiKey)
+    || (ep.auth === 'admin_jwt' && !sessionToken);
+
+  const disabledReason =
+    ep.auth === 'cron_secret'
+      ? 'Server-to-server only'
+      : ep.auth === 'api_key' && !apiKey
+        ? 'API key required'
+        : ep.auth === 'admin_jwt' && !sessionToken
+          ? 'Admin session required'
+          : null;
 
   const mc = METHOD_COLOR[ep.method] ?? '#94a3b8';
 
@@ -219,7 +241,7 @@ const EndpointCard: React.FC<Props> = ({ ep, apiKey }) => {
                 size="small"
                 startIcon={<Play size={14} />}
                 onClick={send}
-                disabled={loading || ep.auth === 'cron_secret'}
+                disabled={loading || cannotSend}
                 sx={{ textTransform: 'none', fontWeight: 700 }}
               >
                 {loading ? 'Sending...' : 'Send request'}
@@ -234,6 +256,12 @@ const EndpointCard: React.FC<Props> = ({ ep, apiKey }) => {
                 {copied ? 'Copied!' : 'Copy curl'}
               </Button>
             </Stack>
+
+            {disabledReason && (
+              <Alert severity="info" sx={{ fontSize: 13 }}>
+                {disabledReason}
+              </Alert>
+            )}
 
             {/* curl preview */}
             <Box>

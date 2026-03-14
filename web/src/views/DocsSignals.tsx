@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Card, CardContent, Chip, Divider, Stack, Typography } from '@mui/material';
+import DocsPageLayout from '../components/DocsPageLayout';
 import DocsPager from '../components/DocsPager';
-import DocsSectionNav from '../components/DocsSectionNav';
 
 type SignalDoc = {
   title: string;
@@ -105,10 +105,8 @@ const SIGNALS: SignalDoc[] = [
 
 const DocsSignals: React.FC = () => {
   return (
-    <Box sx={{ maxWidth: 980, mx: 'auto' }}>
+    <DocsPageLayout>
       <Stack spacing={3}>
-        <DocsSectionNav />
-
         <Box>
           <Typography
             variant="h3"
@@ -129,7 +127,7 @@ const DocsSignals: React.FC = () => {
 
         <DocsPager />
       </Stack>
-    </Box>
+    </DocsPageLayout>
   );
 };
 

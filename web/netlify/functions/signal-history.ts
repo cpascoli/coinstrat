@@ -1,11 +1,6 @@
 import type { Handler } from '@netlify/functions';
-import { createClient } from '@supabase/supabase-js';
 import { signalsStore } from './lib/store';
-
-const supabase = createClient(
-  process.env.VITE_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-);
+import { buildApiRateLimitHeaders, requirePaidApiKey } from './lib/apiAccess';
 
 export const handler: Handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
@@ -16,63 +11,18 @@ export const handler: Handler = async (event) => {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }), headers: corsHeaders() };
   }
 
-  // Validate API key
-  const apiKey = event.headers['x-api-key'];
-  if (!apiKey) {
+  const apiKey = event.headers['x-api-key'] ?? event.headers['X-API-Key'];
+  const access = await requirePaidApiKey(apiKey);
+
+  if ('statusCode' in access) {
     return {
-      statusCode: 401,
-      headers: corsHeaders(),
-      body: JSON.stringify({ error: 'Missing X-API-Key header. Upgrade to Pro for API access.' }),
+      statusCode: access.statusCode,
+      headers: {
+        ...corsHeaders(),
+        ...(access.rateLimit ? buildApiRateLimitHeaders(access.rateLimit) : {}),
+      },
+      body: JSON.stringify({ error: access.error }),
     };
-  }
-
-  const { data: profile, error: dbErr } = await supabase
-    .from('profiles')
-    .select('id, tier, api_calls_today, api_calls_reset_at')
-    .eq('api_key', apiKey)
-    .single();
-
-  if (dbErr || !profile) {
-    return {
-      statusCode: 403,
-      headers: corsHeaders(),
-      body: JSON.stringify({ error: 'Invalid API key.' }),
-    };
-  }
-
-  if (profile.tier === 'free') {
-    return {
-      statusCode: 403,
-      headers: corsHeaders(),
-      body: JSON.stringify({ error: 'Signal history requires a Pro subscription.' }),
-    };
-  }
-
-  // Simple daily rate limiting
-  const dailyLimit = profile.tier === 'pro_plus' ? 10000 : 1000;
-  const resetAt = new Date(profile.api_calls_reset_at);
-  const now = new Date();
-  let calls = profile.api_calls_today;
-
-  if (now.toDateString() !== resetAt.toDateString()) {
-    calls = 0;
-    await supabase.from('profiles').update({
-      api_calls_today: 1,
-      api_calls_reset_at: now.toISOString(),
-    }).eq('id', profile.id);
-  } else {
-    if (calls >= dailyLimit) {
-      return {
-        statusCode: 429,
-        headers: corsHeaders(),
-        body: JSON.stringify({
-          error: `Daily rate limit exceeded (${dailyLimit} calls/day). Resets at midnight UTC.`,
-        }),
-      };
-    }
-    await supabase.from('profiles').update({
-      api_calls_today: calls + 1,
-    }).eq('id', profile.id);
   }
 
   try {
@@ -100,11 +50,16 @@ export const handler: Handler = async (event) => {
 
     return {
       statusCode: 200,
-      headers: { ...corsHeaders(), 'Cache-Control': 'public, max-age=300' },
+      headers: {
+        ...corsHeaders(),
+        ...buildApiRateLimitHeaders(access.rateLimit),
+        'Cache-Control': 'public, max-age=300',
+      },
       body: JSON.stringify({
         count: results.length,
         data: results,
         cached_at: new Date(cached.timestamp).toISOString(),
+        rate_limit: access.rateLimit,
       }),
     };
   } catch (err: any) {
@@ -122,5 +77,6 @@ function corsHeaders() {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, X-API-Key',
+    'Access-Control-Expose-Headers': 'X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset',
   };
 }

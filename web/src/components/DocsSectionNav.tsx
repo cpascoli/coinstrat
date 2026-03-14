@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Button, Paper, Stack, Typography } from '@mui/material';
+import { Button, Paper, Stack, Typography } from '@mui/material';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Activity, BarChart3, Binary, BookOpen, Database, Key } from 'lucide-react';
 
@@ -32,10 +32,7 @@ const DocsSectionNav: React.FC = () => {
       }}
     >
       <Stack spacing={1.5}>
-        <Typography variant="overline" color="text.secondary">
-          Docs Navigation
-        </Typography>
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+        <Stack spacing={1}>
           {DOCS_NAV_ITEMS.map((item) => {
             const active = location.pathname === item.path;
 
@@ -46,13 +43,20 @@ const DocsSectionNav: React.FC = () => {
                 size="small"
                 onClick={() => navigate(item.path)}
                 startIcon={item.icon}
-                sx={{ textTransform: 'none', fontWeight: 700 }}
+                sx={{
+                  textTransform: 'none',
+                  fontWeight: 700,
+                  justifyContent: 'flex-start',
+                  px: 1.5,
+                  py: 1,
+                }}
+                fullWidth
               >
                 {item.label}
               </Button>
             );
           })}
-        </Box>
+        </Stack>
       </Stack>
     </Paper>
   );

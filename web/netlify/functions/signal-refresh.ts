@@ -1,7 +1,8 @@
 import type { Handler } from '@netlify/functions';
-import { createClient } from '@supabase/supabase-js';
 import { signalsStore } from './lib/store';
 import { refreshSignals } from './lib/compute';
+import { authorizeAdminOrCron } from './lib/auth';
+import { deliverSignalAlertChanges, detectAlertChanges } from './lib/signalAlerts';
 
 /**
  * Refresh the signal cache.  Two modes:
@@ -19,30 +20,6 @@ import { refreshSignals } from './lib/compute';
  *
  * Auth: `Bearer <CRON_SECRET>` or a valid admin Supabase JWT.
  */
-const CRON_SECRET = process.env.CRON_SECRET;
-
-async function isAdminJwt(token: string): Promise<boolean> {
-  try {
-    const sb = createClient(
-      process.env.VITE_SUPABASE_URL!,
-      process.env.VITE_SUPABASE_ANON_KEY!,
-    );
-    const { data: { user }, error } = await sb.auth.getUser(token);
-    if (error || !user) return false;
-
-    const admin = createClient(
-      process.env.VITE_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    );
-    const { data } = await admin
-      .from('profiles')
-      .select('is_admin')
-      .eq('id', user.id)
-      .single();
-    return data?.is_admin === true;
-  } catch { return false; }
-}
-
 export const handler: Handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 204, body: '' };
@@ -52,12 +29,8 @@ export const handler: Handler = async (event) => {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
   }
 
-  const auth = event.headers['authorization'];
-  const token = (auth ?? '').replace('Bearer ', '');
-  const isCron = CRON_SECRET && token === CRON_SECRET;
-  const isAdmin = !isCron && token ? await isAdminJwt(token) : false;
-
-  if (!isCron && !isAdmin) {
+  const auth = await authorizeAdminOrCron(event);
+  if (!auth) {
     return { statusCode: 403, body: JSON.stringify({ error: 'Forbidden' }) };
   }
 
@@ -173,11 +146,19 @@ export const handler: Handler = async (event) => {
 
     const combined = [...cachedData, ...newRows];
 
+    const cachedAt = new Date().toISOString();
+
     await store.setJSON('signals_latest', {
       timestamp: Date.now(),
       count: combined.length,
       data: combined,
     });
+
+    const alertWindow = [cachedData[cachedData.length - 1], ...newRows];
+    const alertChanges = detectAlertChanges(alertWindow);
+    const alertSummary = alertChanges.length > 0
+      ? await deliverSignalAlertChanges(alertChanges)
+      : { events: 0, deliveries: 0 };
 
     console.log(
       `[signal-refresh] Appended ${newRows.length} new rows ` +
@@ -192,7 +173,8 @@ export const handler: Handler = async (event) => {
         new_rows: newRows.length,
         total: combined.length,
         latest_date: newRows[newRows.length - 1].Date,
-        cached_at: new Date().toISOString(),
+        cached_at: cachedAt,
+        alerts: alertSummary,
       }),
     };
   } catch (err: any) {

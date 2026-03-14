@@ -8,7 +8,7 @@ import Home from './views/Home';
 import Backtest from './views/Backtest';
 import Profile from './views/Profile';
 import Admin from './views/Admin';
-import ApiDocs from './views/ApiDocs';
+import Developer from './views/Developer';
 import DocsArchitecture from './views/DocsArchitecture';
 import DocsHome from './views/DocsHome';
 import DocsData from './views/DocsData';
@@ -18,6 +18,7 @@ import NewsletterConfirm from './views/NewsletterConfirm';
 import Terms from './views/Terms';
 import Privacy from './views/Privacy';
 import Unsubscribe from './views/Unsubscribe';
+import AlertUnsubscribe from './views/AlertUnsubscribe';
 import { computeAllSignals } from './services/engine';
 import { useAuth } from './contexts/AuthContext';
 import AuthModal from './components/AuthModal';
@@ -78,6 +79,7 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
+  const [authRedirectOverride, setAuthRedirectOverride] = useState<string | null>(null);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [docsAnchorEl, setDocsAnchorEl] = useState<null | HTMLElement>(null);
 
@@ -136,8 +138,20 @@ const App: React.FC = () => {
   const authRedirectTo = requiresAppAccess
     ? `${location.pathname}${location.search}${location.hash}`
     : '/dashboard';
+  const modalRedirectTo = authRedirectOverride ?? authRedirectTo;
+
+  const openAuth = (redirectTo = authRedirectTo) => {
+    setAuthRedirectOverride(redirectTo);
+    setAuthOpen(true);
+  };
+
+  const closeAuth = () => {
+    setAuthOpen(false);
+    setAuthRedirectOverride(null);
+  };
 
   const shouldLoadData = requiresAppAccess && hasFreeAccess;
+  const showAppNavigation = hasFreeAccess;
 
   useEffect(() => {
     if (!shouldLoadData) {
@@ -223,7 +237,7 @@ const App: React.FC = () => {
             Dashboard, signals, charts, and backtests are available to signed-in Free members. Use a magic link for the fastest access.
           </Typography>
           <Box sx={{ display: 'flex', gap: 1.25, flexWrap: 'wrap' }}>
-            <Button variant="contained" onClick={() => setAuthOpen(true)} sx={{ fontWeight: 700 }}>
+            <Button variant="contained" onClick={() => openAuth(authRedirectTo)} sx={{ fontWeight: 700 }}>
               Sign in or create account
             </Button>
             <Button variant="outlined" onClick={() => navigate('/docs')} sx={{ fontWeight: 700 }}>
@@ -313,7 +327,7 @@ const App: React.FC = () => {
           </Box>
 
           {/* Desktop tab buttons */}
-          {isMdUp && (
+          {isMdUp && showAppNavigation && (
             <Box sx={{ display: 'flex', gap: 1 }}>
               {tabs.map((t) => (
                 <Paper
@@ -339,31 +353,33 @@ const App: React.FC = () => {
                   </Typography>
                 </Paper>
               ))}
-              <Paper
-                component="button"
-                onClick={() => navigate('/docs')}
-                sx={{
-                  cursor: 'pointer',
-                  px: 1.5,
-                  py: 1,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 1,
-                  bgcolor: location.pathname.startsWith('/docs') ? 'primary.main' : 'background.paper',
-                  color: location.pathname.startsWith('/docs') ? 'primary.contrastText' : 'text.primary',
-                  borderColor: location.pathname.startsWith('/docs') ? 'primary.main' : 'divider',
-                  '&:hover': { borderColor: 'primary.main' },
-                }}
-              >
-                <BookOpen className="h-5 w-5" />
-                <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                  Docs
-                </Typography>
-              </Paper>
+              {!user && (
+                <Paper
+                  component="button"
+                  onClick={() => navigate('/docs')}
+                  sx={{
+                    cursor: 'pointer',
+                    px: 1.5,
+                    py: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
+                    bgcolor: location.pathname.startsWith('/docs') ? 'primary.main' : 'background.paper',
+                    color: location.pathname.startsWith('/docs') ? 'primary.contrastText' : 'text.primary',
+                    borderColor: location.pathname.startsWith('/docs') ? 'primary.main' : 'divider',
+                    '&:hover': { borderColor: 'primary.main' },
+                  }}
+                >
+                  <BookOpen className="h-5 w-5" />
+                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                    Docs
+                  </Typography>
+                </Paper>
+              )}
             </Box>
           )}
 
-          {!isMdUp && (
+          {!isMdUp && !user && (
             <>
               <IconButton onClick={(e) => setDocsAnchorEl(e.currentTarget)} size="small" sx={{ mr: 0.5 }}>
                 <BookOpen size={18} />
@@ -421,6 +437,14 @@ const App: React.FC = () => {
                   transformOrigin={{ vertical: 'top', horizontal: 'right' }}
                   PaperProps={{ sx: { minWidth: 180 } }}
                 >
+                  <MenuItem onClick={() => { setAnchorEl(null); navigate('/docs'); }}>
+                    <ListItemIcon><BookOpen size={16} /></ListItemIcon>
+                    <ListItemText>Docs</ListItemText>
+                  </MenuItem>
+                  <MenuItem onClick={() => { setAnchorEl(null); navigate('/developer'); }}>
+                    <ListItemIcon><Key size={16} /></ListItemIcon>
+                    <ListItemText>Developer</ListItemText>
+                  </MenuItem>
                   <MenuItem onClick={() => { setAnchorEl(null); navigate('/profile'); }}>
                     <ListItemIcon><User size={16} /></ListItemIcon>
                     <ListItemText>Profile</ListItemText>
@@ -437,25 +461,20 @@ const App: React.FC = () => {
                   </MenuItem>
                 </Menu>
               </>
-            ) : (
-              <Button
-                variant="outlined"
-                size="small"
-                onClick={() => setAuthOpen(true)}
-                sx={{ textTransform: 'none', fontWeight: 700, whiteSpace: 'nowrap' }}
-              >
-                Sign in
-              </Button>
-            )}
+            ) : null}
           </Box>
         </Toolbar>
       </AppBar>
 
       <Container maxWidth="lg" sx={{ py: { xs: 2.5, md: 4 } }}>
         <Routes>
-          <Route path="/" element={<Home />} />
+          <Route
+            path="/"
+            element={<Home hasFreeAccess={hasFreeAccess} isAuthenticated={isAuthenticated} onOpenAuth={openAuth} />}
+          />
           <Route path="/docs" element={<DocsHome />} />
-          <Route path="/docs/api" element={<ApiDocs />} />
+          <Route path="/docs/api" element={<Navigate to="/developer" replace />} />
+          <Route path="/developer" element={<Developer />} />
           <Route path="/docs/data" element={<DocsData />} />
           <Route path="/docs/architecture" element={<DocsArchitecture />} />
           <Route path="/docs/scores" element={<DocsScores />} />
@@ -467,15 +486,16 @@ const App: React.FC = () => {
           <Route path="/backtest" element={gate(<Backtest data={data} />)} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/admin" element={<Admin />} />
-          <Route path="/api-docs" element={<Navigate to="/docs/api" replace />} />
+          <Route path="/api-docs" element={<Navigate to="/developer" replace />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/newsletter/confirm" element={<NewsletterConfirm />} />
           <Route path="/unsubscribe" element={<Unsubscribe />} />
+          <Route path="/alerts/unsubscribe" element={<AlertUnsubscribe />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
 
-        <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} redirectTo={authRedirectTo} />
+        <AuthModal open={authOpen} onClose={closeAuth} redirectTo={modalRedirectTo} />
 
         <Box
           component="footer"
@@ -531,7 +551,7 @@ const App: React.FC = () => {
       </Container>
 
       {/* Mobile bottom navigation */}
-      {!isMdUp && (
+      {!isMdUp && showAppNavigation && (
         <Paper sx={{ position: 'fixed', left: 0, right: 0, bottom: 0, borderTop: '1px solid', borderColor: 'divider' }} elevation={0}>
           <BottomNavigation
             showLabels

@@ -87,6 +87,16 @@
   status = 200
 
 [[redirects]]
+  from = "/api/email/alerts/unsubscribe"
+  to = "/.netlify/functions/signal-alert-unsubscribe"
+  status = 200
+
+[[redirects]]
+  from = "/api/pro/alerts/preferences"
+  to = "/.netlify/functions/signal-alert-preferences"
+  status = 200
+
+[[redirects]]
   from = "/api/email/digest"
   to = "/.netlify/functions/weekly-digest"
   status = 200
