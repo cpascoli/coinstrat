@@ -2,6 +2,7 @@ import type { Handler } from '@netlify/functions';
 import { authorizeAdminOrCron } from './lib/auth';
 import {
   composeNewsletterIssue,
+  getAutomaticNewsletterStatus,
   getIssueById,
   getIssueByWeek,
   getNewsletterSettings,
@@ -9,7 +10,7 @@ import {
   sendNewsletterIssue,
 } from './lib/newsletter';
 
-type DigestAction = 'auto_send' | 'compose' | 'preview' | 'send' | 'send_test';
+type DigestAction = 'auto_send' | 'status' | 'compose' | 'preview' | 'send' | 'send_test';
 
 export const handler: Handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
@@ -30,6 +31,13 @@ export const handler: Handler = async (event) => {
     const action = (body.action as DigestAction | undefined) ?? 'auto_send';
 
     switch (action) {
+      case 'status': {
+        const result = await getAutomaticNewsletterStatus();
+        return {
+          statusCode: 200,
+          body: JSON.stringify(result),
+        };
+      }
       case 'auto_send': {
         const result = await runAutomaticNewsletterSend();
         return {

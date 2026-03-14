@@ -56,10 +56,10 @@ const DocsHome: React.FC = () => {
           />
           <DocsCard
             icon={<Key size={20} />}
-            title="API Reference"
-            text="Programmatic access to CoinStrat signals, history, and internal automation endpoints."
-            actionLabel="Open API Docs"
-            onClick={() => navigate('/docs/api')}
+            title="Developer Workspace"
+            text="Programmatic access to CoinStrat signals, in-browser endpoint testing, API key management, and future developer tooling."
+            actionLabel="Open Developer Workspace"
+            onClick={() => navigate('/developer')}
           />
         </Box>
 

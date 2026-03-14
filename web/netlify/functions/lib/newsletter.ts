@@ -84,6 +84,18 @@ export interface NewsletterSendLog {
   sent_at: string;
 }
 
+export interface AutomaticNewsletterStatus {
+  ok: true;
+  skipped: boolean;
+  wouldSend: boolean;
+  reason: string;
+  now: string;
+  weekOf: string;
+  scheduledFor: string | null;
+  issueId: string | null;
+  alreadySent: boolean;
+}
+
 export interface WeeklyContext {
   weekOf: string;
   referenceDate: string;
@@ -1832,31 +1844,94 @@ export async function unsubscribeEmail(email: string) {
   if (subscriberError) throw new Error(subscriberError.message);
 }
 
-export async function runAutomaticNewsletterSend() {
+export async function getAutomaticNewsletterStatus(nowInput = new Date()): Promise<AutomaticNewsletterStatus> {
   const settings = await getNewsletterSettings();
+  const now = nowInput;
+  const weekOf = mondayOf(now);
+  const scheduledFor = nextScheduledAt(settings, weekOf);
+  const existingIssue = await getIssueByWeek(weekOf);
+
   if (!settings.enabled) {
-    return { ok: true, skipped: true, reason: 'Automatic newsletter sending is disabled.' };
+    return {
+      ok: true,
+      skipped: true,
+      wouldSend: false,
+      reason: 'Automatic newsletter sending is disabled.',
+      now: now.toISOString(),
+      weekOf,
+      scheduledFor,
+      issueId: existingIssue?.id ?? null,
+      alreadySent: Boolean(existingIssue?.sent_at),
+    };
   }
 
-  const now = new Date();
   if (now.getUTCDay() !== settings.send_weekday) {
-    return { ok: true, skipped: true, reason: 'Today is not the configured newsletter day.' };
+    return {
+      ok: true,
+      skipped: true,
+      wouldSend: false,
+      reason: 'Today is not the configured newsletter day.',
+      now: now.toISOString(),
+      weekOf,
+      scheduledFor,
+      issueId: existingIssue?.id ?? null,
+      alreadySent: Boolean(existingIssue?.sent_at),
+    };
   }
 
   if (now.getUTCHours() < settings.send_hour_utc) {
-    return { ok: true, skipped: true, reason: 'Configured newsletter send hour has not been reached yet.' };
+    return {
+      ok: true,
+      skipped: true,
+      wouldSend: false,
+      reason: 'Configured newsletter send hour has not been reached yet.',
+      now: now.toISOString(),
+      weekOf,
+      scheduledFor,
+      issueId: existingIssue?.id ?? null,
+      alreadySent: Boolean(existingIssue?.sent_at),
+    };
   }
-
-  const weekOf = mondayOf(now);
-  const existingIssue = await getIssueByWeek(weekOf);
 
   if (existingIssue?.sent_at) {
-    return { ok: true, skipped: true, reason: 'This week’s newsletter has already been sent.' };
+    return {
+      ok: true,
+      skipped: true,
+      wouldSend: false,
+      reason: 'This week’s newsletter has already been sent.',
+      now: now.toISOString(),
+      weekOf,
+      scheduledFor,
+      issueId: existingIssue.id,
+      alreadySent: true,
+    };
   }
+
+  return {
+    ok: true,
+    skipped: false,
+    wouldSend: true,
+    reason: 'The next auto_send call would compose and broadcast this week’s newsletter.',
+    now: now.toISOString(),
+    weekOf,
+    scheduledFor,
+    issueId: existingIssue?.id ?? null,
+    alreadySent: false,
+  };
+}
+
+export async function runAutomaticNewsletterSend() {
+  const status = await getAutomaticNewsletterStatus();
+  if (!status.wouldSend) {
+    return { ok: true, skipped: true, reason: status.reason };
+  }
+
+  const settings = await getNewsletterSettings();
+  const existingIssue = await getIssueByWeek(status.weekOf);
 
   const issue = await composeNewsletterIssue({
     actorId: null,
-    weekOf,
+    weekOf: status.weekOf,
     editorNote: existingIssue?.editor_note ?? null,
     ctaLabel: existingIssue?.cta_label ?? null,
     ctaHref: existingIssue?.cta_href ?? null,
@@ -1872,7 +1947,7 @@ export async function runAutomaticNewsletterSend() {
     ok: true,
     skipped: false,
     issueId: issue.id,
-    weekOf,
+    weekOf: status.weekOf,
     ...result,
   };
 }

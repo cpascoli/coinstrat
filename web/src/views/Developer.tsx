@@ -21,6 +21,18 @@ import EndpointCard from './api/EndpointCard';
 
 const KEY_STORAGE = 'coinstrat_api_key';
 
+type DigestStatus = {
+  ok: true;
+  skipped: boolean;
+  wouldSend: boolean;
+  reason: string;
+  now: string;
+  weekOf: string;
+  scheduledFor: string | null;
+  issueId: string | null;
+  alreadySent: boolean;
+};
+
 const Developer: React.FC = () => {
   const { session, profile, tier, isAdmin, isAuthenticated } = useAuth();
   const navigate = useNavigate();
@@ -28,6 +40,9 @@ const Developer: React.FC = () => {
   const [tabIdx, setTabIdx] = useState(0);
   const [showKey, setShowKey] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [digestStatus, setDigestStatus] = useState<DigestStatus | null>(null);
+  const [digestStatusLoading, setDigestStatusLoading] = useState(false);
+  const [digestStatusError, setDigestStatusError] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState(() => {
     try {
       return localStorage.getItem(KEY_STORAGE) ?? '';
@@ -62,6 +77,49 @@ const Developer: React.FC = () => {
     }
   }, [tabIdx, visibleEndpointGroups.length]);
 
+  useEffect(() => {
+    if (!isAdmin || !session?.access_token) {
+      setDigestStatus(null);
+      setDigestStatusError(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadStatus = async () => {
+      setDigestStatusLoading(true);
+      setDigestStatusError(null);
+      try {
+        const response = await fetch('/api/email/digest', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ action: 'status' }),
+        });
+        const data = await response.json();
+        if (cancelled) return;
+        if (!response.ok) {
+          setDigestStatusError(data.error ?? 'Unable to load auto-send status.');
+          return;
+        }
+        setDigestStatus(data as DigestStatus);
+      } catch (error) {
+        if (cancelled) return;
+        setDigestStatusError(error instanceof Error ? error.message : 'Unable to load auto-send status.');
+      } finally {
+        if (!cancelled) setDigestStatusLoading(false);
+      }
+    };
+
+    void loadStatus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin, session?.access_token]);
+
   const group = useMemo(
     () => visibleEndpointGroups[tabIdx] ?? visibleEndpointGroups[0],
     [tabIdx, visibleEndpointGroups],
@@ -72,6 +130,33 @@ const Developer: React.FC = () => {
     await navigator.clipboard.writeText(apiKey);
     setCopied(true);
     setTimeout(() => setCopied(false), 1200);
+  };
+
+  const refreshDigestStatus = async () => {
+    if (!isAdmin || !session?.access_token) return;
+
+    setDigestStatusLoading(true);
+    setDigestStatusError(null);
+    try {
+      const response = await fetch('/api/email/digest', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ action: 'status' }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setDigestStatusError(data.error ?? 'Unable to load auto-send status.');
+        return;
+      }
+      setDigestStatus(data as DigestStatus);
+    } catch (error) {
+      setDigestStatusError(error instanceof Error ? error.message : 'Unable to load auto-send status.');
+    } finally {
+      setDigestStatusLoading(false);
+    }
   };
 
   return (
@@ -171,6 +256,62 @@ const Developer: React.FC = () => {
             )}
           </Stack>
         </Paper>
+
+        {isAdmin && (
+          <Paper sx={{ p: { xs: 2.5, sm: 3 } }}>
+            <Stack spacing={2}>
+              <Stack
+                direction={{ xs: 'column', sm: 'row' }}
+                spacing={1.5}
+                alignItems={{ xs: 'flex-start', sm: 'center' }}
+                justifyContent="space-between"
+              >
+                <Box>
+                  <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                    Newsletter Auto-Send Status
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Dry-run status for the current automatic Monday morning newsletter check.
+                  </Typography>
+                </Box>
+                <Button
+                  variant="outlined"
+                  onClick={() => void refreshDigestStatus()}
+                  disabled={digestStatusLoading}
+                  sx={{ textTransform: 'none', fontWeight: 700 }}
+                >
+                  {digestStatusLoading ? 'Checking…' : 'Refresh status'}
+                </Button>
+              </Stack>
+
+              {digestStatusError && <Alert severity="error">{digestStatusError}</Alert>}
+
+              {digestStatus && (
+                <>
+                  <Alert severity={digestStatus.wouldSend ? 'success' : 'info'}>
+                    {digestStatus.reason}
+                  </Alert>
+
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                    <Chip
+                      label={digestStatus.wouldSend ? 'Would send now' : 'Would skip now'}
+                      color={digestStatus.wouldSend ? 'success' : 'default'}
+                      variant={digestStatus.wouldSend ? 'filled' : 'outlined'}
+                    />
+                    <Chip label={`Week of ${digestStatus.weekOf}`} variant="outlined" />
+                    {digestStatus.scheduledFor && <Chip label={`Scheduled ${digestStatus.scheduledFor}`} variant="outlined" />}
+                    {digestStatus.issueId && <Chip label={`Issue ${digestStatus.issueId.slice(0, 8)}…`} variant="outlined" />}
+                    {digestStatus.alreadySent && <Chip label="Already sent" color="success" variant="outlined" />}
+                  </Stack>
+
+                  <Typography variant="body2" color="text.secondary">
+                    Checked at {digestStatus.now}. `auto_send` only broadcasts once the configured weekday and UTC hour have been reached, and it skips if that week’s issue was already sent.
+                  </Typography>
+                </>
+              )}
+            </Stack>
+          </Paper>
+        )}
 
         <Box>
           <Tabs

@@ -4,20 +4,17 @@ import {
   Box,
   CircularProgress,
   FormControlLabel,
-  Link,
   Paper,
   Button,
   Chip,
-  IconButton,
   Stack,
   Switch,
   TextField,
-  Tooltip,
   Typography,
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import useMediaQuery from '@mui/material/useMediaQuery';
-import { Bell, Copy, Crown, ExternalLink, Eye, EyeOff, KeyRound, LogOut, Sparkles, User, Zap } from 'lucide-react';
+import { Bell, Copy, Crown, ExternalLink, LogOut, Sparkles, User, Zap } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import ProfileSectionNav from '../components/ProfileSectionNav';
 import { useAuth } from '../contexts/AuthContext';
@@ -35,11 +32,10 @@ type AlertPreferences = {
   alertKeys: ProAlertKey[];
 };
 
-type ProfileSectionId = 'account' | 'api' | 'signals' | 'openclaw';
+type ProfileSectionId = 'account' | 'signals' | 'openclaw';
 
 const PROFILE_SECTION_ITEMS: Array<{ id: ProfileSectionId; label: string; icon: React.ReactElement }> = [
   { id: 'account', label: 'Account', icon: <User size={16} /> },
-  { id: 'api', label: 'API', icon: <KeyRound size={16} /> },
   { id: 'signals', label: 'Signals', icon: <Bell size={16} /> },
   { id: 'openclaw', label: 'OpenClaw', icon: <Sparkles size={16} /> },
 ];
@@ -51,8 +47,7 @@ const Profile: React.FC = () => {
   const isMdUp = useMediaQuery(theme.breakpoints.up('md'));
   const [searchParams] = useSearchParams();
   const [activeSection, setActiveSection] = useState<ProfileSectionId>('account');
-  const [showKey, setShowKey] = useState(false);
-  const [copiedState, setCopiedState] = useState<'idle' | 'api' | 'skill'>('idle');
+  const [copiedState, setCopiedState] = useState<'idle' | 'skill'>('idle');
   const [billingError, setBillingError] = useState<string | null>(null);
   const [alertsLoading, setAlertsLoading] = useState(false);
   const [alertsSaving, setAlertsSaving] = useState(false);
@@ -63,7 +58,6 @@ const Profile: React.FC = () => {
     alertKeys: [],
   });
   const accountRef = useRef<HTMLDivElement | null>(null);
-  const apiRef = useRef<HTMLDivElement | null>(null);
   const signalsRef = useRef<HTMLDivElement | null>(null);
   const openClawRef = useRef<HTMLDivElement | null>(null);
 
@@ -85,7 +79,6 @@ const Profile: React.FC = () => {
   const tierInfo = TIER_LABELS[tier] ?? TIER_LABELS.free;
   const sectionRefs = {
     account: accountRef,
-    api: apiRef,
     signals: signalsRef,
     openclaw: openClawRef,
   };
@@ -95,14 +88,6 @@ const Profile: React.FC = () => {
 
     if (isMdUp) {
       sectionRefs[sectionId].current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  };
-
-  const handleCopy = async () => {
-    if (profile?.api_key) {
-      await navigator.clipboard.writeText(profile.api_key);
-      setCopiedState('api');
-      setTimeout(() => setCopiedState('idle'), 2000);
     }
   };
 
@@ -312,7 +297,7 @@ const Profile: React.FC = () => {
                 Profile
               </Typography>
               <Typography sx={{ color: 'text.secondary', maxWidth: 720 }}>
-                Manage your account, subscription, API access, signal alerts, and OpenClaw setup from one place.
+                Manage your account, subscription, signal alerts, and OpenClaw setup from one place.
               </Typography>
             </Box>
 
@@ -462,6 +447,13 @@ const Profile: React.FC = () => {
                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} alignItems={{ xs: 'stretch', sm: 'center' }}>
                       <Button
                         variant="outlined"
+                        onClick={() => navigate('/developer')}
+                        sx={{ textTransform: 'none', fontWeight: 700, alignSelf: 'flex-start' }}
+                      >
+                        Open developer workspace
+                      </Button>
+                      <Button
+                        variant="outlined"
                         color="error"
                         onClick={async () => { await signOut(); navigate('/'); }}
                         startIcon={<LogOut size={16} />}
@@ -470,68 +462,7 @@ const Profile: React.FC = () => {
                         Sign out
                       </Button>
                       <Typography variant="body2" color="text.secondary">
-                        Paid features are enforced server-side. Lifetime is treated as Pro-equivalent anywhere API and alerts are available.
-                      </Typography>
-                    </Stack>
-                  </Paper>
-                </Stack>
-              </Box>
-            )}
-
-            {shouldShowSection('api') && (
-              <Box ref={apiRef}>
-                <Stack spacing={2}>
-                  <Typography variant="h5" sx={{ fontWeight: 850 }}>
-                    API Management
-                  </Typography>
-
-                  <Paper sx={{ p: 3 }}>
-                    <Typography variant="h6" sx={{ fontWeight: 800, mb: 2 }}>API Key</Typography>
-
-                    {!hasPaidAccess ? (
-                      <Typography color="text.secondary">
-                        Upgrade to Pro or get a Lifetime Deal to unlock API access.
-                      </Typography>
-                    ) : (
-                      <>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <TextField
-                            value={showKey ? (profile.api_key ?? '') : '••••••••••••••••••••••••'}
-                            fullWidth
-                            size="small"
-                            InputProps={{ readOnly: true, sx: { fontFamily: 'monospace', fontSize: 14 } }}
-                          />
-                          <Tooltip title={showKey ? 'Hide' : 'Reveal'}>
-                            <IconButton onClick={() => setShowKey(!showKey)} size="small">
-                              {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title={copiedState === 'api' ? 'Copied!' : 'Copy'}>
-                            <IconButton onClick={handleCopy} size="small">
-                              <Copy size={16} />
-                            </IconButton>
-                          </Tooltip>
-                        </Box>
-                        <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                          Include this key in the <code>X-API-Key</code> header for paid API requests. Pro and Lifetime include 1,000 calls/day. Pro+ includes 10,000 calls/day.
-                        </Typography>
-                      </>
-                    )}
-                  </Paper>
-
-                  <Paper sx={{ p: 3 }}>
-                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} alignItems={{ xs: 'stretch', sm: 'center' }}>
-                      <Link
-                        component="button"
-                        type="button"
-                        onClick={() => navigate('/docs/api')}
-                        underline="hover"
-                        sx={{ color: 'primary.light', textAlign: 'left' }}
-                      >
-                        Review the API docs
-                      </Link>
-                      <Typography variant="body2" color="text.secondary">
-                        The API reference documents public versus paid endpoints, rate limits, and the current roadmap for future Pro API upgrades.
+                        Paid features are enforced server-side. Lifetime is treated as Pro-equivalent anywhere developer tools and alerts are available.
                       </Typography>
                     </Stack>
                   </Paper>

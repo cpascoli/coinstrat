@@ -396,9 +396,9 @@ const App: React.FC = () => {
                   <ListItemIcon><BookOpen size={16} /></ListItemIcon>
                   <ListItemText>Docs Home</ListItemText>
                 </MenuItem>
-                <MenuItem onClick={() => { setDocsAnchorEl(null); navigate('/docs/api'); }}>
+                <MenuItem onClick={() => { setDocsAnchorEl(null); navigate('/developer'); }}>
                   <ListItemIcon><Key size={16} /></ListItemIcon>
-                  <ListItemText>API Reference</ListItemText>
+                  <ListItemText>Developer</ListItemText>
                 </MenuItem>
                 <MenuItem onClick={() => { setDocsAnchorEl(null); navigate('/docs/data'); }}>
                   <ListItemIcon><Database size={16} /></ListItemIcon>
