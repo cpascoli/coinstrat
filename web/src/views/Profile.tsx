@@ -25,7 +25,7 @@ const TIER_LABELS: Record<string, { label: string; color: string; icon: React.Re
 };
 
 const Profile: React.FC = () => {
-  const { user, profile, tier, loading, signOut } = useAuth();
+  const { user, profile, tier, loading, signOut, refreshProfile } = useAuth();
   const navigate = useNavigate();
   const [showKey, setShowKey] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -38,13 +38,32 @@ const Profile: React.FC = () => {
     );
   }
 
-  if (!user || !profile) {
+  if (!user) {
     return (
       <Paper sx={{ p: 4, textAlign: 'center' }}>
         <Typography variant="h6" sx={{ fontWeight: 700 }}>Not signed in</Typography>
         <Typography color="text.secondary" sx={{ mt: 1 }}>
           Sign in to view your profile and subscription.
         </Typography>
+      </Paper>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <Paper sx={{ p: 4, textAlign: 'center' }}>
+        <Typography variant="h6" sx={{ fontWeight: 700 }}>Finalizing your account</Typography>
+        <Typography color="text.secondary" sx={{ mt: 1, mb: 2 }}>
+          You are signed in and Free access is active, but your account profile is still syncing. This usually resolves within a few seconds.
+        </Typography>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} justifyContent="center">
+          <Button variant="contained" onClick={() => void refreshProfile()} sx={{ textTransform: 'none', fontWeight: 700 }}>
+            Retry account sync
+          </Button>
+          <Button variant="outlined" onClick={() => navigate('/dashboard')} sx={{ textTransform: 'none', fontWeight: 700 }}>
+            Open dashboard
+          </Button>
+        </Stack>
       </Paper>
     );
   }
@@ -122,7 +141,7 @@ const Profile: React.FC = () => {
         {tier === 'free' && (
           <>
             <Alert severity="info" sx={{ mb: 2 }}>
-              Upgrade to Pro to access the Signal API, real-time alerts, full backtest history, and the OpenClaw skill.
+              Upgrade to Pro to access the Signal API, real-time alerts, and the OpenClaw skill.
             </Alert>
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               <Button
@@ -148,7 +167,7 @@ const Profile: React.FC = () => {
         {tier === 'pro' && (
           <>
             <Typography color="text.secondary" sx={{ mb: 2 }}>
-              You're on the <strong>Pro</strong> plan. 1,000 API calls/day, real-time alerts, full backtest.
+              You're on the <strong>Pro</strong> plan. 1,000 API calls/day, real-time alerts, and OpenClaw skill access.
             </Typography>
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               <Button

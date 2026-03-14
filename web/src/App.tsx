@@ -81,7 +81,16 @@ const App: React.FC = () => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [docsAnchorEl, setDocsAnchorEl] = useState<null | HTMLElement>(null);
 
-  const { user, profile, isAdmin, signOut } = useAuth();
+  const {
+    user,
+    profile,
+    isAdmin,
+    signOut,
+    loading: authLoading,
+    isAuthenticated,
+    isVerified,
+    hasFreeAccess,
+  } = useAuth();
   const theme = useTheme();
   const isMdUp = useMediaQuery(theme.breakpoints.up('md'));
   const location = useLocation();
@@ -115,20 +124,52 @@ const App: React.FC = () => {
     navigate(t?.path ?? '/dashboard');
   };
 
+  const requiresAppAccess = useMemo(() => {
+    const p = location.pathname;
+    return p === '/dashboard'
+      || p === '/scores'
+      || p === '/signals'
+      || p === '/backtest'
+      || p.startsWith('/charts');
+  }, [location.pathname]);
+
+  const authRedirectTo = requiresAppAccess
+    ? `${location.pathname}${location.search}${location.hash}`
+    : '/dashboard';
+
+  const shouldLoadData = requiresAppAccess && hasFreeAccess;
+
   useEffect(() => {
-    // Replicating Python logic in real-time within the browser
+    if (!shouldLoadData) {
+      setData([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    setLoading(true);
+    setError(null);
+
     computeAllSignals()
       .then(signals => {
+        if (cancelled) return;
         if (signals.length === 0) throw new Error('No data retrieved from APIs. Check CORS or API keys.');
         setData(signals);
         setLoading(false);
       })
       .catch(err => {
+        if (cancelled) return;
         console.error(err);
         setError(err.message);
         setLoading(false);
       });
-  }, []);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [shouldLoadData]);
 
   const lastData = data.length ? data[data.length - 1] : null;
 
@@ -160,6 +201,63 @@ const App: React.FC = () => {
   );
 
   const gate = (node: React.ReactElement) => {
+    if (authLoading) {
+      return (
+        <Paper sx={{ p: 3 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <CircularProgress size={22} />
+            <Typography sx={{ fontWeight: 800 }}>Checking access…</Typography>
+          </Box>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            Restoring your session and checking whether Free access is unlocked.
+          </Typography>
+        </Paper>
+      );
+    }
+
+    if (!isAuthenticated) {
+      return (
+        <Paper sx={{ p: 3 }}>
+          <Typography sx={{ fontWeight: 900, mb: 1.5 }}>Sign in to unlock CoinStrat Free</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Dashboard, signals, charts, and backtests are available to signed-in Free members. Use a magic link for the fastest access.
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 1.25, flexWrap: 'wrap' }}>
+            <Button variant="contained" onClick={() => setAuthOpen(true)} sx={{ fontWeight: 700 }}>
+              Sign in or create account
+            </Button>
+            <Button variant="outlined" onClick={() => navigate('/docs')} sx={{ fontWeight: 700 }}>
+              Read docs first
+            </Button>
+          </Box>
+        </Paper>
+      );
+    }
+
+    if (!hasFreeAccess || !isVerified) {
+      return (
+        <Paper sx={{ p: 3 }}>
+          <Typography sx={{ fontWeight: 900, mb: 1.5 }}>Verify your email to unlock CoinStrat Free</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Password signups need email confirmation before dashboard access is enabled. Magic-link and OAuth users are unlocked automatically once the sign-in completes.
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 1.25, flexWrap: 'wrap' }}>
+            <Button variant="outlined" onClick={() => navigate('/')} sx={{ fontWeight: 700 }}>
+              Back to home
+            </Button>
+            <Button
+              variant="text"
+              color="inherit"
+              onClick={async () => { await signOut(); navigate('/'); }}
+              sx={{ fontWeight: 700 }}
+            >
+              Sign out
+            </Button>
+          </Box>
+        </Paper>
+      );
+    }
+
     if (error) return DataError;
     if (loading || !lastData) return DataLoading;
     return node;
@@ -374,10 +472,10 @@ const App: React.FC = () => {
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/newsletter/confirm" element={<NewsletterConfirm />} />
           <Route path="/unsubscribe" element={<Unsubscribe />} />
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
 
-        <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
+        <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} redirectTo={authRedirectTo} />
 
         <Box
           component="footer"

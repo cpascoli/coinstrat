@@ -19,11 +19,12 @@ import { supabase } from '../lib/supabase';
 interface Props {
   open: boolean;
   onClose: () => void;
+  redirectTo?: string;
 }
 
 const SITE_URL = import.meta.env.VITE_SITE_URL || window.location.origin;
 
-const AuthModal: React.FC<Props> = ({ open, onClose }) => {
+const AuthModal: React.FC<Props> = ({ open, onClose, redirectTo = '/dashboard' }) => {
   const [tab, setTab] = useState<'login' | 'register'>('login');
   const [method, setMethod] = useState<'magic' | 'password'>('magic');
   const [email, setEmail] = useState('');
@@ -43,13 +44,13 @@ const AuthModal: React.FC<Props> = ({ open, onClose }) => {
     resetState();
     const { error: err } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: `${SITE_URL}/dashboard` },
+      options: { emailRedirectTo: `${SITE_URL}${redirectTo}` },
     });
     setLoading(false);
     if (err) {
       setError(err.message);
     } else {
-      setMessage('Check your email for the login link.');
+      setMessage('Check your email for the magic link. Following it will sign you in and unlock Free access.');
     }
   };
 
@@ -62,13 +63,13 @@ const AuthModal: React.FC<Props> = ({ open, onClose }) => {
       const { error: err } = await supabase.auth.signUp({
         email,
         password,
-        options: { emailRedirectTo: `${SITE_URL}/dashboard` },
+        options: { emailRedirectTo: `${SITE_URL}${redirectTo}` },
       });
       setLoading(false);
       if (err) {
         setError(err.message);
       } else {
-        setMessage('Check your email to confirm your account.');
+        setMessage('Check your email to confirm your account before Free access is enabled.');
       }
     } else {
       const { error: err } = await supabase.auth.signInWithPassword({
@@ -89,7 +90,7 @@ const AuthModal: React.FC<Props> = ({ open, onClose }) => {
     resetState();
     const { error: err } = await supabase.auth.signInWithOAuth({
       provider,
-      options: { redirectTo: `${SITE_URL}/dashboard` },
+      options: { redirectTo: `${SITE_URL}${redirectTo}` },
     });
     if (err) setError(err.message);
   };
