@@ -9,7 +9,7 @@ export type ParamField = {
 
 export type Endpoint = {
   id: string;
-  method: 'GET' | 'POST';
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE';
   path: string;
   summary: string;
   description?: string;
@@ -77,6 +77,33 @@ export const endpointGroups: EndpointGroup[] = [
             placeholder: '2026-01-01',
           },
         ],
+      },
+      {
+        id: 'strategy-interpret',
+        method: 'POST',
+        path: '/api/pro/strategies/interpret',
+        summary: 'Interpret natural-language strategy',
+        description:
+          'Turns a plain-English strategy prompt into a constrained draft strategy spec using the configured LLM provider or the built-in heuristic fallback. Requires a signed-in paid account in the browser.',
+        auth: 'admin_jwt',
+      },
+      {
+        id: 'strategy-preview',
+        method: 'POST',
+        path: '/api/pro/strategies/preview',
+        summary: 'Preview custom strategy history',
+        description:
+          'Evaluates a validated strategy spec against the cached CoinStrat dataset and returns current state, recent flips, summary stats, and a historical preview window.',
+        auth: 'admin_jwt',
+      },
+      {
+        id: 'user-strategies',
+        method: 'GET',
+        path: '/api/pro/strategies',
+        summary: 'List saved custom strategies',
+        description:
+          'Returns the caller’s saved Signal Builder strategies, active preview metadata, and alert configuration.',
+        auth: 'admin_jwt',
       },
     ],
   },

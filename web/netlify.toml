@@ -97,6 +97,26 @@
   status = 200
 
 [[redirects]]
+  from = "/api/pro/strategies"
+  to = "/.netlify/functions/user-strategies"
+  status = 200
+
+[[redirects]]
+  from = "/api/pro/strategies/preview"
+  to = "/.netlify/functions/strategy-preview"
+  status = 200
+
+[[redirects]]
+  from = "/api/pro/strategies/interpret"
+  to = "/.netlify/functions/strategy-interpret"
+  status = 200
+
+[[redirects]]
+  from = "/api/email/strategy-alerts/unsubscribe"
+  to = "/.netlify/functions/strategy-alert-unsubscribe"
+  status = 200
+
+[[redirects]]
   from = "/api/email/digest"
   to = "/.netlify/functions/weekly-digest"
   status = 200

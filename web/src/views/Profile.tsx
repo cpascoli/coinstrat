@@ -14,7 +14,7 @@ import {
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import useMediaQuery from '@mui/material/useMediaQuery';
-import { Bell, Copy, Crown, ExternalLink, LogOut, Sparkles, User, Zap } from 'lucide-react';
+import { Bell, Copy, Crown, ExternalLink, LogOut, Sparkles, User, Workflow, Zap } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import ProfileSectionNav from '../components/ProfileSectionNav';
 import { useAuth } from '../contexts/AuthContext';
@@ -494,6 +494,15 @@ const Profile: React.FC = () => {
                         <Typography color="text.secondary">
                           These alerts are separate from the weekly newsletter. They fire after the signal refresh pipeline detects a state change, so repeated refreshes do not resend the same alert.
                         </Typography>
+
+                        <Button
+                          variant="outlined"
+                          startIcon={<Workflow size={16} />}
+                          onClick={() => navigate('/strategy-builder')}
+                          sx={{ textTransform: 'none', fontWeight: 700, alignSelf: 'flex-start' }}
+                        >
+                          Open Signal Builder
+                        </Button>
 
                         {alertsLoading ? (
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>

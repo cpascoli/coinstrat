@@ -3,6 +3,7 @@ import { signalsStore } from './lib/store';
 import { refreshSignals } from './lib/compute';
 import { authorizeAdminOrCron } from './lib/auth';
 import { deliverSignalAlertChanges, detectAlertChanges } from './lib/signalAlerts';
+import { evaluateActiveStrategies } from './lib/strategyAlerts';
 
 /**
  * Refresh the signal cache.  Two modes:
@@ -106,6 +107,8 @@ export const handler: Handler = async (event) => {
         data: rebuilt,
       });
 
+      const strategySummary = await evaluateActiveStrategies(rebuilt, []);
+
       console.log(`[signal-refresh] Rebuilt full cache with ${rebuilt.length} rows.`);
 
       return {
@@ -116,6 +119,7 @@ export const handler: Handler = async (event) => {
           count: rebuilt.length,
           latest_date: rebuilt[rebuilt.length - 1]?.Date ?? null,
           cached_at: new Date().toISOString(),
+          strategies: strategySummary,
         }),
       };
     }
@@ -159,6 +163,7 @@ export const handler: Handler = async (event) => {
     const alertSummary = alertChanges.length > 0
       ? await deliverSignalAlertChanges(alertChanges)
       : { events: 0, deliveries: 0 };
+    const strategySummary = await evaluateActiveStrategies(combined, newRows.map((row) => row.Date));
 
     console.log(
       `[signal-refresh] Appended ${newRows.length} new rows ` +
@@ -175,6 +180,7 @@ export const handler: Handler = async (event) => {
         latest_date: newRows[newRows.length - 1].Date,
         cached_at: cachedAt,
         alerts: alertSummary,
+        strategies: strategySummary,
       }),
     };
   } catch (err: any) {

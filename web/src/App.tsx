@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { LayoutDashboard, BarChart3, Binary, Info, Activity, FlaskConical, Github, User, LogOut, Shield, BookOpen, Database, Key } from 'lucide-react';
+import { LayoutDashboard, BarChart3, Binary, Info, Activity, FlaskConical, Github, User, LogOut, Shield, BookOpen, Database, Key, Workflow } from 'lucide-react';
 import Dashboard from './views/Dashboard';
 import ScoreBreakdown from './views/ScoreBreakdown';
 import LogicFlow from './views/LogicFlow';
@@ -19,6 +19,8 @@ import Terms from './views/Terms';
 import Privacy from './views/Privacy';
 import Unsubscribe from './views/Unsubscribe';
 import AlertUnsubscribe from './views/AlertUnsubscribe';
+import StrategyBuilder from './views/StrategyBuilder';
+import StrategyAlertUnsubscribe from './views/StrategyAlertUnsubscribe';
 import { computeAllSignals } from './services/engine';
 import { useAuth } from './contexts/AuthContext';
 import AuthModal from './components/AuthModal';
@@ -97,6 +99,7 @@ const App: React.FC = () => {
   const isMdUp = useMediaQuery(theme.breakpoints.up('md'));
   const location = useLocation();
   const navigate = useNavigate();
+  const hasPaidBuilderAccess = profile?.tier === 'pro' || profile?.tier === 'pro_plus' || profile?.tier === 'lifetime';
 
   const tabs = useMemo(
     () => [
@@ -117,7 +120,7 @@ const App: React.FC = () => {
     // Treat any /charts/* route as the Charts tab
     if (p.startsWith('/charts')) return 'charts';
     // Home/docs/reference pages shouldn't highlight a bottom-nav item
-    if (p === '/' || p.startsWith('/docs') || p === '/api-docs') return false;
+    if (p === '/' || p.startsWith('/docs') || p === '/api-docs' || p === '/strategy-builder') return false;
     return 'dashboard';
   }, [location.pathname, tabs]);
 
@@ -445,6 +448,12 @@ const App: React.FC = () => {
                     <ListItemIcon><Key size={16} /></ListItemIcon>
                     <ListItemText>Developer</ListItemText>
                   </MenuItem>
+                {hasPaidBuilderAccess && (
+                  <MenuItem onClick={() => { setAnchorEl(null); navigate('/strategy-builder'); }}>
+                    <ListItemIcon><Workflow size={16} /></ListItemIcon>
+                    <ListItemText>Signal Builder</ListItemText>
+                  </MenuItem>
+                )}
                   <MenuItem onClick={() => { setAnchorEl(null); navigate('/profile'); }}>
                     <ListItemIcon><User size={16} /></ListItemIcon>
                     <ListItemText>Profile</ListItemText>
@@ -475,6 +484,7 @@ const App: React.FC = () => {
           <Route path="/docs" element={<DocsHome />} />
           <Route path="/docs/api" element={<Navigate to="/developer" replace />} />
           <Route path="/developer" element={<Developer />} />
+          <Route path="/strategy-builder" element={<StrategyBuilder />} />
           <Route path="/docs/data" element={<DocsData />} />
           <Route path="/docs/architecture" element={<DocsArchitecture />} />
           <Route path="/docs/scores" element={<DocsScores />} />
@@ -492,6 +502,7 @@ const App: React.FC = () => {
           <Route path="/newsletter/confirm" element={<NewsletterConfirm />} />
           <Route path="/unsubscribe" element={<Unsubscribe />} />
           <Route path="/alerts/unsubscribe" element={<AlertUnsubscribe />} />
+          <Route path="/alerts/strategies/unsubscribe" element={<StrategyAlertUnsubscribe />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
 

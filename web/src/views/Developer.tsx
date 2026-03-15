@@ -13,7 +13,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import { Copy, Eye, EyeOff, Key, Lock, Sparkles } from 'lucide-react';
+import { Copy, Eye, EyeOff, Key, Lock, Sparkles, Workflow } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { endpointGroups } from './api/endpoints';
@@ -254,6 +254,36 @@ const Developer: React.FC = () => {
                   : 'Sign in and upgrade to Pro or Lifetime to unlock paid API access.'}
               </Alert>
             )}
+          </Stack>
+        </Paper>
+
+        <Paper sx={{ p: { xs: 2.5, sm: 3 } }}>
+          <Stack
+            direction={{ xs: 'column', md: 'row' }}
+            spacing={2}
+            alignItems={{ xs: 'flex-start', md: 'center' }}
+            justifyContent="space-between"
+          >
+            <Box>
+              <Stack direction="row" spacing={1.25} alignItems="center" sx={{ mb: 1 }}>
+                <Workflow size={18} />
+                <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                  Signal Builder
+                </Typography>
+              </Stack>
+              <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 760 }}>
+                Turn plain-English ideas into constrained custom strategies, preview them on CoinStrat history,
+                and save them with their own alert rules. The builder reuses the same approved series and backend cache
+                rather than running arbitrary custom code.
+              </Typography>
+            </Box>
+            <Button
+              variant="contained"
+              onClick={() => navigate('/strategy-builder')}
+              sx={{ textTransform: 'none', fontWeight: 700 }}
+            >
+              Open Signal Builder
+            </Button>
           </Stack>
         </Paper>
 
