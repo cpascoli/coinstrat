@@ -125,11 +125,21 @@ export interface StrategyTransition {
   next: number;
 }
 
+export interface StrategySnapshotRow {
+  kind: 'source' | 'metric' | 'condition' | 'output';
+  id: string;
+  label: string;
+  reference?: string;
+  currentValue: number | boolean | null;
+  displayValue: string;
+}
+
 export interface StrategyPreviewResult {
   currentState: number;
   latestDate: string | null;
   rows: StrategyPreviewRow[];
   transitions: StrategyTransition[];
+  snapshot: StrategySnapshotRow[];
   metrics: Array<{ id: string; label: string; latestValue: number | null }>;
   conditions: Array<{ id: string; label: string; latestValue: boolean }>;
   summary: {

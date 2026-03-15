@@ -20,7 +20,7 @@ const DocsHome: React.FC = () => {
             Docs
           </Typography>
           <Typography sx={{ color: 'text.secondary', maxWidth: 720 }}>
-            Reference material for CoinStrat. Explore the API, understand the external data
+            Reference material for CoinStrat. Understand the external data
             feeds behind the model, and see how the signal engine is assembled.
           </Typography>
         </Box>

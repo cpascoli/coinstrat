@@ -8,6 +8,7 @@ import {
   type StrategyMetricDefinition,
   type StrategyPreviewResult,
   type StrategyPreviewRow,
+  type StrategySnapshotRow,
   type StrategySeriesKey,
   type StrategySpec,
 } from '../../../src/lib/strategyBuilder';
@@ -141,6 +142,17 @@ function normalizeNumber(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : Number.NaN;
 }
 
+function formatSnapshotValue(value: number | boolean | null): string {
+  if (typeof value === 'boolean') {
+    return value ? 'TRUE' : 'FALSE';
+  }
+  if (typeof value === 'number') {
+    if (Number.isInteger(value)) return String(value);
+    return value.toFixed(4).replace(/\.?0+$/, '');
+  }
+  return 'n/a';
+}
+
 function buildSourceSeries(rows: SignalRow[], seriesKey: StrategySeriesKey): NumericSeries {
   return rows.map((row) => normalizeNumber(row[seriesKey]));
 }
@@ -241,12 +253,64 @@ export function evaluateStrategy(rows: SignalRow[], spec: StrategySpec): Strateg
 
   const activeDays = signalSeries.filter((value) => value === 1).length;
   const latestRow = previewRows[previewRows.length - 1];
+  const snapshot: StrategySnapshotRow[] = [];
+
+  for (const source of spec.sources) {
+    const series = refs.get(source.id) ?? [];
+    const latestValue = series.length > 0 ? series[series.length - 1] : Number.NaN;
+    const normalized = Number.isFinite(latestValue) ? latestValue : null;
+    snapshot.push({
+      kind: 'source',
+      id: source.id,
+      label: source.label,
+      reference: source.seriesKey,
+      currentValue: normalized,
+      displayValue: formatSnapshotValue(normalized),
+    });
+  }
+
+  for (const metric of spec.metrics) {
+    const series = refs.get(metric.id) ?? [];
+    const latestValue = series.length > 0 ? series[series.length - 1] : Number.NaN;
+    const normalized = Number.isFinite(latestValue) ? latestValue : null;
+    snapshot.push({
+      kind: 'metric',
+      id: metric.id,
+      label: metric.label,
+      reference: metric.operator,
+      currentValue: normalized,
+      displayValue: formatSnapshotValue(normalized),
+    });
+  }
+
+  for (const condition of spec.conditions) {
+    const series = conditionSeries.get(condition.id) ?? [];
+    const latestValue = Boolean(series[series.length - 1]);
+    snapshot.push({
+      kind: 'condition',
+      id: condition.id,
+      label: condition.label,
+      reference: describeComparator(condition.comparator),
+      currentValue: latestValue,
+      displayValue: formatSnapshotValue(latestValue),
+    });
+  }
+
+  snapshot.push({
+    kind: 'output',
+    id: 'output',
+    label: spec.output.label,
+    reference: spec.output.mode,
+    currentValue: latestRow?.signal ?? 0,
+    displayValue: (latestRow?.signal ?? 0) === 1 ? 'ON' : 'OFF',
+  });
 
   return {
     currentState: latestRow?.signal ?? 0,
     latestDate: latestRow?.Date ?? null,
     rows: previewRows,
     transitions,
+    snapshot,
     metrics: spec.metrics.map((metric) => {
       const series = refs.get(metric.id) ?? [];
       const latestValue = series.length > 0 ? series[series.length - 1] : Number.NaN;

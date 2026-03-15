@@ -95,7 +95,7 @@ const DocsArchitecture: React.FC = () => {
         </Box>
 
         <Alert severity="info">
-          The shortest way to think about the model is:{' '}
+          The shortest way to think about the model is:{' '}<br/>
           <strong>raw series {'->'} engineered metrics {'->'} scores {'->'} signals {'->'} final accumulation permission</strong>.
         </Alert>
 

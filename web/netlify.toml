@@ -69,6 +69,11 @@
   to = "/.netlify/functions/admin-newsletter"
   status = 200
 
+[[redirects]]
+  from = "/api/admin/alerts"
+  to = "/.netlify/functions/admin-alerts"
+  status = 200
+
 # --- Email ---
 
 [[redirects]]
@@ -84,6 +89,11 @@
 [[redirects]]
   from = "/api/email/unsubscribe"
   to = "/.netlify/functions/email-unsubscribe"
+  status = 200
+
+[[redirects]]
+  from = "/api/profile/newsletter"
+  to = "/.netlify/functions/profile-newsletter"
   status = 200
 
 [[redirects]]

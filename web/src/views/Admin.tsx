@@ -98,6 +98,38 @@ interface NewsletterIssue {
   latest_send_log: NewsletterSendLog | null;
 }
 
+interface ScheduledAlertsStatus {
+  limit: number;
+  backlogTotal: number;
+  readyTotal: number;
+  nextRunAttemptEstimate: number;
+  signalBacklog: number;
+  strategyBacklog: number;
+}
+
+interface ScheduledAlertsRunResult {
+  refresh: {
+    mode: 'seed' | 'rebuild' | 'incremental';
+    new_rows?: number;
+    total?: number;
+    latest_date?: string | null;
+    alerts?: { events: number; deliveries: number };
+    strategies?: { strategies: number; events: number; deliveries: number };
+    message?: string;
+  };
+  deliveries: {
+    limit: number;
+    backlogBefore: number;
+    readyBefore: number;
+    attempted: number;
+    sent: number;
+    failed: number;
+    remainingBacklog: number;
+    signalBacklog: number;
+    strategyBacklog: number;
+  };
+}
+
 const TIER_COLORS: Record<string, string> = {
   free: '#94a3b8',
   pro: '#60a5fa',
@@ -149,6 +181,10 @@ const Admin: React.FC = () => {
   }>({ latestDate: null, cachedAt: null, stale: null });
   const [refreshing, setRefreshing] = useState(false);
   const [refreshResult, setRefreshResult] = useState<string | null>(null);
+  const [scheduledAlertsLoading, setScheduledAlertsLoading] = useState(true);
+  const [scheduledAlertsRunning, setScheduledAlertsRunning] = useState(false);
+  const [scheduledAlertsStatus, setScheduledAlertsStatus] = useState<ScheduledAlertsStatus | null>(null);
+  const [scheduledAlertsResult, setScheduledAlertsResult] = useState<ScheduledAlertsRunResult | null>(null);
   const [removingSubscriberEmail, setRemovingSubscriberEmail] = useState<string | null>(null);
 
   const [selectedWeek, setSelectedWeek] = useState(currentMonday());
@@ -227,6 +263,22 @@ const Admin: React.FC = () => {
     setLoading(false);
   }, [authHeaders]);
 
+  const fetchScheduledAlertsStatus = useCallback(async () => {
+    setScheduledAlertsLoading(true);
+    try {
+      const res = await fetch('/api/admin/alerts', { headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error ?? 'Failed to load scheduled alert status.');
+      }
+      setScheduledAlertsStatus(data.status ?? null);
+    } catch (err: any) {
+      setError(err.message ?? 'Failed to load scheduled alert status.');
+    } finally {
+      setScheduledAlertsLoading(false);
+    }
+  }, [authHeaders]);
+
   const fetchNewsletter = useCallback(async (weekOf: string) => {
     setNewsletterLoading(true);
     try {
@@ -269,6 +321,11 @@ const Admin: React.FC = () => {
     if (authLoading || !isAdmin || !session) return;
     fetchNewsletter(selectedWeek);
   }, [authLoading, fetchNewsletter, isAdmin, selectedWeek, session]);
+
+  useEffect(() => {
+    if (authLoading || !isAdmin || !session) return;
+    fetchScheduledAlertsStatus();
+  }, [authLoading, fetchScheduledAlertsStatus, isAdmin, session]);
 
   if (authLoading) {
     return (
@@ -386,6 +443,39 @@ const Admin: React.FC = () => {
       setError(err.message);
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const handleRunScheduledAlerts = async () => {
+    setScheduledAlertsRunning(true);
+    setScheduledAlertsResult(null);
+    setError(null);
+
+    try {
+      const res = await fetch('/api/admin/alerts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error ?? 'Scheduled alert run failed.');
+      }
+
+      setScheduledAlertsResult({
+        refresh: data.refresh,
+        deliveries: data.deliveries,
+      });
+
+      await Promise.all([
+        fetchCacheInfo(),
+        fetchScheduledAlertsStatus(),
+      ]);
+    } catch (err: any) {
+      setError(err.message ?? 'Scheduled alert run failed.');
+    } finally {
+      setScheduledAlertsRunning(false);
     }
   };
 
@@ -553,6 +643,60 @@ const Admin: React.FC = () => {
         {refreshResult && (
           <Alert severity="success" sx={{ mt: 1.5 }}>{refreshResult}</Alert>
         )}
+      </Paper>
+
+      <Paper sx={{ p: 2.5, mb: 3 }}>
+        <Stack spacing={1.75}>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <Mail size={18} />
+            <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>Scheduled Alerts</Typography>
+          </Stack>
+
+          <Typography variant="body2" color="text.secondary">
+            Manually run the same workflow as the 4-hour scheduler: refresh signals, create any new alert events, and send up to 50 pending alert emails.
+          </Typography>
+
+          {scheduledAlertsLoading ? (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
+              <CircularProgress size={18} />
+              <Typography variant="body2" color="text.secondary">
+                Loading pending alert backlog…
+              </Typography>
+            </Box>
+          ) : (
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              <Chip label={`Pending backlog: ${scheduledAlertsStatus?.backlogTotal ?? 0}`} size="small" variant="outlined" />
+              <Chip label={`Ready now: ${scheduledAlertsStatus?.readyTotal ?? 0}`} size="small" variant="outlined" />
+              <Chip label={`Next run can send: ${scheduledAlertsStatus?.nextRunAttemptEstimate ?? 0}`} size="small" variant="outlined" />
+              <Chip label={`Fixed alerts: ${scheduledAlertsStatus?.signalBacklog ?? 0}`} size="small" variant="outlined" />
+              <Chip label={`Strategy alerts: ${scheduledAlertsStatus?.strategyBacklog ?? 0}`} size="small" variant="outlined" />
+            </Stack>
+          )}
+
+          <Box>
+            <Button
+              variant="contained"
+              disabled={scheduledAlertsRunning || scheduledAlertsLoading}
+              onClick={handleRunScheduledAlerts}
+              startIcon={scheduledAlertsRunning ? <CircularProgress size={14} color="inherit" /> : <Send size={14} />}
+              sx={{ textTransform: 'none', fontWeight: 700 }}
+            >
+              {scheduledAlertsRunning ? 'Running scheduled alerts…' : 'Run scheduled alerts now'}
+            </Button>
+          </Box>
+
+          {scheduledAlertsResult && (
+            <Alert severity="success">
+              Refresh mode: {scheduledAlertsResult.refresh.mode}.{' '}
+              {scheduledAlertsResult.refresh.new_rows === 0
+                ? (scheduledAlertsResult.refresh.message ?? 'No new rows were added.')
+                : `New rows: ${scheduledAlertsResult.refresh.new_rows ?? 0}. `}
+              Emails attempted: {scheduledAlertsResult.deliveries.attempted}.{' '}
+              Sent: {scheduledAlertsResult.deliveries.sent}. Failed: {scheduledAlertsResult.deliveries.failed}.{' '}
+              Remaining backlog: {scheduledAlertsResult.deliveries.remainingBacklog}.
+            </Alert>
+          )}
+        </Stack>
       </Paper>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
@@ -811,6 +955,10 @@ const Admin: React.FC = () => {
                   Schedule
                 </Typography>
                 <Stack spacing={2}>
+                  <Alert severity="info">
+                    Netlify checks the automatic newsletter once a day at 00:30 UTC. If automatic broadcast is enabled and the configured weekday/hour has been reached, that run will compose and send the newsletter.
+                  </Alert>
+
                   <FormControlLabel
                     control={(
                       <Switch

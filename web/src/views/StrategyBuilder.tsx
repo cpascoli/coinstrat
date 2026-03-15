@@ -7,14 +7,25 @@ import {
   CircularProgress,
   Collapse,
   Divider,
+  Dialog,
+  DialogContent,
+  IconButton,
   MenuItem,
   Paper,
   Select,
   Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   TextField,
   Typography,
 } from '@mui/material';
-import { Bot, ChevronDown, ChevronUp, Save, Sparkles, Trash2, Wand2, Workflow } from 'lucide-react';
+import { useTheme } from '@mui/material/styles';
+import useMediaQuery from '@mui/material/useMediaQuery';
+import { Bot, ChevronDown, ChevronUp, Plus, Save, Sparkles, Trash2, Wand2, Workflow, X } from 'lucide-react';
 import {
   CartesianGrid,
   Line,
@@ -54,6 +65,8 @@ type StoredStrategy = {
 const StrategyBuilder: React.FC = () => {
   const navigate = useNavigate();
   const { session, isAuthenticated, loading, tier } = useAuth();
+  const theme = useTheme();
+  const isSmDown = useMediaQuery(theme.breakpoints.down('sm'));
   const hasPaidAccess = tier === 'pro' || tier === 'pro_plus' || tier === 'lifetime';
   const [prompt, setPrompt] = useState('Alert me when BTC is above its 200 day moving average and MVRV is below 2.');
   const [strategyName, setStrategyName] = useState('Prompt strategy');
@@ -66,6 +79,7 @@ const StrategyBuilder: React.FC = () => {
   const [provider, setProvider] = useState<'openai' | 'heuristic' | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [preview, setPreview] = useState<StrategyPreviewResult | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [showAdvancedDetails, setShowAdvancedDetails] = useState(false);
   const [strategies, setStrategies] = useState<StoredStrategy[]>([]);
   const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(null);
@@ -184,6 +198,12 @@ const StrategyBuilder: React.FC = () => {
     setError(null);
   };
 
+  const detachSelectedStrategy = () => {
+    setSelectedStrategyId(null);
+    setSuccess('Detached from the saved strategy. You can now save this draft as a new strategy.');
+    setError(null);
+  };
+
   const interpretPrompt = async () => {
     setBusyAction('interpret');
     setError(null);
@@ -228,6 +248,7 @@ const StrategyBuilder: React.FC = () => {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? 'Unable to preview strategy.');
       setPreview(data.preview ?? null);
+      setPreviewOpen(true);
       setSuccess('Historical preview updated.');
     } catch (previewError) {
       setError(previewError instanceof Error ? previewError.message : 'Unable to preview strategy.');
@@ -236,7 +257,7 @@ const StrategyBuilder: React.FC = () => {
     }
   };
 
-  const saveStrategy = async () => {
+  const saveStrategy = async (mode: 'update' | 'create' = 'update') => {
     const currentSpec = parsedSpec;
     if (!currentSpec) {
       setError('Draft a strategy first.');
@@ -247,10 +268,10 @@ const StrategyBuilder: React.FC = () => {
     setSuccess(null);
     try {
       const response = await fetch('/api/pro/strategies', {
-        method: selectedStrategyId ? 'PUT' : 'POST',
+        method: mode === 'update' && selectedStrategyId ? 'PUT' : 'POST',
         headers: authHeaders,
         body: JSON.stringify({
-          strategyId: selectedStrategyId,
+          strategyId: mode === 'update' ? selectedStrategyId : null,
           name: strategyName,
           description: strategyDescription,
           prompt,
@@ -265,7 +286,7 @@ const StrategyBuilder: React.FC = () => {
       const saved = data.strategy as StoredStrategy;
       applyStrategy(saved);
       await loadStrategies();
-      setSuccess(selectedStrategyId ? 'Strategy updated.' : 'Strategy saved.');
+      setSuccess(mode === 'update' && selectedStrategyId ? 'Strategy updated.' : 'Strategy saved as new.');
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Unable to save strategy.');
     } finally {
@@ -357,7 +378,7 @@ const StrategyBuilder: React.FC = () => {
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               <Chip label="Pro feature" size="small" variant="outlined" />
               <Chip label="LLM with guardrails" size="small" variant="outlined" icon={<Bot size={12} />} />
-              <Chip label="Preview before save" size="small" variant="outlined" icon={<Sparkles size={12} />} />
+              <Chip label="Email notifications" size="small" variant="outlined" icon={<Sparkles size={12} />} />
             </Stack>
           </Stack>
         </Paper>
@@ -372,7 +393,19 @@ const StrategyBuilder: React.FC = () => {
           <Stack spacing={3}>
             <Paper sx={{ p: 3 }}>
               <Stack spacing={2}>
-                <Typography variant="h6" sx={{ fontWeight: 800 }}>1. Describe your strategy</Typography>
+                <Stack direction="row" justifyContent="space-between" alignItems="center">
+                  <Typography variant="h6" sx={{ fontWeight: 800 }}>Describe your strategy</Typography>
+                  <IconButton
+                    onClick={detachSelectedStrategy}
+                    disabled={busyAction !== null}
+                    size="small"
+                    sx={{ border: '1px solid', borderColor: 'divider' }}
+                    aria-label="Start a new draft"
+                    title="Start a new draft"
+                  >
+                    <Plus size={18} />
+                  </IconButton>
+                </Stack>
                 <TextField
                   multiline
                   minRows={4}
@@ -380,6 +413,11 @@ const StrategyBuilder: React.FC = () => {
                   onChange={(event) => setPrompt(event.target.value)}
                   placeholder="Example: Alert me when BTC crosses above its 200 day moving average and MVRV is below 2."
                 />
+                {selectedStrategy && (
+                  <Alert severity="info">
+                    Editing saved strategy: <strong>{selectedStrategy.name}</strong>. Click the <strong>+</strong> icon to start a new draft.
+                  </Alert>
+                )}
                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25}>
                   <Button
                     variant="contained"
@@ -399,102 +437,70 @@ const StrategyBuilder: React.FC = () => {
                     {busyAction === 'preview' ? 'Previewing…' : 'Preview strategy'}
                   </Button>
                   {hasUnsavedChanges ? (
-                    <Button
-                      variant="outlined"
-                      startIcon={<Save size={16} />}
-                      onClick={() => void saveStrategy()}
-                      disabled={!validation.ok || busyAction !== null}
-                      sx={{ textTransform: 'none', fontWeight: 700 }}
-                    >
-                      {busyAction === 'save' ? 'Saving…' : selectedStrategyId ? 'Update strategy' : 'Save strategy'}
-                    </Button>
+                    <>
+                      {selectedStrategyId && (
+                        <Button
+                          variant="outlined"
+                          startIcon={<Save size={16} />}
+                          onClick={() => void saveStrategy('update')}
+                          disabled={!validation.ok || busyAction !== null}
+                          sx={{ textTransform: 'none', fontWeight: 700 }}
+                        >
+                          {busyAction === 'save' ? 'Saving…' : 'Update strategy'}
+                        </Button>
+                      )}
+                      {!selectedStrategyId && (
+                        <Button
+                          variant="outlined"
+                          startIcon={<Save size={16} />}
+                          onClick={() => void saveStrategy('create')}
+                          disabled={!validation.ok || busyAction !== null}
+                          sx={{ textTransform: 'none', fontWeight: 700 }}
+                        >
+                          {busyAction === 'save' ? 'Saving…' : 'Save strategy'}
+                        </Button>
+                      )}
+                    </>
                   ) : (
-                    <Button
-                      variant="outlined"
-                      color="error"
-                      startIcon={<Trash2 size={16} />}
-                      onClick={() => void deleteStrategy()}
-                      disabled={!selectedStrategyId || busyAction !== null}
-                      sx={{ textTransform: 'none', fontWeight: 700 }}
-                    >
-                      {busyAction === 'delete' ? 'Deleting…' : 'Delete strategy'}
-                    </Button>
+                    <>
+                      <Button
+                        variant="outlined"
+                        color="error"
+                        startIcon={<Trash2 size={16} />}
+                        onClick={() => void deleteStrategy()}
+                        disabled={!selectedStrategyId || busyAction !== null}
+                        sx={{ textTransform: 'none', fontWeight: 700 }}
+                      >
+                        {busyAction === 'delete' ? 'Deleting…' : 'Delete strategy'}
+                      </Button>
+                    </>
                   )}
                 </Stack>
+                {preview && (
+                  <Button
+                    variant="text"
+                    onClick={() => setPreviewOpen(true)}
+                    sx={{ alignSelf: 'flex-start', px: 0, textTransform: 'none', fontWeight: 700 }}
+                  >
+                    Reopen preview
+                  </Button>
+                )}
                 {provider && (
                   <Typography variant="body2" color="text.secondary">
                     Interpretation provider: <strong>{provider}</strong>
                   </Typography>
                 )}
-              </Stack>
-            </Paper>
-
-            <Paper sx={{ p: 3 }}>
-              <Stack spacing={2}>
-                <Typography variant="h6" sx={{ fontWeight: 800 }}>2. Historical preview</Typography>
-                {!preview ? (
+                {preview && (
                   <Typography variant="body2" color="text.secondary">
-                    Run a preview to inspect current state, signal flips, and the last year of signal history.
+                    Preview includes the current snapshot of sources, metrics, conditions, and output alongside the historical chart.
                   </Typography>
-                ) : (
-                  <>
-                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                      <Chip label={`Current state: ${preview.currentState}`} size="small" variant="outlined" />
-                      {preview.latestDate && <Chip label={`Latest date: ${preview.latestDate}`} size="small" variant="outlined" />}
-                      <Chip label={`Transitions: ${preview.summary.transitionCount}`} size="small" variant="outlined" />
-                      <Chip label={`Active days: ${preview.summary.activeDays}`} size="small" variant="outlined" />
-                    </Stack>
-
-                    <Box sx={{ width: '100%', height: 280 }}>
-                      <ResponsiveContainer>
-                        <LineChart data={chartData}>
-                          <CartesianGrid strokeDasharray="3 3" opacity={0.16} />
-                          <XAxis dataKey="Date" tick={{ fontSize: 12 }} minTickGap={30} />
-                          <YAxis yAxisId="signal" domain={[0, 1]} ticks={[0, 1]} />
-                          <YAxis yAxisId="btc" orientation="right" />
-                          <Tooltip />
-                          <Line yAxisId="signal" type="stepAfter" dataKey="signal" stroke="#60a5fa" dot={false} strokeWidth={2.2} />
-                          <Line yAxisId="btc" type="monotone" dataKey="btcScaled" name="BTC (scaled)" stroke="#f59e0b" dot={false} strokeWidth={1.4} />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </Box>
-
-                    <Stack spacing={1}>
-                      <Typography sx={{ fontWeight: 700 }}>Latest metric values</Typography>
-                      <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
-                        {preview.metrics.map((metric) => (
-                          <Chip
-                            key={metric.id}
-                            label={`${metric.label}: ${metric.latestValue ?? 'n/a'}`}
-                            size="small"
-                            variant="outlined"
-                          />
-                        ))}
-                      </Stack>
-                    </Stack>
-
-                    <Stack spacing={1}>
-                      <Typography sx={{ fontWeight: 700 }}>Recent transitions</Typography>
-                      {preview.transitions.length === 0 ? (
-                        <Typography variant="body2" color="text.secondary">No flips in the preview window.</Typography>
-                      ) : (
-                        preview.transitions.slice(-10).reverse().map((transition) => (
-                          <Paper key={`${transition.Date}-${transition.previous}-${transition.next}`} variant="outlined" sx={{ p: 1.25 }}>
-                            <Typography variant="body2">
-                              {transition.Date}: {transition.previous} to {transition.next}
-                            </Typography>
-                          </Paper>
-                        ))
-                      )}
-                    </Stack>
-                  </>
                 )}
               </Stack>
             </Paper>
 
             <Paper sx={{ p: 3 }}>
               <Stack spacing={2}>
-                <Typography variant="h6" sx={{ fontWeight: 800 }}>3. Review strategy details</Typography>
+                <Typography variant="h6" sx={{ fontWeight: 800 }}>Review strategy details</Typography>
                 <TextField value={strategyName} onChange={(event) => setStrategyName(event.target.value)} label="Strategy name" />
                 <TextField value={strategyDescription} onChange={(event) => setStrategyDescription(event.target.value)} label="Description" multiline minRows={2} />
                 <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25}>
@@ -659,7 +665,136 @@ const StrategyBuilder: React.FC = () => {
           </Stack>
         </Box>
       </Stack>
-    </Box>
+
+      <Dialog
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        fullScreen={isSmDown}
+        fullWidth
+        maxWidth="lg"
+        PaperProps={{
+          sx: {
+            bgcolor: 'background.paper',
+            m: isSmDown ? 0 : 2,
+            width: isSmDown ? '100%' : undefined,
+            maxHeight: isSmDown ? '100%' : 'calc(100% - 32px)',
+          },
+        }}
+      >
+        <DialogContent sx={{ p: isSmDown ? 0 : 2 }}>
+          <Stack spacing={isSmDown ? 1.25 : 2} sx={{ p: isSmDown ? 1 : 0 }}>
+            <Stack
+              direction="row"
+              justifyContent="space-between"
+              alignItems="center"
+              sx={{ px: isSmDown ? 0.5 : 0, pt: isSmDown ? 0.5 : 0 }}
+            >
+              <Box>
+                <Typography variant={isSmDown ? 'h6' : 'h5'} sx={{ fontWeight: 900 }}>
+                  Preview
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Current strategy snapshot plus historical behavior on the signal dataset.
+                </Typography>
+              </Box>
+              <IconButton onClick={() => setPreviewOpen(false)} aria-label="Close preview">
+                <X size={18} />
+              </IconButton>
+            </Stack>
+
+            {!preview ? (
+              <Typography variant="body2" color="text.secondary" sx={{ px: isSmDown ? 0.5 : 0 }}>
+                Run a preview to inspect current state, signal flips, and the last year of signal history.
+              </Typography>
+            ) : (
+              <>
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ px: isSmDown ? 0.5 : 0 }}>
+                  <Chip label={`Current state: ${preview.currentState}`} size="small" variant="outlined" />
+                  {preview.latestDate && <Chip label={`Latest date: ${preview.latestDate}`} size="small" variant="outlined" />}
+                  <Chip label={`Transitions: ${preview.summary.transitionCount}`} size="small" variant="outlined" />
+                  <Chip label={`Active days: ${preview.summary.activeDays}`} size="small" variant="outlined" />
+                </Stack>
+
+                <Box sx={{ width: '100%', height: isSmDown ? '52vh' : 360 }}>
+                  <ResponsiveContainer>
+                    <LineChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" opacity={0.16} />
+                      <XAxis dataKey="Date" tick={{ fontSize: 12 }} minTickGap={30} />
+                      <YAxis yAxisId="signal" domain={[0, 1]} ticks={[0, 1]} />
+                      <YAxis yAxisId="btc" orientation="right" />
+                      <Tooltip />
+                      <Line yAxisId="signal" type="stepAfter" dataKey="signal" stroke="#60a5fa" dot={false} strokeWidth={2.2} />
+                      <Line yAxisId="btc" type="monotone" dataKey="btcScaled" name="BTC (scaled)" stroke="#f59e0b" dot={false} strokeWidth={1.4} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </Box>
+
+                <Stack spacing={1} sx={{ px: isSmDown ? 0.5 : 0 }}>
+                  <Typography sx={{ fontWeight: 700 }}>Current snapshot</Typography>
+                  <TableContainer
+                    component={Paper}
+                    variant="outlined"
+                    sx={{ backgroundColor: 'transparent', overflowX: 'auto' }}
+                  >
+                    <Table size="small" sx={{ minWidth: 520 }}>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell sx={{ fontWeight: 800 }}>Type</TableCell>
+                          <TableCell sx={{ fontWeight: 800 }}>Name</TableCell>
+                          <TableCell sx={{ fontWeight: 800 }}>Reference</TableCell>
+                          <TableCell sx={{ fontWeight: 800 }}>Current value</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {preview.snapshot.map((row) => (
+                          <TableRow key={`${row.kind}-${row.id}`}>
+                            <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                              <Chip
+                                label={row.kind}
+                                size="small"
+                                variant="outlined"
+                                sx={{ textTransform: 'capitalize' }}
+                              />
+                            </TableCell>
+                            <TableCell sx={{ fontWeight: 600 }}>{row.label}</TableCell>
+                            <TableCell sx={{ color: 'text.secondary', fontFamily: 'monospace' }}>
+                              {row.reference ?? '—'}
+                            </TableCell>
+                            <TableCell sx={{ fontFamily: 'monospace', fontWeight: 700 }}>
+                              {row.displayValue}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                  <Typography variant="caption" color="text.secondary">
+                    Snapshot date:{' '}
+                    {preview.latestDate
+                      ? `${preview.latestDate}. This is usually yesterday's data, but it can be older if the underlying feeds have not refreshed yet.`
+                      : 'Unavailable.'}
+                  </Typography>
+                </Stack>
+
+                <Stack spacing={1} sx={{ px: isSmDown ? 0.5 : 0, pb: isSmDown ? 1 : 0 }}>
+                  <Typography sx={{ fontWeight: 700 }}>Recent transitions</Typography>
+                  {preview.transitions.length === 0 ? (
+                    <Typography variant="body2" color="text.secondary">No flips in the preview window.</Typography>
+                  ) : (
+                    preview.transitions.slice(-10).reverse().map((transition) => (
+                      <Paper key={`${transition.Date}-${transition.previous}-${transition.next}`} variant="outlined" sx={{ p: 1.25 }}>
+                        <Typography variant="body2">
+                          {transition.Date}: {transition.previous} to {transition.next}
+                        </Typography>
+                      </Paper>
+                    ))
+                  )}
+                </Stack>
+              </>
+            )}
+          </Stack>
+        </DialogContent>
+      </Dialog>    </Box>
   );
 };
 

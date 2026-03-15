@@ -1,4 +1,5 @@
 import type { StrategyAlertMode, StrategySpec, StrategyStatus } from '../../../src/lib/strategyBuilder';
+import { isAlertRetryReady } from './alertDeliveryRetry';
 import { serviceSupabase } from './auth';
 
 export interface StoredStrategy {
@@ -32,6 +33,22 @@ export interface StrategyAlertEventRecord {
   previous_value: number;
   new_value: number;
   event_key: string;
+}
+
+export interface PendingStrategyAlertDelivery {
+  kind: 'strategy';
+  eventId: string;
+  strategyId: string;
+  strategyName: string;
+  signalDate: string;
+  previousValue: number;
+  newValue: number;
+  email: string;
+  unsubscribeToken: string | null;
+  attemptCount: number;
+  nextRetryAt: string | null;
+  sortAt: string;
+  isReady: boolean;
 }
 
 function mapStoredStrategy(row: any): StoredStrategy {
@@ -295,8 +312,12 @@ export async function createStrategyAlertDelivery(params: {
   strategyId: string;
   email: string;
   status: 'sent' | 'failed';
+  attemptCount?: number;
+  lastAttemptAt?: string | null;
+  nextRetryAt?: string | null;
   errorSummary?: string | null;
 }): Promise<void> {
+  const attemptedAt = params.lastAttemptAt ?? new Date().toISOString();
   const { error } = await serviceSupabase
     .from('user_strategy_alert_deliveries')
     .upsert({
@@ -304,10 +325,106 @@ export async function createStrategyAlertDelivery(params: {
       strategy_id: params.strategyId,
       email: params.email,
       status: params.status,
-      sent_at: params.status === 'sent' ? new Date().toISOString() : null,
+      sent_at: params.status === 'sent' ? attemptedAt : null,
+      attempt_count: params.attemptCount ?? 1,
+      last_attempt_at: attemptedAt,
+      next_retry_at: params.nextRetryAt ?? null,
       error_summary: params.errorSummary ?? null,
     }, { onConflict: 'event_id,strategy_id' });
   if (error) throw new Error(error.message);
+}
+
+export async function listPendingStrategyAlertDeliveries(): Promise<PendingStrategyAlertDelivery[]> {
+  const { data: eventRows, error: eventsError } = await serviceSupabase
+    .from('user_strategy_alert_events')
+    .select('id, strategy_id, signal_date, previous_value, new_value, created_at')
+    .order('signal_date', { ascending: true })
+    .order('created_at', { ascending: true });
+
+  if (eventsError) throw new Error(eventsError.message);
+  if (!eventRows?.length) return [];
+
+  const strategyIds = Array.from(new Set(eventRows.map((row) => row.strategy_id)));
+  const eventIds = eventRows.map((row) => row.id);
+
+  const { data: strategyRows, error: strategiesError } = await serviceSupabase
+    .from('user_strategies')
+    .select(`
+      id,
+      name,
+      profiles!user_strategies_user_id_fkey(tier),
+      user_strategy_alerts(strategy_id, email, enabled, mode, unsubscribe_token)
+    `)
+    .in('id', strategyIds);
+
+  if (strategiesError) throw new Error(strategiesError.message);
+
+  const { data: deliveryRows, error: deliveriesError } = await serviceSupabase
+    .from('user_strategy_alert_deliveries')
+    .select('event_id, strategy_id, status, attempt_count, next_retry_at')
+    .in('event_id', eventIds);
+
+  if (deliveriesError) throw new Error(deliveriesError.message);
+
+  const strategiesById = new Map(
+    (strategyRows ?? []).map((row: any) => {
+      const profileRow = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+      const alertRow = Array.isArray(row.user_strategy_alerts) ? row.user_strategy_alerts[0] : row.user_strategy_alerts;
+
+      return [row.id, {
+        name: row.name as string,
+        tier: profileRow?.tier as string | undefined,
+        alert: {
+          email: alertRow?.email as string | undefined,
+          enabled: Boolean(alertRow?.enabled),
+          mode: (alertRow?.mode as string | undefined) ?? 'disabled',
+          unsubscribeToken: (alertRow?.unsubscribe_token as string | null | undefined) ?? null,
+        },
+      }];
+    }),
+  );
+
+  const deliveriesByKey = new Map(
+    (deliveryRows ?? []).map((row: any) => [
+      `${row.event_id}:${row.strategy_id}`,
+      {
+        status: row.status as 'sent' | 'failed',
+        attemptCount: Number(row.attempt_count ?? 0),
+        nextRetryAt: (row.next_retry_at as string | null | undefined) ?? null,
+      },
+    ]),
+  );
+
+  return (eventRows ?? []).flatMap((row: any) => {
+    const strategy = strategiesById.get(row.strategy_id);
+    if (!strategy?.alert.enabled || strategy.alert.mode === 'disabled' || !strategy.alert.email) {
+      return [];
+    }
+    if (strategy.tier !== 'pro' && strategy.tier !== 'pro_plus' && strategy.tier !== 'lifetime') {
+      return [];
+    }
+
+    const delivery = deliveriesByKey.get(`${row.id}:${row.strategy_id}`);
+    if (delivery?.status === 'sent') {
+      return [];
+    }
+
+    return [{
+      kind: 'strategy' as const,
+      eventId: row.id as string,
+      strategyId: row.strategy_id as string,
+      strategyName: strategy.name,
+      signalDate: row.signal_date as string,
+      previousValue: Number(row.previous_value),
+      newValue: Number(row.new_value),
+      email: strategy.alert.email,
+      unsubscribeToken: strategy.alert.unsubscribeToken,
+      attemptCount: delivery?.attemptCount ?? 0,
+      nextRetryAt: delivery?.nextRetryAt ?? null,
+      sortAt: (row.created_at as string | undefined) ?? (row.signal_date as string),
+      isReady: isAlertRetryReady(delivery?.nextRetryAt ?? null),
+    }];
+  });
 }
 
 export async function unsubscribeStrategyAlert(token: string): Promise<string> {

@@ -1,18 +1,21 @@
-import { Resend } from 'resend';
 import type { SignalRow } from './compute';
+import { buildNextAlertRetryAt } from './alertDeliveryRetry';
+import { getDefaultAlertFromEmail, sendTransactionalEmail } from './emailDelivery';
 import { evaluateStrategy } from './strategyEngine';
 import {
   createStrategyAlertDelivery,
   createStrategyAlertEvent,
+  listPendingStrategyAlertDeliveries as listPendingStrategyAlertDeliveryRows,
   listActiveStrategiesForEvaluation,
   saveStrategyEvaluation,
 } from './strategyStore';
+import type { PendingStrategyAlertDelivery } from './strategyStore';
+import { assertNever, type StrategyAlertMode } from '../../../src/lib/strategyBuilder';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-const fromEmail = process.env.RESEND_FROM_EMAIL || 'alerts@coinstrat.xyz';
+const fromEmail = getDefaultAlertFromEmail();
 const appUrl = process.env.VITE_APP_URL || 'https://coinstrat.xyz';
 
-function shouldSendAlert(mode: string, previousValue: number, newValue: number): boolean {
+function shouldSendAlert(mode: StrategyAlertMode, previousValue: number, newValue: number): boolean {
   switch (mode) {
     case 'disabled':
       return false;
@@ -23,7 +26,7 @@ function shouldSendAlert(mode: string, previousValue: number, newValue: number):
     case 'turns_off':
       return previousValue === 1 && newValue === 0;
     default:
-      return false;
+      return assertNever(mode);
   }
 }
 
@@ -135,40 +138,7 @@ export async function evaluateActiveStrategies(rows: SignalRow[], recentDates: s
         newValue: transition.next,
       });
       if (!eventRecord) continue;
-
-      const emailContent = renderStrategyAlertEmail({
-        strategyName: strategy.name,
-        signalDate: transition.Date,
-        previousValue: transition.previous,
-        newValue: transition.next,
-        unsubscribeToken: strategy.alert.unsubscribe_token,
-      });
-
-      try {
-        await resend.emails.send({
-          from: fromEmail,
-          to: strategy.email,
-          subject: emailContent.subject,
-          text: emailContent.text,
-          html: emailContent.html,
-        });
-        await createStrategyAlertDelivery({
-          eventId: eventRecord.id,
-          strategyId: strategy.id,
-          email: strategy.email,
-          status: 'sent',
-        });
-        events += 1;
-        deliveries += 1;
-      } catch (error) {
-        await createStrategyAlertDelivery({
-          eventId: eventRecord.id,
-          strategyId: strategy.id,
-          email: strategy.email,
-          status: 'failed',
-          errorSummary: error instanceof Error ? error.message : 'Unknown email delivery error.',
-        });
-      }
+      events += 1;
     }
   }
 
@@ -178,3 +148,48 @@ export async function evaluateActiveStrategies(rows: SignalRow[], recentDates: s
     deliveries,
   };
 }
+
+export async function listPendingStrategyAlertDeliveries(): Promise<PendingStrategyAlertDelivery[]> {
+  return listPendingStrategyAlertDeliveryRows();
+}
+
+export async function sendPendingStrategyAlertDelivery(delivery: PendingStrategyAlertDelivery): Promise<{
+  status: 'sent' | 'failed';
+  errorSummary: string | null;
+}> {
+  const attemptedAt = new Date().toISOString();
+  const attemptCount = delivery.attemptCount + 1;
+  const emailContent = renderStrategyAlertEmail({
+    strategyName: delivery.strategyName,
+    signalDate: delivery.signalDate,
+    previousValue: delivery.previousValue,
+    newValue: delivery.newValue,
+    unsubscribeToken: delivery.unsubscribeToken,
+  });
+
+  const result = await sendTransactionalEmail({
+    from: fromEmail,
+    to: delivery.email,
+    subject: emailContent.subject,
+    text: emailContent.text,
+    html: emailContent.html,
+  });
+
+  await createStrategyAlertDelivery({
+    eventId: delivery.eventId,
+    strategyId: delivery.strategyId,
+    email: delivery.email,
+    status: result.ok ? 'sent' : 'failed',
+    attemptCount,
+    lastAttemptAt: attemptedAt,
+    nextRetryAt: result.ok ? null : buildNextAlertRetryAt(new Date(attemptedAt)),
+    errorSummary: result.errorSummary,
+  });
+
+  return {
+    status: result.ok ? 'sent' : 'failed',
+    errorSummary: result.errorSummary,
+  };
+}
+
+export type { PendingStrategyAlertDelivery } from './strategyStore';

@@ -14,7 +14,7 @@ import {
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import useMediaQuery from '@mui/material/useMediaQuery';
-import { Bell, Copy, Crown, ExternalLink, LogOut, Sparkles, User, Workflow, Zap } from 'lucide-react';
+import { Bell, Copy, Crown, ExternalLink, LogOut, Mail, Sparkles, User, Workflow, Zap } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import ProfileSectionNav from '../components/ProfileSectionNav';
 import { useAuth } from '../contexts/AuthContext';
@@ -30,6 +30,11 @@ const TIER_LABELS: Record<string, { label: string; color: string; icon: React.Re
 type AlertPreferences = {
   enabled: boolean;
   alertKeys: ProAlertKey[];
+};
+
+type NewsletterPreference = {
+  enabled: boolean;
+  subscribedAt: string | null;
 };
 
 type ProfileSectionId = 'account' | 'signals' | 'openclaw';
@@ -53,6 +58,14 @@ const Profile: React.FC = () => {
   const [alertsSaving, setAlertsSaving] = useState(false);
   const [alertsError, setAlertsError] = useState<string | null>(null);
   const [alertsMessage, setAlertsMessage] = useState<string | null>(null);
+  const [newsletterLoading, setNewsletterLoading] = useState(false);
+  const [newsletterSaving, setNewsletterSaving] = useState(false);
+  const [newsletterError, setNewsletterError] = useState<string | null>(null);
+  const [newsletterMessage, setNewsletterMessage] = useState<string | null>(null);
+  const [newsletterPreference, setNewsletterPreference] = useState<NewsletterPreference>({
+    enabled: false,
+    subscribedAt: null,
+  });
   const [alertPreferences, setAlertPreferences] = useState<AlertPreferences>({
     enabled: false,
     alertKeys: [],
@@ -166,6 +179,43 @@ const Profile: React.FC = () => {
     };
   }, [hasPaidAccess, session?.access_token]);
 
+  useEffect(() => {
+    if (!session?.access_token) return;
+
+    let cancelled = false;
+    setNewsletterLoading(true);
+    setNewsletterError(null);
+
+    fetch('/api/profile/newsletter', {
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
+    })
+      .then(async (response) => {
+        const data = await response.json();
+        if (cancelled) return;
+        if (!response.ok) {
+          setNewsletterError(data.error ?? 'Unable to load newsletter preference.');
+          return;
+        }
+        setNewsletterPreference({
+          enabled: Boolean(data.preference?.subscribed),
+          subscribedAt: data.preference?.subscribedAt ?? null,
+        });
+      })
+      .catch((error: Error) => {
+        if (cancelled) return;
+        setNewsletterError(error.message || 'Unable to load newsletter preference.');
+      })
+      .finally(() => {
+        if (!cancelled) setNewsletterLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.access_token]);
+
   const toggleAlert = (alertKey: ProAlertKey) => {
     setAlertsMessage(null);
     setAlertsError(null);
@@ -222,6 +272,42 @@ const Profile: React.FC = () => {
       setAlertsError(error instanceof Error ? error.message : 'Unable to save alert preferences.');
     } finally {
       setAlertsSaving(false);
+    }
+  };
+
+  const updateNewsletterPreference = async (enabled: boolean) => {
+    if (!session?.access_token) return;
+
+    setNewsletterSaving(true);
+    setNewsletterError(null);
+    setNewsletterMessage(null);
+
+    try {
+      const response = await fetch('/api/profile/newsletter', {
+        method: 'PUT',
+        headers: authHeaders,
+        body: JSON.stringify({ enabled }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        setNewsletterError(data.error ?? 'Unable to update newsletter preference.');
+        return;
+      }
+
+      setNewsletterPreference({
+        enabled: Boolean(data.preference?.subscribed),
+        subscribedAt: data.preference?.subscribedAt ?? null,
+      });
+      setNewsletterMessage(
+        enabled
+          ? 'Weekly newsletter enabled.'
+          : 'Weekly newsletter turned off.',
+      );
+    } catch (error) {
+      setNewsletterError(error instanceof Error ? error.message : 'Unable to update newsletter preference.');
+    } finally {
+      setNewsletterSaving(false);
     }
   };
 
@@ -366,7 +452,7 @@ const Profile: React.FC = () => {
                     {tier === 'free' && (
                       <>
                         <Alert severity="info" sx={{ mb: 2 }}>
-                          Upgrade to Pro to access the Signal API, real-time alerts, and the OpenClaw skill.
+                          Upgrade to Pro to access custom signals, real-time alerts, the Signal API, and the OpenClaw skill.
                         </Alert>
                         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                           <Button
@@ -444,6 +530,52 @@ const Profile: React.FC = () => {
                   </Paper>
 
                   <Paper sx={{ p: 3 }}>
+                    <Stack direction="row" spacing={1.25} alignItems="center" sx={{ mb: 1.5 }}>
+                      <Mail size={18} />
+                      <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                        Weekly Newsletter
+                      </Typography>
+                    </Stack>
+
+                    <Stack spacing={2}>
+                      <Typography color="text.secondary">
+                        Receive the free weekly CoinStrat newsletter at <strong>{profile.email}</strong>.
+                      </Typography>
+
+                      {newsletterLoading ? (
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
+                          <CircularProgress size={18} />
+                          <Typography variant="body2" color="text.secondary">
+                            Loading your newsletter preference…
+                          </Typography>
+                        </Box>
+                      ) : (
+                        <>
+                          {newsletterError && <Alert severity="error">{newsletterError}</Alert>}
+                          {newsletterMessage && <Alert severity="success">{newsletterMessage}</Alert>}
+
+                          <FormControlLabel
+                            control={(
+                              <Switch
+                                checked={newsletterPreference.enabled}
+                                onChange={(_, checked) => void updateNewsletterPreference(checked)}
+                                disabled={newsletterSaving}
+                              />
+                            )}
+                            label={newsletterPreference.enabled ? 'Weekly newsletter enabled' : 'Weekly newsletter disabled'}
+                          />
+
+                          <Typography variant="body2" color="text.secondary">
+                            {newsletterPreference.enabled
+                              ? `You are subscribed${newsletterPreference.subscribedAt ? ` since ${new Date(newsletterPreference.subscribedAt).toLocaleDateString()}` : ''}.`
+                              : 'Turn this on to receive the free weekly market roundup by email.'}
+                          </Typography>
+                        </>
+                      )}
+                    </Stack>
+                  </Paper>
+
+                  <Paper sx={{ p: 3 }}>
                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} alignItems={{ xs: 'stretch', sm: 'center' }}>
                       <Button
                         variant="outlined"
@@ -481,18 +613,18 @@ const Profile: React.FC = () => {
                     <Stack direction="row" spacing={1.25} alignItems="center" sx={{ mb: 1.5 }}>
                       <Bell size={18} />
                       <Typography variant="h6" sx={{ fontWeight: 800 }}>
-                        Signal Alerts
+                        CoinStrat Alerts
                       </Typography>
                     </Stack>
 
                     {!hasPaidAccess ? (
                       <Alert severity="info">
-                        Signal alerts are a Pro feature. Upgrade to receive near real-time emails after the refresh pipeline detects a signal or score change.
+                        Signal alerts are a Pro feature. Upgrade to build custom signals and receive near real-time emails when the model detects a signal or score change.
                       </Alert>
                     ) : (
                       <Stack spacing={2}>
                         <Typography color="text.secondary">
-                          These alerts are separate from the weekly newsletter. They fire after the signal refresh pipeline detects a state change, so repeated refreshes do not resend the same alert.
+                          Get notified when the CoinStrat model detects a signal or score change.
                         </Typography>
 
                         <Button

@@ -129,7 +129,16 @@ export const endpointGroups: EndpointGroup[] = [
         path: '/api/email/digest',
         summary: 'Send weekly digest email',
         description:
-          'Runs the weekly newsletter workflow. The daily cron checks newsletter settings, composes the issue for the current week, and broadcasts it on the configured weekday and UTC hour.',
+          'Runs the weekly newsletter workflow manually or via admin/cron auth. Netlify also runs a separate daily scheduled function at 00:30 UTC that checks the saved newsletter settings and broadcasts automatically once the configured weekday and UTC hour have been reached.',
+        auth: 'admin_jwt',
+      },
+      {
+        id: 'admin-alerts',
+        method: 'POST',
+        path: '/api/admin/alerts',
+        summary: 'Run scheduled alert workflow',
+        description:
+          'Admin-only manual trigger for the same workflow used by the 4-hour scheduled alert job: refresh the signal cache, create any new fixed/strategy alert events, and deliver up to 50 pending alert emails.',
         auth: 'admin_jwt',
       },
     ],

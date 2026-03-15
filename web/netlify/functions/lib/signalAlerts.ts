@@ -1,5 +1,6 @@
-import { Resend } from 'resend';
+import { buildNextAlertRetryAt, isAlertRetryReady } from './alertDeliveryRetry';
 import { isPaidTier, serviceSupabase, type AppTier } from './auth';
+import { getDefaultAlertFromEmail, sendTransactionalEmail } from './emailDelivery';
 
 export const ALERT_KEYS = [
   'CORE_ON',
@@ -29,6 +30,19 @@ export interface AlertChange {
   row: Record<string, unknown>;
 }
 
+export interface PendingSignalAlertDelivery {
+  kind: 'signal';
+  eventId: string;
+  userId: string;
+  email: string;
+  unsubscribeToken: string;
+  change: AlertChange;
+  attemptCount: number;
+  nextRetryAt: string | null;
+  sortAt: string;
+  isReady: boolean;
+}
+
 interface AlertKeyConfig {
   label: string;
   shortLabel: string;
@@ -36,8 +50,7 @@ interface AlertKeyConfig {
   kind: 'binary' | 'score';
 }
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-const fromEmail = process.env.RESEND_FROM_EMAIL || 'alerts@coinstrat.xyz';
+const fromEmail = getDefaultAlertFromEmail();
 const appUrl = process.env.VITE_APP_URL || 'https://coinstrat.xyz';
 
 const ALERT_CONFIG: Record<AlertKey, AlertKeyConfig> = {
@@ -395,9 +408,48 @@ export async function unsubscribeSignalAlerts(token: string): Promise<string> {
   return normalizeEmail(data.email);
 }
 
-export async function deliverSignalAlertChanges(changes: AlertChange[]): Promise<{ events: number; deliveries: number }> {
+function mapEventRowToChange(row: any): AlertChange {
+  return {
+    alertKey: row.alert_key as AlertKey,
+    signalDate: row.signal_date as string,
+    previousValue: row.previous_value ?? '',
+    newValue: row.new_value ?? '',
+    row: row.row_json ?? {},
+  };
+}
+
+async function upsertSignalAlertDelivery(params: {
+  eventId: string;
+  userId: string;
+  email: string;
+  status: 'sent' | 'failed';
+  attemptCount: number;
+  lastAttemptAt: string;
+  nextRetryAt: string | null;
+  errorSummary: string | null;
+}): Promise<void> {
+  const { error } = await serviceSupabase
+    .from('signal_alert_deliveries')
+    .upsert({
+      event_id: params.eventId,
+      user_id: params.userId,
+      email: params.email,
+      provider: 'resend',
+      status: params.status,
+      sent_at: params.status === 'sent' ? params.lastAttemptAt : null,
+      attempt_count: params.attemptCount,
+      last_attempt_at: params.lastAttemptAt,
+      next_retry_at: params.nextRetryAt,
+      error_summary: params.errorSummary,
+    }, { onConflict: 'event_id,user_id' });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export async function persistSignalAlertChanges(changes: AlertChange[]): Promise<{ events: number; deliveries: number }> {
   let eventsCreated = 0;
-  let deliveriesSent = 0;
 
   for (const change of changes) {
     const eventPayload = {
@@ -420,90 +472,129 @@ export async function deliverSignalAlertChanges(changes: AlertChange[]): Promise
     }
 
     eventsCreated += 1;
-
-    const { data: subscriptions, error: subscriptionError } = await serviceSupabase
-      .from('signal_alert_subscriptions')
-      .select('user_id, email, enabled, alert_keys, unsubscribe_token')
-      .eq('enabled', true)
-      .contains('alert_keys', [change.alertKey]);
-
-    if (subscriptionError) {
-      throw new Error(subscriptionError.message);
-    }
-
-    if (!subscriptions?.length) {
-      continue;
-    }
-
-    const userIds = subscriptions.map((subscription) => subscription.user_id);
-    const { data: profiles, error: profilesError } = await serviceSupabase
-      .from('profiles')
-      .select('id, tier')
-      .in('id', userIds);
-
-    if (profilesError) {
-      throw new Error(profilesError.message);
-    }
-
-    const eligibleUsers = new Set(
-      (profiles ?? [])
-        .filter((profile) => isPaidTier(profile.tier))
-        .map((profile) => profile.id),
-    );
-
-    for (const subscription of subscriptions) {
-      if (!eligibleUsers.has(subscription.user_id)) continue;
-
-      const { data: existingDelivery, error: deliveryLookupError } = await serviceSupabase
-        .from('signal_alert_deliveries')
-        .select('id')
-        .eq('event_id', eventRow.id)
-        .eq('user_id', subscription.user_id)
-        .maybeSingle();
-
-      if (deliveryLookupError) {
-        throw new Error(deliveryLookupError.message);
-      }
-
-      if (existingDelivery) {
-        continue;
-      }
-
-      const toEmail = normalizeEmail(subscription.email);
-      let status: 'sent' | 'failed' = 'sent';
-      let errorSummary: string | null = null;
-
-      try {
-        await resend.emails.send({
-          from: fromEmail,
-          to: toEmail,
-          subject: buildAlertSubject(change),
-          html: renderAlertEmailHtml(change, subscription.unsubscribe_token),
-          text: renderAlertEmailText(change, subscription.unsubscribe_token),
-        });
-        deliveriesSent += 1;
-      } catch (error) {
-        status = 'failed';
-        errorSummary = error instanceof Error ? error.message : String(error);
-      }
-
-      const { error: insertDeliveryError } = await serviceSupabase
-        .from('signal_alert_deliveries')
-        .insert({
-          event_id: eventRow.id,
-          user_id: subscription.user_id,
-          email: toEmail,
-          provider: 'resend',
-          status,
-          sent_at: status === 'sent' ? new Date().toISOString() : null,
-          error_summary: errorSummary,
-        });
-
-      if (insertDeliveryError) {
-        throw new Error(insertDeliveryError.message);
-      }
-    }
   }
 
-  return { events: eventsCreated, deliveries: deliveriesSent };
+  return { events: eventsCreated, deliveries: 0 };
+}
+
+export async function listPendingSignalAlertDeliveries(): Promise<PendingSignalAlertDelivery[]> {
+  const { data: eventRows, error: eventsError } = await serviceSupabase
+    .from('signal_alert_events')
+    .select('id, alert_key, signal_date, previous_value, new_value, row_json, detected_at')
+    .order('signal_date', { ascending: true })
+    .order('detected_at', { ascending: true });
+
+  if (eventsError) {
+    throw new Error(eventsError.message);
+  }
+  if (!eventRows?.length) {
+    return [];
+  }
+
+  const { data: subscriptions, error: subscriptionError } = await serviceSupabase
+    .from('signal_alert_subscriptions')
+    .select('user_id, email, enabled, alert_keys, unsubscribe_token')
+    .eq('enabled', true);
+
+  if (subscriptionError) {
+    throw new Error(subscriptionError.message);
+  }
+  if (!subscriptions?.length) {
+    return [];
+  }
+
+  const userIds = subscriptions.map((subscription) => subscription.user_id);
+  const eventIds = eventRows.map((row) => row.id);
+
+  const { data: profiles, error: profilesError } = await serviceSupabase
+    .from('profiles')
+    .select('id, tier')
+    .in('id', userIds);
+
+  if (profilesError) {
+    throw new Error(profilesError.message);
+  }
+
+  const { data: deliveryRows, error: deliveriesError } = await serviceSupabase
+    .from('signal_alert_deliveries')
+    .select('event_id, user_id, status, attempt_count, next_retry_at')
+    .in('event_id', eventIds);
+
+  if (deliveriesError) {
+    throw new Error(deliveriesError.message);
+  }
+
+  const eligibleUsers = new Set(
+    (profiles ?? [])
+      .filter((profile) => isPaidTier(profile.tier as AppTier))
+      .map((profile) => profile.id),
+  );
+
+  const deliveriesByKey = new Map(
+    (deliveryRows ?? []).map((row: any) => [
+      `${row.event_id}:${row.user_id}`,
+      {
+        status: row.status as 'sent' | 'failed',
+        attemptCount: Number(row.attempt_count ?? 0),
+        nextRetryAt: (row.next_retry_at as string | null | undefined) ?? null,
+      },
+    ]),
+  );
+
+  return eventRows.flatMap((row: any) => {
+    const alertKey = row.alert_key as AlertKey;
+    const change = mapEventRowToChange(row);
+
+    return subscriptions.flatMap((subscription) => {
+      if (!eligibleUsers.has(subscription.user_id)) return [];
+      if (!normalizeAlertKeys(subscription.alert_keys).includes(alertKey)) return [];
+
+      const delivery = deliveriesByKey.get(`${row.id}:${subscription.user_id}`);
+      if (delivery?.status === 'sent') return [];
+
+      return [{
+        kind: 'signal' as const,
+        eventId: row.id as string,
+        userId: subscription.user_id as string,
+        email: normalizeEmail(subscription.email as string),
+        unsubscribeToken: subscription.unsubscribe_token as string,
+        change,
+        attemptCount: delivery?.attemptCount ?? 0,
+        nextRetryAt: delivery?.nextRetryAt ?? null,
+        sortAt: (row.detected_at as string | undefined) ?? (row.signal_date as string),
+        isReady: isAlertRetryReady(delivery?.nextRetryAt ?? null),
+      }];
+    });
+  });
+}
+
+export async function sendPendingSignalAlertDelivery(delivery: PendingSignalAlertDelivery): Promise<{
+  status: 'sent' | 'failed';
+  errorSummary: string | null;
+}> {
+  const attemptedAt = new Date().toISOString();
+  const attemptCount = delivery.attemptCount + 1;
+  const result = await sendTransactionalEmail({
+    from: fromEmail,
+    to: delivery.email,
+    subject: buildAlertSubject(delivery.change),
+    html: renderAlertEmailHtml(delivery.change, delivery.unsubscribeToken),
+    text: renderAlertEmailText(delivery.change, delivery.unsubscribeToken),
+  });
+
+  await upsertSignalAlertDelivery({
+    eventId: delivery.eventId,
+    userId: delivery.userId,
+    email: delivery.email,
+    status: result.ok ? 'sent' : 'failed',
+    attemptCount,
+    lastAttemptAt: attemptedAt,
+    nextRetryAt: result.ok ? null : buildNextAlertRetryAt(new Date(attemptedAt)),
+    errorSummary: result.errorSummary,
+  });
+
+  return {
+    status: result.ok ? 'sent' : 'failed',
+    errorSummary: result.errorSummary,
+  };
 }

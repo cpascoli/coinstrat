@@ -96,6 +96,12 @@ export interface AutomaticNewsletterStatus {
   alreadySent: boolean;
 }
 
+export interface NewsletterSubscriptionPreference {
+  email: string;
+  subscribed: boolean;
+  subscribedAt: string | null;
+}
+
 export interface WeeklyContext {
   weekOf: string;
   referenceDate: string;
@@ -1783,6 +1789,67 @@ export async function requestNewsletterSubscription(email: string, source?: stri
   }
 
   return 'pending_confirmation';
+}
+
+export async function getNewsletterSubscriptionPreference(email: string): Promise<NewsletterSubscriptionPreference> {
+  const normalized = normalizeEmail(email);
+  const { data, error } = await serviceSupabase
+    .from('email_subscribers')
+    .select('email, subscribed_at, unsubscribed_at, confirmed_at')
+    .eq('email', normalized)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+
+  return {
+    email: normalized,
+    subscribed: Boolean(data && data.confirmed_at && !data.unsubscribed_at),
+    subscribedAt: data?.subscribed_at ?? null,
+  };
+}
+
+export async function setRegisteredUserNewsletterPreference(
+  email: string,
+  enabled: boolean,
+): Promise<NewsletterSubscriptionPreference> {
+  const normalized = normalizeEmail(email);
+
+  if (!enabled) {
+    await unsubscribeEmail(normalized);
+    return {
+      email: normalized,
+      subscribed: false,
+      subscribedAt: null,
+    };
+  }
+
+  const now = new Date().toISOString();
+  const [{ error: subscriberError }, { error: suppressionDeleteError }] = await Promise.all([
+    serviceSupabase
+      .from('email_subscribers')
+      .upsert({
+        email: normalized,
+        source: 'profile_toggle',
+        subscribed_at: now,
+        unsubscribed_at: null,
+        confirmed_at: now,
+        confirmation_token: null,
+        confirmation_sent_at: null,
+      }, { onConflict: 'email' }),
+    serviceSupabase
+      .from('newsletter_suppressions')
+      .delete()
+      .eq('email', normalized),
+  ]);
+
+  if (subscriberError) throw new Error(subscriberError.message);
+  if (suppressionDeleteError) throw new Error(suppressionDeleteError.message);
+
+  return {
+    email: normalized,
+    subscribed: true,
+    subscribedAt: now,
+  };
 }
 
 export async function confirmNewsletterSubscription(token: string): Promise<string> {

@@ -35,7 +35,7 @@ const Home: React.FC<HomeProps> = ({ hasFreeAccess = false, isAuthenticated = fa
           color: 'transparent',
         }}
       >
-        Multi‑Factor Bitcoin Macro Engine
+        A Clearer Way to Accumulate Bitcoin
       </Box>
     </Typography>
 
@@ -53,14 +53,20 @@ const Home: React.FC<HomeProps> = ({ hasFreeAccess = false, isAuthenticated = fa
     
               <Box component="li" sx={{ mb: 1 }}>
                 <Typography color="text.secondary" sx={{ lineHeight: 1.75, fontSize: { xs: 14, sm: 16, md: 18 } }}>
-                  Coin Strat turns <strong>global liquidity</strong>, <strong>macro conditions</strong>, and <strong>BTC valuation</strong> into simple signals 
-                  that help you decide when to <strong>deploy</strong>, <strong>accelerate</strong>, and <strong>pause</strong> bitcoin accumulation.
+                  CoinStrat turns <strong>macro conditions</strong>, <strong>liquidity</strong>, and <strong>Bitcoin valuation</strong> into clear signals
+                  so you can decide when to <strong>buy steadily</strong>, <strong>press harder</strong>, or <strong>stay cautious</strong>.
                 </Typography>
               </Box>
 
               <Box component="li" sx={{ mb: 1}}>
                 <Typography color="text.secondary" sx={{ lineHeight: 1.75, fontSize: { xs: 14, sm: 16, md: 18 } }}>
-                  Use Coin Strat to optimize how you fund {' '}
+                  Designed for long-term Bitcoin accumulators who want a process, not just opinions, to guide position sizing and timing.
+                </Typography>
+              </Box>
+
+              <Box component="li" sx={{ mb: 1}}>
+                <Typography color="text.secondary" sx={{ lineHeight: 1.75, fontSize: { xs: 14, sm: 16, md: 18 } }}>
+                  Use CoinStrat to optimize how you fund {' '}
                   <Link
                     href="https://powerwallet.finance"
                     target="_blank"
@@ -70,7 +76,7 @@ const Home: React.FC<HomeProps> = ({ hasFreeAccess = false, isAuthenticated = fa
                   >
                     Power Wallet
                   </Link>
-                  ’s bitcoin accumulation strategies.
+                  ’s Bitcoin accumulation strategies.
                 </Typography>
               </Box>
             </Box>
@@ -92,10 +98,10 @@ const Home: React.FC<HomeProps> = ({ hasFreeAccess = false, isAuthenticated = fa
                 }}
                 sx={{ fontWeight: 900 }}
               >
-                {hasFreeAccess ? 'Open Dashboard' : isAuthenticated ? 'Open Profile' : 'Sign In'}
+                {hasFreeAccess ? 'Open Dashboard' : isAuthenticated ? 'Open Profile' : 'Unlock Free Access'}
               </Button>
               <Button variant="outlined" size="medium" onClick={() => navigate('/docs')} sx={{ fontWeight: 900 }}>
-                Learn More
+                See How It Works
               </Button>
             </Stack>
           </Box>
@@ -111,24 +117,47 @@ const Home: React.FC<HomeProps> = ({ hasFreeAccess = false, isAuthenticated = fa
 
       <section className="space-y-6">
         <div className="flex items-center gap-3 border-b pb-2">
-          <h2 className="text-2xl font-bold text-slate-100">System Architecture</h2>
+          <h2 className="text-2xl font-bold text-slate-100">Why CoinStrat</h2>
         </div>
-        <p className="text-slate-300 leading-relaxed">
-          The system is composed of three main components
-        </p>
+        <Typography color="text.secondary" sx={{ maxWidth: 760, lineHeight: 1.75 }}>
+          CoinStrat helps you accumulate Bitcoin with more conviction, less noise, and better timing. It gives you a disciplined read on when conditions are supportive, when risk is rising, and when it makes sense to stay patient.
+        </Typography>
+        <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' } }}>
+          <DocCard
+            title="Cut Through Noise"
+            text="Stop reacting to headlines, price swings, and social-media narratives. Focus on the macro and market signals that actually matter."
+          />
+          <DocCard
+            title="Accumulate With Confidence"
+            text="Know when the backdrop supports steady buying, when conviction is building, and when caution matters more than urgency."
+          />
+          <DocCard
+            title="Stay Consistent"
+            text="Use a repeatable process instead of gut feel, so your Bitcoin strategy stays grounded when the market gets emotional."
+          />
+        </Box>
+      </section>
+
+      <section className="space-y-6">
+        <div className="flex items-center gap-3 border-b pb-2">
+          <h2 className="text-2xl font-bold text-slate-100">How CoinStrat Works</h2>
+        </div>
+        <Typography color="text.secondary" sx={{ maxWidth: 760, lineHeight: 1.75 }}>
+          CoinStrat turns a complex market into a simple decision framework. It tracks the backdrop, scores the setup, and translates that into practical accumulation guidance.
+        </Typography>
         {/* Use MUI breakpoints for layout so cards reliably render in a row on desktop */}
         <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' } }}>
           <DocCard 
-            title="Data Ingestion" 
-            text="Real-time feeds from FRED (Federal Reserve), Stooq, and Blockchain.info provide the foundation."
+            title="Read the Backdrop" 
+            text="Track liquidity, macro stress, and Bitcoin market conditions in one place instead of piecing the puzzle together yourself."
           />
           <DocCard 
-            title="Scoring" 
-            text="Raw data is normalized into 0-2 scores to determine if a specific factor is a headwind or tailwind."
+            title="Score the Setup" 
+            text="Turn raw data into a simple read on whether conditions are supportive, neutral, or working against accumulation."
           />
           <DocCard 
-            title="Action Synthesis" 
-            text="Scores are aggregated into a permission-based hierarchy (PAUSE, BASE, ACCELERATED)."
+            title="Act With Discipline" 
+            text="Translate the signal stack into a practical accumulation stance so you know when to pause, buy, or accelerate."
           />
         </Box>
       </section>
@@ -136,8 +165,11 @@ const Home: React.FC<HomeProps> = ({ hasFreeAccess = false, isAuthenticated = fa
       <section className="space-y-6">
         <div className="flex items-center gap-3 border-b pb-2">
          
-          <h2 className="text-2xl font-bold text-slate-100">Key Signals</h2>
+          <h2 className="text-2xl font-bold text-slate-100">The Two Core Layers</h2>
         </div>
+        <Typography color="text.secondary" sx={{ maxWidth: 760, lineHeight: 1.75 }}>
+          CoinStrat is built around two decisions: when Bitcoin looks attractive enough to accumulate, and when the macro backdrop supports pressing harder.
+        </Typography>
         
         <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' } }}>
           <Card
@@ -163,8 +195,7 @@ const Home: React.FC<HomeProps> = ({ hasFreeAccess = false, isAuthenticated = fa
                 CORE Accumulation
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.65, fontStyle: 'regular' }}>
-                The Core "Engine" focuses on multi-month accumulation during deep-value phases. It uses MVRV to identify
-                capitulation bottoms and the 40-week Moving Average to confirm the trend.
+                This is the base layer. It focuses on building position when Bitcoin looks attractive and the trend is constructive enough to justify steady accumulation.
               </Typography>
             </CardContent>
           </Card>
@@ -192,8 +223,7 @@ const Home: React.FC<HomeProps> = ({ hasFreeAccess = false, isAuthenticated = fa
                  MACRO Acceleration
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.65, fontStyle: 'regular' }}>
-                The "Turbo" activates when the external environment is highly favorable. If US Net Liquidity is expanding
-                and the Business Cycle is out of the danger zone, the model permits triple-sizing the accumulation rate.
+                This is the conviction layer. When liquidity and macro conditions improve, CoinStrat signals when the environment may justify leaning in more aggressively.
               </Typography>
             </CardContent>
           </Card>
@@ -256,8 +286,8 @@ const PLANS = [
     features: [
       'Live dashboard & signals',
       'Score breakdown',
-      'Charts (full history)',
-      'Backtest (full history)',
+      'Charts',
+      'Backtest',
       'Weekly email digest (optional)',
     ],
     cta: 'Unlock Free Access',
@@ -274,9 +304,9 @@ const PLANS = [
     badge: null,
     features: [
       'Everything in Free',
-      'Signal API (1K calls/day)',
+      'Build custom strategies and signals',
+      'API and OpenClaw access',
       'Real-time signal alerts by email',
-      'OpenClaw skill access',
       'Priority feature access',
     ],
     cta: 'Upgrade to Pro',
@@ -317,6 +347,9 @@ const PricingSection: React.FC<{ hasFreeAccess?: boolean; isAuthenticated?: bool
       <div className="flex items-center gap-3 border-b pb-2">
         <h2 className="text-2xl font-bold text-slate-100">Pricing</h2>
       </div>
+      <Typography color="text.secondary" sx={{ maxWidth: 760, lineHeight: 1.75 }}>
+        Start free, follow the model, and upgrade when you want custom signals, real-time alerts, and more control.
+      </Typography>
       <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' } }}>
         {PLANS.map((plan) => (
           <Card
@@ -489,13 +522,13 @@ const EmailSignup: React.FC = () => {
               Free Weekly Signal Report
             </Typography>
             <Typography color="text.secondary" sx={{ mb: 2.25, maxWidth: 560, lineHeight: 1.75 }}>
-              Start every Monday with the latest CoinStrat signal, the macro and liquidity backdrop,
-              and a concise Bitcoin market brief built from the stories that actually moved the week.
+              Start Sunday morning with the latest CoinStrat signal, the macro and liquidity backdrop,
+              and a concise Bitcoin market brief built to help you frame the week ahead.
             </Typography>
 
             {/* <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} useFlexGap flexWrap="wrap">
               {[
-                'Monday morning delivery',
+                'Sunday morning delivery',
                 'Signal snapshot + score context',
                 'Concise Bitcoin market read',
               ].map((item) => (
