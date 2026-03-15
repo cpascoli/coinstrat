@@ -106,15 +106,23 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
                   <Grid item xs={4}>
                     <MetricChip title="Supply in Profit" label="SIP" value={typeof current.SIP === 'number' ? `${current.SIP.toFixed(1)}%` : '–'} />
                   </Grid>
-                  <Grid item xs={4}>
-                    <MetricChip title="Euphoria Flag" label="SIP_EUPHORIA" value={(current.SIP_EUPHORIA_FLAG ?? 0) === 1 ? 'ARMED' : 'OFF'} />
-                  </Grid>
+                  {
+                    current.SIP_EXHAUSTED === 0 && (
+                      <Grid item xs={4}>
+                        <MetricChip title="Euphoria Flag" label="SIP_EUPHORIA" value={(current.SIP_EUPHORIA_FLAG ?? 0) === 1 ? 'ARMED' : 'OFF'} />
+                      </Grid>
+                    )
+                  }
                   <Grid item xs={4}>
                     <MetricChip title="SIP Exhausted" label="SIP_EXHAUST" value={(current.SIP_EXHAUSTED ?? 0) === 1 ? 'YES' : 'NO'} />
                   </Grid>
-                  <Grid item xs={4}>
-                    <MetricChip title="Obs. Window" label="SIP_OBS_DAYS" value={`${current.SIP_OBS_DAYS ?? 0}d`} />
-                  </Grid>
+                  { // show observation window if SIP is not exhausted
+                    current.SIP_EXHAUSTED === 0 && (
+                      <Grid item xs={4}>
+                        <MetricChip title="Obs. Window" label="SIP_OBS_DAYS" value={`${current.SIP_OBS_DAYS ?? 0}d`} />
+                      </Grid>
+                    )
+                  }
                 </Grid>
               </Stack>
             </CardContent>
@@ -313,7 +321,7 @@ function MetricChip(props: { title: string; label: string; value: number | strin
         <Typography variant="h6" sx={{ fontWeight: 900 }}>
           {String(value)}
         </Typography>
-        <Chip size="small" label={label} color={color as any} variant="outlined" />
+        {/* <Chip size="small" label={label} color={color as any} variant="outlined" /> */}
       </Stack>
     </Box>
   );

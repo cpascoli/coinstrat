@@ -94,11 +94,6 @@ const DocsArchitecture: React.FC = () => {
           </Typography>
         </Box>
 
-        <Alert severity="info">
-          The shortest way to think about the model is:{' '}<br/>
-          <strong>raw series {'->'} engineered metrics {'->'} scores {'->'} signals {'->'} final accumulation permission</strong>.
-        </Alert>
-
         <Card
           sx={{
             borderColor: 'rgba(148,163,184,0.35)',
