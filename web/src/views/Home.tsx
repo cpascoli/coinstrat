@@ -17,7 +17,7 @@ const Home: React.FC<HomeProps> = ({ hasFreeAccess = false, isAuthenticated = fa
 
     <Typography
       sx={{
-        textAlign: 'center',
+        textAlign: 'left',
         fontWeight: 1000,
         letterSpacing: -1.2,
         lineHeight: 1.0,

@@ -85,9 +85,9 @@ const DATA_FEEDS: DataFeed[] = [
     ],
   },
   {
-    title: 'MVRV Ratio',
+    title: 'Market Value to Realized Value',
     id: 'MVRV',
-    href: 'https://charts.bitbo.io/mvrv-z-score/',
+    href: 'https://www.blockchain.com/explorer/charts/mvrv',
     meaning: 'Bitcoin market-value to realized-value ratio, used as a valuation anchor.',
     usage: [
       'Core valuation input for accumulation signals.',
@@ -97,8 +97,8 @@ const DATA_FEEDS: DataFeed[] = [
   {
     title: 'Supply in Profit',
     id: 'SIP',
-    href: 'https://charts.bitbo.io/supply-in-profit/',
-    meaning: 'Share of Bitcoin supply currently sitting in unrealized profit.',
+    href: 'https://charts.bgeometrics.com/supply_in_profit.html',
+    meaning: 'Measures the amount of BTC that is currently in profit or loss based on the price at which each bitcoin last moved.',
     usage: [
       'Tracks euphoric conditions during late-cycle moves.',
       'Used with observation-window rules to detect exhaustion after overheated conditions.',
@@ -107,7 +107,7 @@ const DATA_FEEDS: DataFeed[] = [
   {
     title: 'LTH SOPR',
     id: 'LTH_SOPR',
-    href: 'https://charts.bitbo.io/lth-sopr/',
+    href: 'https://charts.bgeometrics.com/lth_sopr.html',
     meaning: 'Spent Output Profit Ratio for long-term holders.',
     usage: [
       'Provides context on whether long-term holders are realizing profits or selling under stress.',
