@@ -82,7 +82,7 @@ function heuristicComparator(prompt: string): StrategyComparator {
   return 'gt';
 }
 
-function buildHeuristicSpec(prompt: string): StrategyInterpretationResult {
+export function buildHeuristicSpec(prompt: string): StrategyInterpretationResult {
   const spec = createEmptyStrategySpec(prompt);
   const sources = heuristicSeries(prompt);
   spec.name = 'Prompt strategy';
@@ -152,7 +152,38 @@ function buildHeuristicSpec(prompt: string): StrategyInterpretationResult {
   };
 }
 
-function buildValidatedDraftFromCandidate(
+/**
+ * Auto-fix common LLM omissions on metric definitions so trivially
+ * recoverable mistakes don't cause a full heuristic fallback.
+ */
+export function autoFixMetrics(
+  metrics: StrategySpec['metrics'],
+  autoFixWarnings: string[],
+): StrategySpec['metrics'] {
+  return metrics.map((m) => {
+    const patched = { ...m };
+    const op = patched.operator;
+
+    if ((op === 'diff' || op === 'pct_change') && (patched.periods == null || !Number.isFinite(patched.periods))) {
+      patched.periods = 1;
+      autoFixWarnings.push(`Auto-fixed metric "${patched.id}": added default periods=1 for ${op}.`);
+    }
+
+    if (op === 'pct_change' && patched.scale !== 'ratio' && patched.scale !== 'percent') {
+      patched.scale = 'ratio';
+      autoFixWarnings.push(`Auto-fixed metric "${patched.id}": added default scale="ratio" for pct_change.`);
+    }
+
+    if ((op === 'rolling_mean' || op === 'rolling_min' || op === 'rolling_max') && (patched.window == null || !Number.isFinite(patched.window))) {
+      patched.window = 200;
+      autoFixWarnings.push(`Auto-fixed metric "${patched.id}": added default window=200 for ${op}.`);
+    }
+
+    return patched;
+  });
+}
+
+export function buildValidatedDraftFromCandidate(
   prompt: string,
   candidate: unknown,
   warnings: string[],
@@ -174,6 +205,12 @@ function buildValidatedDraftFromCandidate(
     };
   }
 
+  const autoFixWarnings: string[] = [];
+  const rawMetrics = Array.isArray(candidateSpec.metrics)
+    ? candidateSpec.metrics as StrategySpec['metrics']
+    : baseSpec.metrics;
+  const fixedMetrics = autoFixMetrics(rawMetrics, autoFixWarnings);
+
   const mergedSpec: StrategySpec = {
     version: 1,
     name: typeof candidateSpec.name === 'string' && candidateSpec.name.trim()
@@ -186,9 +223,7 @@ function buildValidatedDraftFromCandidate(
     sources: Array.isArray(candidateSpec.sources) && candidateSpec.sources.length > 0
       ? candidateSpec.sources as StrategySpec['sources']
       : baseSpec.sources,
-    metrics: Array.isArray(candidateSpec.metrics)
-      ? candidateSpec.metrics as StrategySpec['metrics']
-      : baseSpec.metrics,
+    metrics: fixedMetrics,
     conditions: Array.isArray(candidateSpec.conditions) && candidateSpec.conditions.length > 0
       ? candidateSpec.conditions as StrategySpec['conditions']
       : baseSpec.conditions,
@@ -218,12 +253,14 @@ function buildValidatedDraftFromCandidate(
       : baseSpec.alerts,
   };
 
+  const allWarnings = [...warnings, ...autoFixWarnings];
+
   const validation = validateStrategySpec(mergedSpec);
   if (!validation.ok) {
     return {
       ...heuristic,
       warnings: [
-        ...warnings,
+        ...allWarnings,
         'The model returned an incomplete draft, so CoinStrat fell back to a safe heuristic strategy.',
         `Validation details: ${validation.errors.join(' ')}`,
       ],
@@ -233,7 +270,7 @@ function buildValidatedDraftFromCandidate(
 
   return {
     spec: mergedSpec,
-    warnings,
+    warnings: allWarnings,
     provider: 'openai',
   };
 }
@@ -278,6 +315,36 @@ function buildOpenAiMessages(prompt: string, registry: ReturnType<typeof buildSt
     warnings: [],
   };
 
+  const examplePrompt2 = 'Alert me when bitcoin is above the 200 day moving average, and the 200 day moving average is going up (uptrend) and the dollar is weak.';
+  const exampleResponse2 = {
+    spec: {
+      version: 1,
+      name: 'BTC uptrend with weak dollar',
+      description: 'Signal on when BTC is above a rising 200d MA and the dollar is weak.',
+      prompt: examplePrompt2,
+      sources: [
+        { id: 'btcusd', seriesKey: 'BTCUSD', label: 'BTC Price (USD)' },
+        { id: 'dxy_score', seriesKey: 'DXY_SCORE', label: 'Dollar Score' },
+      ],
+      metrics: [
+        { id: 'btc_ma_200', label: 'BTC 200d MA', operator: 'rolling_mean', input: 'btcusd', window: 200 },
+        { id: 'btc_ma_200_slope', label: '200d MA daily change', operator: 'diff', input: 'btc_ma_200', periods: 1 },
+      ],
+      conditions: [
+        { id: 'btc_above_ma', label: 'BTC above 200d MA', left: 'btcusd', comparator: 'gt', rightType: 'reference', rightRef: 'btc_ma_200' },
+        { id: 'ma_rising', label: '200d MA rising', left: 'btc_ma_200_slope', comparator: 'gt', rightType: 'constant', rightConstant: 0 },
+        { id: 'dollar_weak', label: 'Dollar is weak', left: 'dxy_score', comparator: 'gte', rightType: 'constant', rightConstant: 1 },
+      ],
+      output: {
+        label: 'BTC Uptrend + Weak Dollar',
+        mode: 'all',
+        conditionIds: ['btc_above_ma', 'ma_rising', 'dollar_weak'],
+      },
+      alerts: { mode: 'state_change' },
+    },
+    warnings: [],
+  };
+
   return [
     {
       role: 'system' as const,
@@ -288,10 +355,21 @@ function buildOpenAiMessages(prompt: string, registry: ReturnType<typeof buildSt
         'Use only series keys that exist in the provided registry.',
         'Use only these metric operators: identity, rolling_mean, pct_change, diff, rolling_min, rolling_max.',
         'Use only these comparators: gt, gte, lt, lte, eq, crosses_above, crosses_below.',
+        '',
+        'METRIC OPERATOR FIELD REQUIREMENTS (you MUST include the correct fields):',
+        '- rolling_mean, rolling_min, rolling_max: REQUIRE "window" (integer >= 2).',
+        '- diff: REQUIRES "periods" (integer >= 1). Computes value[i] - value[i - periods].',
+        '- pct_change: REQUIRES "periods" (integer >= 1) AND "scale" ("ratio" or "percent").',
+        '- identity: no extra fields needed.',
+        '',
+        'Metrics can chain: a metric\'s "input" can reference another metric\'s id, not just a source id.',
+        'To detect whether a moving average is rising, use diff on the moving average metric with periods: 1.',
+        '',
         'The spec MUST include every required field: version, name, description, prompt, sources, metrics, conditions, output, alerts.',
         'Do not invent a different AST shape such as strategy/operator/operands.',
         'Do not use operators like sma. Use rolling_mean instead.',
         'Do not omit alerts. Use alerts.mode = state_change unless the prompt clearly implies otherwise.',
+        'For ambiguous concepts like "dollar is weak", prefer using DXY_SCORE (CoinStrat\'s pre-computed dollar regime score where >= 1 means favorable/weak dollar).',
         'Keep strategies simple enough for retail users to understand.',
       ].join(' '),
     },
@@ -316,13 +394,23 @@ function buildOpenAiMessages(prompt: string, registry: ReturnType<typeof buildSt
           description: 'string',
           prompt: 'string',
           sources: [{ id: 'string', seriesKey: 'one of registry.series[].key', label: 'string' }],
-          metrics: [{ id: 'string', label: 'string', operator: 'rolling_mean|pct_change|diff|identity|rolling_min|rolling_max', input: 'source-or-metric-id' }],
+          metrics: [{
+            id: 'string',
+            label: 'string',
+            operator: 'rolling_mean|pct_change|diff|identity|rolling_min|rolling_max',
+            input: 'source-or-metric-id (can reference another metric)',
+            window: 'integer >= 2 (REQUIRED for rolling_mean, rolling_min, rolling_max)',
+            periods: 'integer >= 1 (REQUIRED for diff, pct_change)',
+            scale: '"ratio" or "percent" (REQUIRED for pct_change)',
+          }],
           conditions: [{ id: 'string', label: 'string', left: 'source-or-metric-id', comparator: 'gt|gte|lt|lte|eq|crosses_above|crosses_below', rightType: 'constant|reference' }],
           output: { label: 'string', mode: 'all|any', conditionIds: ['condition-id'] },
           alerts: { mode: 'disabled|state_change|turns_on|turns_off' },
         },
-        examplePrompt,
-        exampleResponse,
+        examples: [
+          { prompt: examplePrompt, response: exampleResponse },
+          { prompt: examplePrompt2, response: exampleResponse2 },
+        ],
       }),
     },
   ];

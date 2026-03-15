@@ -14,6 +14,7 @@ import DocsHome from './views/DocsHome';
 import DocsData from './views/DocsData';
 import DocsSignals from './views/DocsSignals';
 import DocsScores from './views/DocsScores';
+import DocsSignalBuilder from './views/DocsSignalBuilder';
 import NewsletterConfirm from './views/NewsletterConfirm';
 import Terms from './views/Terms';
 import Privacy from './views/Privacy';
@@ -419,6 +420,10 @@ const App: React.FC = () => {
                   <ListItemIcon><Binary size={16} /></ListItemIcon>
                   <ListItemText>Signals</ListItemText>
                 </MenuItem>
+                <MenuItem onClick={() => { setDocsAnchorEl(null); navigate('/docs/signal-builder'); }}>
+                  <ListItemIcon><Workflow size={16} /></ListItemIcon>
+                  <ListItemText>Signal Builder</ListItemText>
+                </MenuItem>
               </Menu>
             </>
           )}
@@ -489,6 +494,7 @@ const App: React.FC = () => {
           <Route path="/docs/architecture" element={<DocsArchitecture />} />
           <Route path="/docs/scores" element={<DocsScores />} />
           <Route path="/docs/signals" element={<DocsSignals />} />
+          <Route path="/docs/signal-builder" element={<DocsSignalBuilder />} />
           <Route path="/dashboard" element={gate(<Dashboard current={lastData as SignalData} history={data} />)} />
           <Route path="/scores" element={gate(<ScoreBreakdown current={lastData as SignalData} />)} />
           <Route path="/signals" element={gate(<LogicFlow current={lastData as SignalData} />)} />

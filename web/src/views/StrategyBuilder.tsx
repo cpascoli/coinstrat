@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Box,
@@ -21,15 +21,38 @@ import {
   TableHead,
   TableRow,
   TextField,
+  Tooltip as MuiTooltip,
   Typography,
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import useMediaQuery from '@mui/material/useMediaQuery';
-import { Bot, ChevronDown, ChevronUp, Plus, Save, Sparkles, Trash2, Wand2, Workflow, X } from 'lucide-react';
 import {
+  BookOpen,
+  Bot,
+  ChevronDown,
+  ChevronUp,
+  DollarSign,
+  Link2,
+  Droplets,
+  TrendingUp,
+  ArrowLeftRight,
+  Gauge,
+  Radio,
+  Plus,
+  Save,
+  Sparkles,
+  Trash2,
+  Wand2,
+  Workflow,
+  X,
+} from 'lucide-react';
+import {
+  Area,
+  AreaChart,
   CartesianGrid,
   Line,
   LineChart,
+  ReferenceDot,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -39,6 +62,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import {
   STRATEGY_SERIES_CATALOG,
+  getGroupedSeries,
   describeComparator,
   summarizeStrategySpec,
   validateStrategySpec,
@@ -87,6 +111,15 @@ const StrategyBuilder: React.FC = () => {
   const [busyAction, setBusyAction] = useState<'interpret' | 'preview' | 'save' | 'delete' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [seriesModalOpen, setSeriesModalOpen] = useState(false);
+  const [seriesModalKey, setSeriesModalKey] = useState<string | null>(null);
+
+  const groupedSeries = useMemo(() => getGroupedSeries(), []);
+
+  const openSeriesDetail = useCallback((key: string) => {
+    setSeriesModalKey(key);
+    setSeriesModalOpen(true);
+  }, []);
 
   const authHeaders = useMemo(() => ({
     'Content-Type': 'application/json',
@@ -374,6 +407,20 @@ const StrategyBuilder: React.FC = () => {
             <Typography sx={{ color: 'text.secondary', maxWidth: 780 }}>
               Describe the strategy you want in plain English. CoinStrat turns that into a constrained,
               reviewable strategy spec that you can preview, save, and alert on without running custom code.
+              {' '}
+              <Typography
+                component="span"
+                sx={{
+                  color: 'primary.main',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  '&:hover': { textDecoration: 'underline' },
+                }}
+                onClick={() => navigate('/docs/signal-builder')}
+              >
+                <BookOpen size={13} style={{ verticalAlign: 'text-bottom', marginRight: 3 }} />
+                Learn more
+              </Typography>
             </Typography>
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               <Chip label="Pro feature" size="small" variant="outlined" />
@@ -650,18 +697,50 @@ const StrategyBuilder: React.FC = () => {
             </Paper>
 
             <Paper sx={{ p: 3 }}>
-              <Stack spacing={1.5}>
-                <Typography variant="h6" sx={{ fontWeight: 800 }}>Available series</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  The builder only uses approved series and derived CoinStrat fields from the cached dataset.
-                </Typography>
-                <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
-                  {STRATEGY_SERIES_CATALOG.map((entry) => (
-                    <Chip key={entry.key} label={entry.label} size="small" variant="outlined" />
-                  ))}
-                </Stack>
+              <Stack spacing={2}>
+                <Box>
+                  <Typography variant="h6" sx={{ fontWeight: 800 }}>Available series</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Click any series to inspect its historical chart and latest value.
+                  </Typography>
+                </Box>
+                {groupedSeries.map((g) => (
+                  <Box key={g.group}>
+                    <Stack direction="row" alignItems="center" spacing={0.75} sx={{ mb: 0.75 }}>
+                      {seriesGroupIcon(g.group)}
+                      <Typography variant="overline" sx={{ fontWeight: 700, letterSpacing: 1 }}>
+                        {g.label}
+                      </Typography>
+                    </Stack>
+                    <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                      {g.series.map((entry) => (
+                        <MuiTooltip key={entry.key} title={entry.description} arrow enterDelay={400}>
+                          <Chip
+                            label={entry.label}
+                            size="small"
+                            variant="outlined"
+                            clickable
+                            onClick={() => openSeriesDetail(entry.key)}
+                            sx={{
+                              cursor: 'pointer',
+                              '&:hover': { borderColor: 'primary.main', bgcolor: 'rgba(96,165,250,0.08)' },
+                            }}
+                          />
+                        </MuiTooltip>
+                      ))}
+                    </Stack>
+                  </Box>
+                ))}
               </Stack>
             </Paper>
+
+            <SeriesDetailModal
+              open={seriesModalOpen}
+              onClose={() => setSeriesModalOpen(false)}
+              seriesKey={seriesModalKey}
+              accessToken={session?.access_token ?? null}
+              isSmDown={isSmDown}
+            />
           </Stack>
         </Box>
       </Stack>
@@ -797,5 +876,261 @@ const StrategyBuilder: React.FC = () => {
       </Dialog>    </Box>
   );
 };
+
+function seriesGroupIcon(group: string) {
+  const sz = 15;
+  const cls = 'opacity-60';
+  switch (group) {
+    case 'market':
+      return <DollarSign size={sz} className={cls} />;
+    case 'valuation':
+      return <Link2 size={sz} className={cls} />;
+    case 'liquidity':
+      return <Droplets size={sz} className={cls} />;
+    case 'macro':
+      return <TrendingUp size={sz} className={cls} />;
+    case 'fx':
+      return <ArrowLeftRight size={sz} className={cls} />;
+    case 'scores':
+      return <Gauge size={sz} className={cls} />;
+    case 'signals':
+      return <Radio size={sz} className={cls} />;
+    default:
+      return null;
+  }
+}
+
+function formatSeriesValue(value: number | null, key: string): string {
+  if (value == null) return '—';
+  if (['CORE_ON', 'MACRO_ON', 'ACCUM_ON', 'PRICE_REGIME_ON', 'SIP_EXHAUSTED'].includes(key)) {
+    return value === 1 ? 'ON' : 'OFF';
+  }
+  if (['VAL_SCORE', 'LIQ_SCORE', 'DXY_SCORE', 'CYCLE_SCORE'].includes(key)) {
+    return String(value);
+  }
+  if (['SIP', 'US_LIQ_YOY', 'G3_YOY'].includes(key)) {
+    return `${value.toFixed(2)}%`;
+  }
+  if (['WALCL', 'WTREGEN', 'RRPONTSYD', 'US_LIQ', 'US_LIQ_13W_DELTA', 'ECB_RAW', 'BOJ_RAW', 'G3_ASSETS'].includes(key)) {
+    const abs = Math.abs(value);
+    if (abs >= 1e12) return `${(value / 1e12).toFixed(2)}T`;
+    if (abs >= 1e9) return `${(value / 1e9).toFixed(2)}B`;
+    if (abs >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
+    return value.toLocaleString();
+  }
+  if (Math.abs(value) >= 1000) return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  if (Math.abs(value) < 0.01) return value.toExponential(2);
+  return value.toFixed(Math.abs(value) < 10 ? 4 : 2);
+}
+
+interface SeriesDetailModalProps {
+  open: boolean;
+  onClose: () => void;
+  seriesKey: string | null;
+  accessToken: string | null;
+  isSmDown: boolean;
+}
+
+function SeriesDetailModal({ open, onClose, seriesKey, accessToken, isSmDown }: SeriesDetailModalProps) {
+  const [data, setData] = useState<Array<{ d: string; v: number | null }>>([]);
+  const [latest, setLatest] = useState<{ d: string; v: number | null } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const meta = useMemo(
+    () => (seriesKey ? STRATEGY_SERIES_CATALOG.find((e) => e.key === seriesKey) ?? null : null),
+    [seriesKey],
+  );
+
+  useEffect(() => {
+    if (!open || !seriesKey || !accessToken) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setData([]);
+    setLatest(null);
+
+    fetch(`/api/pro/series-detail?key=${encodeURIComponent(seriesKey)}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+      .then(async (res) => {
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? 'Failed to load series data.');
+        return json;
+      })
+      .then((json) => {
+        if (cancelled) return;
+        setData(json.data ?? []);
+        setLatest(json.latest ?? null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'Failed to load series.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [open, seriesKey, accessToken]);
+
+  const chartData = useMemo(() => {
+    if (!data.length) return [];
+    return data
+      .filter((r) => r.v != null)
+      .map((r) => ({ date: r.d, ts: new Date(r.d).getTime(), value: r.v! }));
+  }, [data]);
+
+  const lastPoint = chartData.length > 0 ? chartData[chartData.length - 1] : null;
+
+  const yDomain = useMemo(() => {
+    if (!chartData.length) return [0, 1] as [number, number];
+    let min = Infinity;
+    let max = -Infinity;
+    for (const p of chartData) {
+      if (p.value < min) min = p.value;
+      if (p.value > max) max = p.value;
+    }
+    const pad = (max - min) * 0.05 || 1;
+    return [min - pad, max + pad] as [number, number];
+  }, [chartData]);
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      fullScreen={isSmDown}
+      fullWidth
+      maxWidth="md"
+      PaperProps={{
+        sx: {
+          bgcolor: 'background.paper',
+          m: isSmDown ? 0 : 2,
+          width: isSmDown ? '100%' : undefined,
+          maxHeight: isSmDown ? '100%' : 'calc(100% - 32px)',
+        },
+      }}
+    >
+      <DialogContent sx={{ p: isSmDown ? 1.5 : 3 }}>
+        <Stack spacing={2}>
+          <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+            <Box>
+              <Typography variant={isSmDown ? 'h6' : 'h5'} sx={{ fontWeight: 900 }}>
+                {meta?.label ?? seriesKey}
+              </Typography>
+              {meta && (
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
+                  {meta.description}
+                </Typography>
+              )}
+              {meta && (
+                <Stack direction="row" spacing={0.75} sx={{ mt: 0.75 }}>
+                  <Chip label={meta.kind} size="small" variant="outlined" sx={{ textTransform: 'capitalize' }} />
+                  <Chip label={meta.group} size="small" variant="outlined" sx={{ textTransform: 'capitalize' }} />
+                </Stack>
+              )}
+            </Box>
+            <IconButton onClick={onClose} aria-label="Close series detail" sx={{ mt: -0.5 }}>
+              <X size={18} />
+            </IconButton>
+          </Stack>
+
+          {latest && (
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 2,
+                display: 'flex',
+                alignItems: 'baseline',
+                gap: 1.5,
+                borderColor: 'primary.main',
+                bgcolor: 'rgba(96,165,250,0.06)',
+              }}
+            >
+              <Typography variant="overline" sx={{ fontWeight: 700 }}>
+                Latest ({latest.d})
+              </Typography>
+              <Typography variant="h5" sx={{ fontWeight: 900, fontFamily: 'monospace' }}>
+                {formatSeriesValue(latest.v, seriesKey ?? '')}
+              </Typography>
+            </Paper>
+          )}
+
+          {loading && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
+              <CircularProgress size={32} />
+            </Box>
+          )}
+
+          {error && <Alert severity="error">{error}</Alert>}
+
+          {!loading && !error && chartData.length > 0 && (
+            <Box sx={{ width: '100%', height: isSmDown ? '50vh' : 340 }}>
+              <ResponsiveContainer>
+                <AreaChart data={chartData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                  <defs>
+                    <linearGradient id="seriesGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#60a5fa" stopOpacity={0.25} />
+                      <stop offset="95%" stopColor="#60a5fa" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.12} />
+                  <XAxis
+                    dataKey="ts"
+                    scale="time"
+                    type="number"
+                    domain={['dataMin', 'dataMax']}
+                    tickFormatter={(ts: number) => {
+                      const d = new Date(ts);
+                      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                    }}
+                    tick={{ fontSize: 11 }}
+                    minTickGap={40}
+                  />
+                  <YAxis domain={yDomain} tick={{ fontSize: 11 }} width={60} />
+                  <Tooltip
+                    labelFormatter={(ts: number) => new Date(ts).toISOString().slice(0, 10)}
+                    formatter={(v: number) => [formatSeriesValue(v, seriesKey ?? ''), meta?.label ?? seriesKey]}
+                    contentStyle={{
+                      backgroundColor: 'rgba(15, 23, 42, 0.92)',
+                      border: '1px solid rgba(148,163,184,0.2)',
+                      borderRadius: 8,
+                      fontSize: 13,
+                    }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="value"
+                    stroke="#60a5fa"
+                    strokeWidth={1.8}
+                    fill="url(#seriesGrad)"
+                    dot={false}
+                    activeDot={{ r: 4, stroke: '#60a5fa', strokeWidth: 2, fill: '#0f172a' }}
+                  />
+                  {lastPoint && (
+                    <ReferenceDot
+                      x={lastPoint.ts}
+                      y={lastPoint.value}
+                      r={6}
+                      fill="#60a5fa"
+                      stroke="#fff"
+                      strokeWidth={2}
+                    />
+                  )}
+                </AreaChart>
+              </ResponsiveContainer>
+            </Box>
+          )}
+
+          {!loading && !error && chartData.length === 0 && data.length === 0 && (
+            <Typography variant="body2" color="text.secondary" sx={{ py: 4, textAlign: 'center' }}>
+              No historical data available for this series.
+            </Typography>
+          )}
+        </Stack>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export default StrategyBuilder;

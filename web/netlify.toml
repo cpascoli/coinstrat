@@ -122,6 +122,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/pro/series-detail"
+  to = "/.netlify/functions/series-detail"
+  status = 200
+
+[[redirects]]
   from = "/api/email/strategy-alerts/unsubscribe"
   to = "/.netlify/functions/strategy-alert-unsubscribe"
   status = 200

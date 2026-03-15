@@ -32,6 +32,36 @@ export const STRATEGY_SERIES_CATALOG = [
 ] as const;
 
 export type StrategySeriesKey = typeof STRATEGY_SERIES_CATALOG[number]['key'];
+export type StrategySeriesGroup = typeof STRATEGY_SERIES_CATALOG[number]['group'];
+
+export const SERIES_GROUP_META: Array<{
+  group: string;
+  label: string;
+  order: number;
+}> = [
+  { group: 'market', label: 'Price', order: 0 },
+  { group: 'valuation', label: 'On-chain', order: 1 },
+  { group: 'liquidity', label: 'Liquidity', order: 2 },
+  { group: 'macro', label: 'Business Cycle', order: 3 },
+  { group: 'fx', label: 'FX', order: 4 },
+  { group: 'scores', label: 'Scores', order: 5 },
+  { group: 'signals', label: 'Signals', order: 6 },
+];
+
+export function getGroupedSeries() {
+  const grouped = new Map<string, typeof STRATEGY_SERIES_CATALOG[number][]>();
+  for (const entry of STRATEGY_SERIES_CATALOG) {
+    const existing = grouped.get(entry.group) ?? [];
+    existing.push(entry);
+    grouped.set(entry.group, existing);
+  }
+  return SERIES_GROUP_META
+    .filter((gm) => grouped.has(gm.group))
+    .map((gm) => ({
+      ...gm,
+      series: grouped.get(gm.group)!,
+    }));
+}
 export type StrategySeriesKind = typeof STRATEGY_SERIES_CATALOG[number]['kind'];
 export type StrategyMetricOperator =
   | 'identity'
