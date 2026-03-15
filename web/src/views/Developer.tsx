@@ -13,25 +13,13 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import { Copy, Eye, EyeOff, Key, Lock, Sparkles, Workflow } from 'lucide-react';
+import { Copy, Eye, EyeOff, Key, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { endpointGroups } from './api/endpoints';
 import EndpointCard from './api/EndpointCard';
 
 const KEY_STORAGE = 'coinstrat_api_key';
-
-type DigestStatus = {
-  ok: true;
-  skipped: boolean;
-  wouldSend: boolean;
-  reason: string;
-  now: string;
-  weekOf: string;
-  scheduledFor: string | null;
-  issueId: string | null;
-  alreadySent: boolean;
-};
 
 const Developer: React.FC = () => {
   const { session, profile, tier, isAdmin, isAuthenticated } = useAuth();
@@ -40,9 +28,6 @@ const Developer: React.FC = () => {
   const [tabIdx, setTabIdx] = useState(0);
   const [showKey, setShowKey] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [digestStatus, setDigestStatus] = useState<DigestStatus | null>(null);
-  const [digestStatusLoading, setDigestStatusLoading] = useState(false);
-  const [digestStatusError, setDigestStatusError] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState(() => {
     try {
       return localStorage.getItem(KEY_STORAGE) ?? '';
@@ -77,49 +62,6 @@ const Developer: React.FC = () => {
     }
   }, [tabIdx, visibleEndpointGroups.length]);
 
-  useEffect(() => {
-    if (!isAdmin || !session?.access_token) {
-      setDigestStatus(null);
-      setDigestStatusError(null);
-      return;
-    }
-
-    let cancelled = false;
-
-    const loadStatus = async () => {
-      setDigestStatusLoading(true);
-      setDigestStatusError(null);
-      try {
-        const response = await fetch('/api/email/digest', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({ action: 'status' }),
-        });
-        const data = await response.json();
-        if (cancelled) return;
-        if (!response.ok) {
-          setDigestStatusError(data.error ?? 'Unable to load auto-send status.');
-          return;
-        }
-        setDigestStatus(data as DigestStatus);
-      } catch (error) {
-        if (cancelled) return;
-        setDigestStatusError(error instanceof Error ? error.message : 'Unable to load auto-send status.');
-      } finally {
-        if (!cancelled) setDigestStatusLoading(false);
-      }
-    };
-
-    void loadStatus();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isAdmin, session?.access_token]);
-
   const group = useMemo(
     () => visibleEndpointGroups[tabIdx] ?? visibleEndpointGroups[0],
     [tabIdx, visibleEndpointGroups],
@@ -130,33 +72,6 @@ const Developer: React.FC = () => {
     await navigator.clipboard.writeText(apiKey);
     setCopied(true);
     setTimeout(() => setCopied(false), 1200);
-  };
-
-  const refreshDigestStatus = async () => {
-    if (!isAdmin || !session?.access_token) return;
-
-    setDigestStatusLoading(true);
-    setDigestStatusError(null);
-    try {
-      const response = await fetch('/api/email/digest', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ action: 'status' }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        setDigestStatusError(data.error ?? 'Unable to load auto-send status.');
-        return;
-      }
-      setDigestStatus(data as DigestStatus);
-    } catch (error) {
-      setDigestStatusError(error instanceof Error ? error.message : 'Unable to load auto-send status.');
-    } finally {
-      setDigestStatusLoading(false);
-    }
   };
 
   return (
@@ -171,14 +86,12 @@ const Developer: React.FC = () => {
                 component="h1"
                 sx={{ fontWeight: 900, fontSize: { xs: 28, sm: 36, md: 44 } }}
               >
-                Developer Workspace
+                API Docs
               </Typography>
             </Stack>
 
             <Typography sx={{ color: 'text.secondary', maxWidth: 760 }}>
-              Explore CoinStrat endpoints, test requests in the browser, manage your API key,
-              and use the same workspace to grow future developer features like usage analytics,
-              SDK examples, and automation helpers.
+              Explore CoinStrat API endpoints, test requests directly in the browser, and manage your API key.
             </Typography>
 
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
@@ -229,7 +142,7 @@ const Developer: React.FC = () => {
                   <TextField
                     size="small"
                     fullWidth
-                    value={showKey ? apiKey : '••••••••••••••••••••••••'}
+                    value={showKey ? apiKey : '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022'}
                     InputProps={{ readOnly: true, sx: { fontFamily: 'monospace', fontSize: 13 } }}
                   />
                   <Tooltip title={showKey ? 'Hide' : 'Reveal'}>
@@ -244,7 +157,7 @@ const Developer: React.FC = () => {
                   </Tooltip>
                 </Box>
                 <Typography variant="caption" color="text.secondary">
-                  This page auto-adds <code>X-API-Key</code> for paid endpoints and your signed-in bearer token for admin endpoints you are allowed to use in-browser.
+                  This page auto-adds <code>X-API-Key</code> for paid endpoints and your signed-in bearer token for Pro/Admin endpoints.
                 </Typography>
               </>
             ) : (
@@ -256,92 +169,6 @@ const Developer: React.FC = () => {
             )}
           </Stack>
         </Paper>
-
-        <Paper sx={{ p: { xs: 2.5, sm: 3 } }}>
-          <Stack
-            direction={{ xs: 'column', md: 'row' }}
-            spacing={2}
-            alignItems={{ xs: 'flex-start', md: 'center' }}
-            justifyContent="space-between"
-          >
-            <Box>
-              <Stack direction="row" spacing={1.25} alignItems="center" sx={{ mb: 1 }}>
-                <Workflow size={18} />
-                <Typography variant="h6" sx={{ fontWeight: 800 }}>
-                  Signal Builder
-                </Typography>
-              </Stack>
-              <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 760 }}>
-                Turn plain-English ideas into constrained custom strategies, preview them on CoinStrat history,
-                and save them with their own alert rules. The builder reuses the same approved series and backend cache
-                rather than running arbitrary custom code.
-              </Typography>
-            </Box>
-            <Button
-              variant="contained"
-              onClick={() => navigate('/strategy-builder')}
-              sx={{ textTransform: 'none', fontWeight: 700 }}
-            >
-              Open Signal Builder
-            </Button>
-          </Stack>
-        </Paper>
-
-        {isAdmin && (
-          <Paper sx={{ p: { xs: 2.5, sm: 3 } }}>
-            <Stack spacing={2}>
-              <Stack
-                direction={{ xs: 'column', sm: 'row' }}
-                spacing={1.5}
-                alignItems={{ xs: 'flex-start', sm: 'center' }}
-                justifyContent="space-between"
-              >
-                <Box>
-                  <Typography variant="h6" sx={{ fontWeight: 800 }}>
-                    Newsletter Auto-Send Status
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Dry-run status for the current automatic Monday morning newsletter check.
-                  </Typography>
-                </Box>
-                <Button
-                  variant="outlined"
-                  onClick={() => void refreshDigestStatus()}
-                  disabled={digestStatusLoading}
-                  sx={{ textTransform: 'none', fontWeight: 700 }}
-                >
-                  {digestStatusLoading ? 'Checking…' : 'Refresh status'}
-                </Button>
-              </Stack>
-
-              {digestStatusError && <Alert severity="error">{digestStatusError}</Alert>}
-
-              {digestStatus && (
-                <>
-                  <Alert severity={digestStatus.wouldSend ? 'success' : 'info'}>
-                    {digestStatus.reason}
-                  </Alert>
-
-                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                    <Chip
-                      label={digestStatus.wouldSend ? 'Would send now' : 'Would skip now'}
-                      color={digestStatus.wouldSend ? 'success' : 'default'}
-                      variant={digestStatus.wouldSend ? 'filled' : 'outlined'}
-                    />
-                    <Chip label={`Week of ${digestStatus.weekOf}`} variant="outlined" />
-                    {digestStatus.scheduledFor && <Chip label={`Scheduled ${digestStatus.scheduledFor}`} variant="outlined" />}
-                    {digestStatus.issueId && <Chip label={`Issue ${digestStatus.issueId.slice(0, 8)}…`} variant="outlined" />}
-                    {digestStatus.alreadySent && <Chip label="Already sent" color="success" variant="outlined" />}
-                  </Stack>
-
-                  <Typography variant="body2" color="text.secondary">
-                    Checked at {digestStatus.now}. `auto_send` only broadcasts once the configured weekday and UTC hour have been reached, and it skips if that week’s issue was already sent.
-                  </Typography>
-                </>
-              )}
-            </Stack>
-          </Paper>
-        )}
 
         <Box>
           <Tabs
@@ -413,24 +240,9 @@ const Developer: React.FC = () => {
           </Stack>
         </Paper>
 
-        <Paper sx={{ p: 3 }}>
-          <Typography variant="h6" sx={{ fontWeight: 800, mb: 2 }}>
-            Roadmap
-          </Typography>
-          <Stack spacing={1}>
-            <Typography variant="body2" color="text.secondary">
-              Near-term improvements planned for the API experience:
-            </Typography>
-            <Typography variant="body2" color="text.secondary">OpenAPI schema for client generation and stronger API discoverability.</Typography>
-            <Typography variant="body2" color="text.secondary">JavaScript and Python examples tailored to the most common workflows.</Typography>
-            <Typography variant="body2" color="text.secondary">Usage and quota endpoints for self-serve monitoring inside this workspace.</Typography>
-            <Typography variant="body2" color="text.secondary">Richer history filters, state-change endpoints, and automation-focused responses.</Typography>
-          </Stack>
-        </Paper>
-
         <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-          Browser testing from this workspace only auto-adds credentials that are safe to use client-side:
-          public requests, your own API key, and your signed-in admin session when supported by the backend.
+          Browser testing from this page only auto-adds credentials that are safe to use client-side:
+          public requests, your own API key, and your signed-in session when supported by the backend.
           Server-only secrets like <code>CRON_SECRET</code> are never exposed here.
         </Typography>
       </Stack>

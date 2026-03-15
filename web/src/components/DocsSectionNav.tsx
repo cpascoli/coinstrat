@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button, Paper, Stack, Typography } from '@mui/material';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Activity, BarChart3, Binary, BookOpen, Database, Key, Workflow } from 'lucide-react';
+import { Activity, BarChart3, Binary, BookOpen, Database, Workflow } from 'lucide-react';
 
 export type DocsNavItem = {
   label: string;
@@ -16,7 +16,6 @@ export const DOCS_NAV_ITEMS: DocsNavItem[] = [
   { label: 'Scores', path: '/docs/scores', icon: <BarChart3 size={16} /> },
   { label: 'Signals', path: '/docs/signals', icon: <Binary size={16} /> },
   { label: 'Signal Builder', path: '/docs/signal-builder', icon: <Workflow size={16} /> },
-  { label: 'API', path: '/docs/api', icon: <Key size={16} /> },
 ];
 
 const DocsSectionNav: React.FC = () => {

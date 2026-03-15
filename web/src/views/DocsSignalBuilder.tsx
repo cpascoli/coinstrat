@@ -12,6 +12,8 @@ import {
   IconButton,
   Paper,
   Stack,
+  Tab,
+  Tabs,
   Tooltip as MuiTooltip,
   Typography,
 } from '@mui/material';
@@ -375,6 +377,15 @@ function SeriesDetailModal({ open, onClose, seriesKey, accessToken, isSmDown }: 
 // Page component
 // ---------------------------------------------------------------------------
 
+const CARD_SX = { borderColor: 'rgba(148,163,184,0.35)', background: 'linear-gradient(180deg, rgba(2,6,23,0.35) 0%, rgba(15,23,42,0.65) 100%)', boxShadow: 'none' } as const;
+
+const SECTION_TABS = [
+  { label: 'Overview' },
+  { label: 'Series' },
+  { label: 'Reference' },
+  { label: 'Examples' },
+] as const;
+
 const DocsSignalBuilder: React.FC = () => {
   const { session } = useAuth();
   const theme = useTheme();
@@ -382,6 +393,7 @@ const DocsSignalBuilder: React.FC = () => {
   const groupedSeries = useMemo(() => getGroupedSeries(), []);
   const [seriesModalOpen, setSeriesModalOpen] = useState(false);
   const [seriesModalKey, setSeriesModalKey] = useState<string | null>(null);
+  const [sectionIdx, setSectionIdx] = useState(0);
   const hasPaidAccess = !!session?.access_token;
 
   const openSeriesDetail = useCallback((key: string) => {
@@ -403,252 +415,279 @@ const DocsSignalBuilder: React.FC = () => {
           </Typography>
         </Box>
 
-        {/* How it works */}
-        <Card sx={{ borderColor: 'rgba(148,163,184,0.35)', background: 'linear-gradient(180deg, rgba(2,6,23,0.35) 0%, rgba(15,23,42,0.65) 100%)', boxShadow: 'none' }}>
-          <CardContent>
-            <Stack spacing={2}>
-              <Typography variant="h5" sx={{ fontWeight: 900 }}>How it works</Typography>
-              <Stack component="ol" spacing={1.25} sx={{ pl: 2.5 }}>
-                {[
-                  ['Describe', 'Write what you want in the text box. For example: "Alert me when BTC is above its 200-day MA and the dollar is weak."'],
-                  ['Interpret', 'CoinStrat sends your prompt to an LLM (with guardrails) that translates it into a structured JSON spec using only the approved series and operators listed below.'],
-                  ['Review', 'You can inspect the generated strategy blocks, edit the JSON directly, and fix anything the model got wrong.'],
-                  ['Preview', 'Run the strategy against the cached signal dataset to see how the signal would have behaved historically, including state transitions and current snapshot values.'],
-                  ['Save & alert', 'Save the strategy to your account. Optionally enable email alerts that notify you when the signal flips.'],
-                ].map(([title, body]) => (
-                  <Typography component="li" variant="body2" key={title} sx={{ lineHeight: 1.75 }}>
-                    <strong>{title}.</strong> {body}
-                  </Typography>
-                ))}
-              </Stack>
-            </Stack>
-          </CardContent>
-        </Card>
+        {/* Section tabs */}
+        <Tabs
+          value={sectionIdx}
+          onChange={(_, v: number) => setSectionIdx(v)}
+          variant="scrollable"
+          scrollButtons="auto"
+          sx={{
+            borderBottom: 1,
+            borderColor: 'divider',
+            '& .MuiTab-root': { fontWeight: 700, textTransform: 'none', minHeight: 42 },
+          }}
+        >
+          {SECTION_TABS.map((t) => (
+            <Tab key={t.label} label={t.label} />
+          ))}
+        </Tabs>
 
-        {/* Strategy anatomy */}
-        <Card sx={{ borderColor: 'rgba(148,163,184,0.35)', background: 'linear-gradient(180deg, rgba(2,6,23,0.35) 0%, rgba(15,23,42,0.65) 100%)', boxShadow: 'none' }}>
-          <CardContent>
-            <Stack spacing={2}>
-              <Typography variant="h5" sx={{ fontWeight: 900 }}>Anatomy of a strategy</Typography>
-              <Typography variant="body2" sx={{ lineHeight: 1.75 }}>
-                Every strategy spec has four layers that build on each other:
-              </Typography>
-              <Stack spacing={1.5}>
-                {[
-                  { badge: 'Sources', desc: `Raw data feeds selected from the catalog below (max ${STRATEGY_LIMITS.maxSources}). Each source is assigned an id you can reference later.` },
-                  { badge: 'Metrics', desc: `Derived values computed from sources or other metrics using the operators below (max ${STRATEGY_LIMITS.maxMetrics}). Metrics can chain — e.g. you can compute a diff of a rolling_mean to detect whether a moving average is rising.` },
-                  { badge: 'Conditions', desc: `Boolean tests that compare a source or metric against a constant or another reference using a comparator (max ${STRATEGY_LIMITS.maxConditions}). Optional persistence filters let you require a condition to be true for N of the last M days.` },
-                  { badge: 'Output', desc: 'Combines conditions with AND (all) or OR (any) logic to produce the final binary signal (1 = on, 0 = off).' },
-                ].map(({ badge, desc }) => (
-                  <Box key={badge} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, px: 2, py: 1.25, bgcolor: 'rgba(2,6,23,0.15)' }}>
-                    <Chip label={badge} size="small" sx={{ fontWeight: 700, mb: 0.5 }} />
-                    <Typography variant="body2" sx={{ lineHeight: 1.75 }}>{desc}</Typography>
-                  </Box>
-                ))}
-              </Stack>
-            </Stack>
-          </CardContent>
-        </Card>
-
-        {/* Available series */}
-        <Card sx={{ borderColor: 'rgba(148,163,184,0.35)', background: 'linear-gradient(180deg, rgba(2,6,23,0.35) 0%, rgba(15,23,42,0.65) 100%)', boxShadow: 'none' }}>
-          <CardContent>
-            <Stack spacing={2.5}>
-              <Box>
-                <Typography variant="h5" sx={{ fontWeight: 900 }}>Available series</Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                  The builder only uses the approved series below. {hasPaidAccess ? 'Click any series to view its historical chart and latest value.' : 'Sign in with a Pro account to view historical charts.'}
-                </Typography>
-              </Box>
-              {groupedSeries.map((g) => (
-                <Box key={g.group}>
-                  <Stack direction="row" alignItems="center" spacing={0.75} sx={{ mb: 0.75 }}>
-                    {seriesGroupIcon(g.group)}
-                    <Typography variant="overline" sx={{ fontWeight: 700, letterSpacing: 1 }}>{g.label}</Typography>
+        {/* ---- Tab 0: Overview ---- */}
+        {sectionIdx === 0 && (
+          <>
+            <Card sx={CARD_SX}>
+              <CardContent>
+                <Stack spacing={2}>
+                  <Typography variant="h5" sx={{ fontWeight: 900 }}>How it works</Typography>
+                  <Stack component="ol" spacing={1.25} sx={{ pl: 2.5 }}>
+                    {[
+                      ['Describe', 'Write what you want in the text box. For example: "Alert me when BTC is above its 200-day MA and the dollar is weak."'],
+                      ['Interpret', 'CoinStrat sends your prompt to an LLM (with guardrails) that translates it into a structured JSON spec using only the approved series and operators.'],
+                      ['Review', 'You can inspect the generated strategy blocks, edit the JSON directly, and fix anything the model got wrong.'],
+                      ['Preview', 'Run the strategy against the cached signal dataset to see how the signal would have behaved historically, including state transitions and current snapshot values.'],
+                      ['Save & alert', 'Save the strategy to your account. Optionally enable email alerts that notify you when the signal flips.'],
+                    ].map(([title, body]) => (
+                      <Typography component="li" variant="body2" key={title} sx={{ lineHeight: 1.75 }}>
+                        <strong>{title}.</strong> {body}
+                      </Typography>
+                    ))}
                   </Stack>
-                  <Stack spacing={0.75}>
-                    {g.series.map((entry) => (
-                      <Box
-                        key={entry.key}
-                        sx={{
-                          display: 'flex',
-                          alignItems: 'baseline',
-                          gap: 1.5,
-                          px: 2,
-                          py: 1,
-                          border: '1px solid',
-                          borderColor: 'divider',
-                          borderRadius: 2,
-                          bgcolor: 'rgba(2,6,23,0.15)',
-                          cursor: hasPaidAccess ? 'pointer' : 'default',
-                          '&:hover': hasPaidAccess ? { borderColor: 'primary.main', bgcolor: 'rgba(96,165,250,0.06)' } : {},
-                        }}
-                        onClick={hasPaidAccess ? () => openSeriesDetail(entry.key) : undefined}
-                      >
-                        <Chip label={entry.key} size="small" sx={{ fontFamily: 'monospace', fontWeight: 700, minWidth: 110 }} />
-                        <Box sx={{ flex: 1 }}>
-                          <Typography variant="body2" sx={{ fontWeight: 700 }}>{entry.label}</Typography>
-                          <Typography variant="caption" color="text.secondary">{entry.description}</Typography>
-                        </Box>
-                        <Chip label={entry.kind} size="small" variant="outlined" sx={{ textTransform: 'capitalize', fontSize: 11 }} />
+                </Stack>
+              </CardContent>
+            </Card>
+
+            <Card sx={CARD_SX}>
+              <CardContent>
+                <Stack spacing={2}>
+                  <Typography variant="h5" sx={{ fontWeight: 900 }}>Anatomy of a strategy</Typography>
+                  <Typography variant="body2" sx={{ lineHeight: 1.75 }}>
+                    Every strategy spec has four layers that build on each other:
+                  </Typography>
+                  <Stack spacing={1.5}>
+                    {[
+                      { badge: 'Sources', desc: `Raw data feeds selected from the catalog (max ${STRATEGY_LIMITS.maxSources}). Each source is assigned an id you can reference later.` },
+                      { badge: 'Metrics', desc: `Derived values computed from sources or other metrics using the operators (max ${STRATEGY_LIMITS.maxMetrics}). Metrics can chain \u2014 e.g. you can compute a diff of a rolling_mean to detect whether a moving average is rising.` },
+                      { badge: 'Conditions', desc: `Boolean tests that compare a source or metric against a constant or another reference using a comparator (max ${STRATEGY_LIMITS.maxConditions}). Optional persistence filters let you require a condition to be true for N of the last M days.` },
+                      { badge: 'Output', desc: 'Combines conditions with AND (all) or OR (any) logic to produce the final binary signal (1 = on, 0 = off).' },
+                    ].map(({ badge, desc }) => (
+                      <Box key={badge} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, px: 2, py: 1.25, bgcolor: 'rgba(2,6,23,0.15)' }}>
+                        <Chip label={badge} size="small" sx={{ fontWeight: 700, mb: 0.5 }} />
+                        <Typography variant="body2" sx={{ lineHeight: 1.75 }}>{desc}</Typography>
                       </Box>
                     ))}
                   </Stack>
-                </Box>
-              ))}
-            </Stack>
-          </CardContent>
-        </Card>
+                </Stack>
+              </CardContent>
+            </Card>
+          </>
+        )}
 
-        {/* Operators */}
-        <Card sx={{ borderColor: 'rgba(148,163,184,0.35)', background: 'linear-gradient(180deg, rgba(2,6,23,0.35) 0%, rgba(15,23,42,0.65) 100%)', boxShadow: 'none' }}>
-          <CardContent>
-            <Stack spacing={2.5}>
-              <Box>
-                <Typography variant="h5" sx={{ fontWeight: 900 }}>Metric operators</Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                  Operators transform a source or metric into a derived value. Metrics can chain — the input of one metric can be the output of another.
-                </Typography>
-              </Box>
-              {OPERATOR_DOCS.map((op) => (
-                <Box key={op.key} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, px: 2, py: 1.5, bgcolor: 'rgba(2,6,23,0.15)' }}>
-                  <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} gap={0.75} sx={{ mb: 0.75 }}>
-                    <Typography variant="h6" sx={{ fontWeight: 800 }}>{op.label}</Typography>
-                    <Chip label={op.key} size="small" sx={{ fontFamily: 'monospace', fontWeight: 700 }} />
+        {/* ---- Tab 1: Series ---- */}
+        {sectionIdx === 1 && (
+          <Card sx={CARD_SX}>
+            <CardContent>
+              <Stack spacing={2.5}>
+                <Box>
+                  <Typography variant="h5" sx={{ fontWeight: 900 }}>Available series</Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                    The builder only uses the approved series below. {hasPaidAccess ? 'Click any series to view its historical chart and latest value.' : 'Sign in with a Pro account to view historical charts.'}
+                  </Typography>
+                </Box>
+                {groupedSeries.map((g) => (
+                  <Box key={g.group}>
+                    <Stack direction="row" alignItems="center" spacing={0.75} sx={{ mb: 0.75 }}>
+                      {seriesGroupIcon(g.group)}
+                      <Typography variant="overline" sx={{ fontWeight: 700, letterSpacing: 1 }}>{g.label}</Typography>
+                    </Stack>
+                    <Stack spacing={0.75}>
+                      {g.series.map((entry) => (
+                        <Box
+                          key={entry.key}
+                          sx={{
+                            display: 'flex',
+                            alignItems: 'baseline',
+                            gap: 1.5,
+                            px: 2,
+                            py: 1,
+                            border: '1px solid',
+                            borderColor: 'divider',
+                            borderRadius: 2,
+                            bgcolor: 'rgba(2,6,23,0.15)',
+                            cursor: hasPaidAccess ? 'pointer' : 'default',
+                            '&:hover': hasPaidAccess ? { borderColor: 'primary.main', bgcolor: 'rgba(96,165,250,0.06)' } : {},
+                          }}
+                          onClick={hasPaidAccess ? () => openSeriesDetail(entry.key) : undefined}
+                        >
+                          <Chip label={entry.key} size="small" sx={{ fontFamily: 'monospace', fontWeight: 700, minWidth: 110 }} />
+                          <Box sx={{ flex: 1 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 700 }}>{entry.label}</Typography>
+                            <Typography variant="caption" color="text.secondary">{entry.description}</Typography>
+                          </Box>
+                          <Chip label={entry.kind} size="small" variant="outlined" sx={{ textTransform: 'capitalize', fontSize: 11 }} />
+                        </Box>
+                      ))}
+                    </Stack>
+                  </Box>
+                ))}
+              </Stack>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ---- Tab 2: Reference (operators, comparators, limits) ---- */}
+        {sectionIdx === 2 && (
+          <>
+            <Card sx={CARD_SX}>
+              <CardContent>
+                <Stack spacing={2.5}>
+                  <Box>
+                    <Typography variant="h5" sx={{ fontWeight: 900 }}>Metric operators</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                      Operators transform a source or metric into a derived value. Metrics can chain — the input of one metric can be the output of another.
+                    </Typography>
+                  </Box>
+                  {OPERATOR_DOCS.map((op) => (
+                    <Box key={op.key} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, px: 2, py: 1.5, bgcolor: 'rgba(2,6,23,0.15)' }}>
+                      <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} gap={0.75} sx={{ mb: 0.75 }}>
+                        <Typography variant="h6" sx={{ fontWeight: 800 }}>{op.label}</Typography>
+                        <Chip label={op.key} size="small" sx={{ fontFamily: 'monospace', fontWeight: 700 }} />
+                      </Stack>
+                      <Typography variant="body2" sx={{ lineHeight: 1.75, mb: 1 }}>{op.description}</Typography>
+                      {op.requiredFields.length > 0 && (
+                        <Box sx={{ mb: 1 }}>
+                          <Typography variant="overline" color="text.secondary">Required fields</Typography>
+                          <Stack component="ul" spacing={0.25} sx={{ pl: 2, mt: 0.25 }}>
+                            {op.requiredFields.map((field) => (
+                              <Typography component="li" variant="body2" key={field} sx={{ fontFamily: 'monospace', fontSize: 13 }}>{field}</Typography>
+                            ))}
+                          </Stack>
+                        </Box>
+                      )}
+                      <Box>
+                        <Typography variant="overline" color="text.secondary">Example</Typography>
+                        <Typography variant="body2" sx={{
+                          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                          fontSize: 13,
+                          bgcolor: 'rgba(0,0,0,0.25)',
+                          px: 1.5,
+                          py: 0.75,
+                          borderRadius: 1,
+                          mt: 0.25,
+                        }}>
+                          {op.example}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  ))}
+                </Stack>
+              </CardContent>
+            </Card>
+
+            <Card sx={CARD_SX}>
+              <CardContent>
+                <Stack spacing={2}>
+                  <Box>
+                    <Typography variant="h5" sx={{ fontWeight: 900 }}>Condition comparators</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                      Conditions compare the left operand (a source or metric) against a constant or another reference.
+                    </Typography>
+                  </Box>
+                  <Stack spacing={0.75}>
+                    {COMPARATOR_DOCS.map((c) => (
+                      <Stack key={c.key} direction="row" alignItems="center" spacing={1.5} sx={{ px: 2, py: 0.75, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'rgba(2,6,23,0.15)' }}>
+                        <Chip label={c.symbol} size="small" sx={{ fontFamily: 'monospace', fontWeight: 800, minWidth: 70, justifyContent: 'center' }} />
+                        <Chip label={c.key} size="small" variant="outlined" sx={{ fontFamily: 'monospace', fontSize: 12, minWidth: 100 }} />
+                        <Typography variant="body2" sx={{ flex: 1 }}>{c.label}</Typography>
+                      </Stack>
+                    ))}
                   </Stack>
-                  <Typography variant="body2" sx={{ lineHeight: 1.75, mb: 1 }}>{op.description}</Typography>
-                  {op.requiredFields.length > 0 && (
-                    <Box sx={{ mb: 1 }}>
-                      <Typography variant="overline" color="text.secondary">Required fields</Typography>
-                      <Stack component="ul" spacing={0.25} sx={{ pl: 2, mt: 0.25 }}>
-                        {op.requiredFields.map((field) => (
-                          <Typography component="li" variant="body2" key={field} sx={{ fontFamily: 'monospace', fontSize: 13 }}>{field}</Typography>
+                </Stack>
+              </CardContent>
+            </Card>
+
+            <Card sx={CARD_SX}>
+              <CardContent>
+                <Stack spacing={2}>
+                  <Typography variant="h5" sx={{ fontWeight: 900 }}>Limits</Typography>
+                  <Stack spacing={0.75}>
+                    {[
+                      ['Max sources', String(STRATEGY_LIMITS.maxSources)],
+                      ['Max metrics', String(STRATEGY_LIMITS.maxMetrics)],
+                      ['Max conditions', String(STRATEGY_LIMITS.maxConditions)],
+                      ['Max window / periods', String(STRATEGY_LIMITS.maxWindow)],
+                      ['Max lookback (persistence)', `${STRATEGY_LIMITS.maxLookbackDays} days`],
+                    ].map(([label, val]) => (
+                      <Stack key={label} direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 2, py: 0.75, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'rgba(2,6,23,0.15)' }}>
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>{label}</Typography>
+                        <Chip label={val} size="small" sx={{ fontFamily: 'monospace', fontWeight: 700 }} />
+                      </Stack>
+                    ))}
+                  </Stack>
+                </Stack>
+              </CardContent>
+            </Card>
+          </>
+        )}
+
+        {/* ---- Tab 3: Examples (tips + example prompts) ---- */}
+        {sectionIdx === 3 && (
+          <>
+            <Card sx={CARD_SX}>
+              <CardContent>
+                <Stack spacing={2}>
+                  <Typography variant="h5" sx={{ fontWeight: 900 }}>Tips for writing prompts</Typography>
+                  <Stack component="ul" spacing={1} sx={{ pl: 2 }}>
+                    {[
+                      'Be specific about time windows: "200-day moving average" is better than "long-term average".',
+                      'Name the series when possible: "MVRV below 2" is clearer than "valuation is cheap".',
+                      'For ambiguous concepts like "dollar is weak", the LLM will default to DXY_SCORE >= 1 (CoinStrat\'s pre-computed dollar regime score).',
+                      'Use "and" for conditions that must all be true, "or" for conditions where any one is sufficient.',
+                      'To detect a rising moving average, the model will use diff(rolling_mean, periods=1) > 0.',
+                      'You can always review and edit the generated JSON before saving.',
+                    ].map((tip) => (
+                      <Typography component="li" variant="body2" key={tip} sx={{ lineHeight: 1.75 }}>{tip}</Typography>
+                    ))}
+                  </Stack>
+                </Stack>
+              </CardContent>
+            </Card>
+
+            <Card sx={CARD_SX}>
+              <CardContent>
+                <Stack spacing={2.5}>
+                  <Box>
+                    <Typography variant="h5" sx={{ fontWeight: 900 }}>Example prompts</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                      Copy any of these into the builder to see how the LLM translates them. Each one highlights a different capability.
+                    </Typography>
+                  </Box>
+                  {EXAMPLE_PROMPTS.map((ex) => (
+                    <Box key={ex.title} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, px: 2, py: 1.5, bgcolor: 'rgba(2,6,23,0.15)' }}>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 0.5 }}>{ex.title}</Typography>
+                      <Typography variant="body2" sx={{
+                        fontStyle: 'italic',
+                        bgcolor: 'rgba(0,0,0,0.25)',
+                        px: 1.5,
+                        py: 1,
+                        borderRadius: 1,
+                        lineHeight: 1.75,
+                        mb: 1,
+                      }}>
+                        &ldquo;{ex.prompt}&rdquo;
+                      </Typography>
+                      <Typography variant="body2" sx={{ lineHeight: 1.75, mb: 1 }}>{ex.explanation}</Typography>
+                      <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                        {ex.concepts.map((concept) => (
+                          <Chip key={concept} label={concept} size="small" variant="outlined" sx={{ fontSize: 11 }} />
                         ))}
                       </Stack>
                     </Box>
-                  )}
-                  <Box>
-                    <Typography variant="overline" color="text.secondary">Example</Typography>
-                    <Typography variant="body2" sx={{
-                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                      fontSize: 13,
-                      bgcolor: 'rgba(0,0,0,0.25)',
-                      px: 1.5,
-                      py: 0.75,
-                      borderRadius: 1,
-                      mt: 0.25,
-                    }}>
-                      {op.example}
-                    </Typography>
-                  </Box>
-                </Box>
-              ))}
-            </Stack>
-          </CardContent>
-        </Card>
-
-        {/* Comparators */}
-        <Card sx={{ borderColor: 'rgba(148,163,184,0.35)', background: 'linear-gradient(180deg, rgba(2,6,23,0.35) 0%, rgba(15,23,42,0.65) 100%)', boxShadow: 'none' }}>
-          <CardContent>
-            <Stack spacing={2}>
-              <Box>
-                <Typography variant="h5" sx={{ fontWeight: 900 }}>Condition comparators</Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                  Conditions compare the left operand (a source or metric) against a constant or another reference.
-                </Typography>
-              </Box>
-              <Stack spacing={0.75}>
-                {COMPARATOR_DOCS.map((c) => (
-                  <Stack key={c.key} direction="row" alignItems="center" spacing={1.5} sx={{ px: 2, py: 0.75, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'rgba(2,6,23,0.15)' }}>
-                    <Chip label={c.symbol} size="small" sx={{ fontFamily: 'monospace', fontWeight: 800, minWidth: 70, justifyContent: 'center' }} />
-                    <Chip label={c.key} size="small" variant="outlined" sx={{ fontFamily: 'monospace', fontSize: 12, minWidth: 100 }} />
-                    <Typography variant="body2" sx={{ flex: 1 }}>{c.label}</Typography>
-                  </Stack>
-                ))}
-              </Stack>
-            </Stack>
-          </CardContent>
-        </Card>
-
-        {/* Limits & tips */}
-        <Card sx={{ borderColor: 'rgba(148,163,184,0.35)', background: 'linear-gradient(180deg, rgba(2,6,23,0.35) 0%, rgba(15,23,42,0.65) 100%)', boxShadow: 'none' }}>
-          <CardContent>
-            <Stack spacing={2}>
-              <Typography variant="h5" sx={{ fontWeight: 900 }}>Limits</Typography>
-              <Stack spacing={0.75}>
-                {[
-                  ['Max sources', String(STRATEGY_LIMITS.maxSources)],
-                  ['Max metrics', String(STRATEGY_LIMITS.maxMetrics)],
-                  ['Max conditions', String(STRATEGY_LIMITS.maxConditions)],
-                  ['Max window / periods', String(STRATEGY_LIMITS.maxWindow)],
-                  ['Max lookback (persistence)', `${STRATEGY_LIMITS.maxLookbackDays} days`],
-                ].map(([label, val]) => (
-                  <Stack key={label} direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 2, py: 0.75, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'rgba(2,6,23,0.15)' }}>
-                    <Typography variant="body2" sx={{ fontWeight: 600 }}>{label}</Typography>
-                    <Chip label={val} size="small" sx={{ fontFamily: 'monospace', fontWeight: 700 }} />
-                  </Stack>
-                ))}
-              </Stack>
-            </Stack>
-          </CardContent>
-        </Card>
-
-        {/* Tips */}
-        <Card sx={{ borderColor: 'rgba(148,163,184,0.35)', background: 'linear-gradient(180deg, rgba(2,6,23,0.35) 0%, rgba(15,23,42,0.65) 100%)', boxShadow: 'none' }}>
-          <CardContent>
-            <Stack spacing={2}>
-              <Typography variant="h5" sx={{ fontWeight: 900 }}>Tips for writing prompts</Typography>
-              <Stack component="ul" spacing={1} sx={{ pl: 2 }}>
-                {[
-                  'Be specific about time windows: "200-day moving average" is better than "long-term average".',
-                  'Name the series when possible: "MVRV below 2" is clearer than "valuation is cheap".',
-                  'For ambiguous concepts like "dollar is weak", the LLM will default to DXY_SCORE >= 1 (CoinStrat\'s pre-computed dollar regime score).',
-                  'Use "and" for conditions that must all be true, "or" for conditions where any one is sufficient.',
-                  'To detect a rising moving average, the model will use diff(rolling_mean, periods=1) > 0.',
-                  'You can always review and edit the generated JSON before saving.',
-                ].map((tip) => (
-                  <Typography component="li" variant="body2" key={tip} sx={{ lineHeight: 1.75 }}>{tip}</Typography>
-                ))}
-              </Stack>
-            </Stack>
-          </CardContent>
-        </Card>
-
-        {/* Example prompts */}
-        <Card sx={{ borderColor: 'rgba(148,163,184,0.35)', background: 'linear-gradient(180deg, rgba(2,6,23,0.35) 0%, rgba(15,23,42,0.65) 100%)', boxShadow: 'none' }}>
-          <CardContent>
-            <Stack spacing={2.5}>
-              <Box>
-                <Typography variant="h5" sx={{ fontWeight: 900 }}>Example prompts</Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                  Copy any of these into the builder to see how the LLM translates them. Each one highlights a different capability.
-                </Typography>
-              </Box>
-              {EXAMPLE_PROMPTS.map((ex) => (
-                <Box key={ex.title} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, px: 2, py: 1.5, bgcolor: 'rgba(2,6,23,0.15)' }}>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 0.5 }}>{ex.title}</Typography>
-                  <Typography variant="body2" sx={{
-                    fontStyle: 'italic',
-                    bgcolor: 'rgba(0,0,0,0.25)',
-                    px: 1.5,
-                    py: 1,
-                    borderRadius: 1,
-                    lineHeight: 1.75,
-                    mb: 1,
-                  }}>
-                    &ldquo;{ex.prompt}&rdquo;
-                  </Typography>
-                  <Typography variant="body2" sx={{ lineHeight: 1.75, mb: 1 }}>{ex.explanation}</Typography>
-                  <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                    {ex.concepts.map((concept) => (
-                      <Chip key={concept} label={concept} size="small" variant="outlined" sx={{ fontSize: 11 }} />
-                    ))}
-                  </Stack>
-                </Box>
-              ))}
-            </Stack>
-          </CardContent>
-        </Card>
+                  ))}
+                </Stack>
+              </CardContent>
+            </Card>
+          </>
+        )}
 
         <DocsPager />
       </Stack>

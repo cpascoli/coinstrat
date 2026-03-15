@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Button, Card, CardContent, Stack, Typography } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
-import { Activity, BarChart3, Binary, Database, Key } from 'lucide-react';
+import { Activity, BarChart3, Binary, Database, Workflow } from 'lucide-react';
 import DocsPageLayout from '../components/DocsPageLayout';
 import DocsPager from '../components/DocsPager';
 
@@ -55,11 +55,11 @@ const DocsHome: React.FC = () => {
             onClick={() => navigate('/docs/signals')}
           />
           <DocsCard
-            icon={<Key size={20} />}
-            title="Developer Workspace"
-            text="Programmatic access to CoinStrat signals, in-browser endpoint testing, API key management, and future developer tooling."
-            actionLabel="Open Developer Workspace"
-            onClick={() => navigate('/developer')}
+            icon={<Workflow size={20} />}
+            title="Signal Builder"
+            text="Build custom strategies in plain English. Learn about the available series, metric operators, comparators, and see example prompts."
+            actionLabel="Open Signal Builder Docs"
+            onClick={() => navigate('/docs/signal-builder')}
           />
         </Box>
 

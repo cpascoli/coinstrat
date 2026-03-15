@@ -407,25 +407,21 @@ const StrategyBuilder: React.FC = () => {
             <Typography sx={{ color: 'text.secondary', maxWidth: 780 }}>
               Describe the strategy you want in plain English. CoinStrat turns that into a constrained,
               reviewable strategy spec that you can preview, save, and alert on without running custom code.
-              {' '}
+            </Typography>
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               <Typography
-                component="span"
-                sx={{
-                  color: 'primary.main',
-                  cursor: 'pointer',
-                  fontWeight: 600,
-                  '&:hover': { textDecoration: 'underline' },
-                }}
-                onClick={() => navigate('/docs/signal-builder')}
-              >
+                  component="span"
+                  sx={{
+                    color: 'primary.main',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                    '&:hover': { textDecoration: 'underline' },
+                  }}
+                  onClick={() => navigate('/docs/signal-builder')}
+                >
                 <BookOpen size={13} style={{ verticalAlign: 'text-bottom', marginRight: 3 }} />
                 Learn more
               </Typography>
-            </Typography>
-            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-              <Chip label="Pro feature" size="small" variant="outlined" />
-              <Chip label="LLM with guardrails" size="small" variant="outlined" icon={<Bot size={12} />} />
-              <Chip label="Email notifications" size="small" variant="outlined" icon={<Sparkles size={12} />} />
             </Stack>
           </Stack>
         </Paper>

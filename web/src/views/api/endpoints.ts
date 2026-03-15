@@ -48,7 +48,7 @@ export const endpointGroups: EndpointGroup[] = [
     role: 'pro',
     label: 'Pro',
     description:
-      'Requires an API key (X-API-Key header). Available to Pro and Lifetime (1,000 calls/day) plus Pro+ (10,000 calls/day) subscribers.',
+      'Requires an API key (X-API-Key header) or a signed-in Pro session. Available to Pro and Lifetime (1,000 calls/day) plus Pro+ (10,000 calls/day) subscribers.',
     color: '#60a5fa',
     endpoints: [
       {
@@ -79,12 +79,40 @@ export const endpointGroups: EndpointGroup[] = [
         ],
       },
       {
+        id: 'series-detail',
+        method: 'GET',
+        path: '/api/pro/series-detail',
+        summary: 'Single series history',
+        description:
+          'Returns the full historical time series for a single catalog series key (e.g. BTCUSD, MVRV, DXY_SCORE). Includes the latest value and all daily data points.',
+        auth: 'admin_jwt',
+        params: [
+          {
+            name: 'key',
+            in: 'query',
+            type: 'string',
+            required: true,
+            description: 'Series key from the catalog (e.g. BTCUSD, MVRV, US_LIQ)',
+            placeholder: 'BTCUSD',
+          },
+        ],
+      },
+      {
+        id: 'alert-preferences',
+        method: 'GET',
+        path: '/api/pro/alerts/preferences',
+        summary: 'Get alert preferences',
+        description:
+          'Returns the caller\'s signal alert preferences including enabled state, subscribed alert keys, and tier eligibility.',
+        auth: 'admin_jwt',
+      },
+      {
         id: 'strategy-interpret',
         method: 'POST',
         path: '/api/pro/strategies/interpret',
         summary: 'Interpret natural-language strategy',
         description:
-          'Turns a plain-English strategy prompt into a constrained draft strategy spec using the configured LLM provider or the built-in heuristic fallback. Requires a signed-in paid account in the browser.',
+          'Turns a plain-English strategy prompt into a constrained draft strategy spec using the configured LLM provider or the built-in heuristic fallback.',
         auth: 'admin_jwt',
       },
       {
@@ -102,7 +130,7 @@ export const endpointGroups: EndpointGroup[] = [
         path: '/api/pro/strategies',
         summary: 'List saved custom strategies',
         description:
-          'Returns the caller’s saved Signal Builder strategies, active preview metadata, and alert configuration.',
+          'Returns the caller\'s saved Signal Builder strategies, active preview metadata, and alert configuration.',
         auth: 'admin_jwt',
       },
     ],
@@ -129,7 +157,7 @@ export const endpointGroups: EndpointGroup[] = [
         path: '/api/email/digest',
         summary: 'Send weekly digest email',
         description:
-          'Runs the weekly newsletter workflow manually or via admin/cron auth. Netlify also runs a separate daily scheduled function at 00:30 UTC that checks the saved newsletter settings and broadcasts automatically once the configured weekday and UTC hour have been reached.',
+          'Runs the weekly newsletter workflow manually or via admin/cron auth. Checks the saved newsletter settings and broadcasts automatically once the configured weekday and UTC hour have been reached.',
         auth: 'admin_jwt',
       },
       {
@@ -139,6 +167,24 @@ export const endpointGroups: EndpointGroup[] = [
         summary: 'Run scheduled alert workflow',
         description:
           'Admin-only manual trigger for the same workflow used by the 4-hour scheduled alert job: refresh the signal cache, create any new fixed/strategy alert events, and deliver up to 50 pending alert emails.',
+        auth: 'admin_jwt',
+      },
+      {
+        id: 'admin-users',
+        method: 'GET',
+        path: '/api/admin/users',
+        summary: 'List and manage users',
+        description:
+          'Returns user profiles with tier, email, and admin status. Supports search queries and pagination. Also allows updating user tiers and admin flags via POST.',
+        auth: 'admin_jwt',
+      },
+      {
+        id: 'admin-newsletter',
+        method: 'GET',
+        path: '/api/admin/newsletter',
+        summary: 'Newsletter dashboard',
+        description:
+          'Returns newsletter settings, subscriber counts, and issue history. Supports composing, sending, and test-sending newsletter issues via POST/PUT.',
         auth: 'admin_jwt',
       },
     ],
