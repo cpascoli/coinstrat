@@ -186,7 +186,7 @@ export async function refreshSignals(
     walcl, tga, rrp, dxyRaw, sahm, yc, newOrders,
     btcPrices, mvrv,
     ecbAssets, bojAssets, eurUsd, jpyUsd,
-    lthSopr, nupl, supplyInProfit,
+    lthSopr, nupl, supplyInProfit, sthRealizedPrice, lthRealizedPrice,
   ] = await Promise.all([
     fetchFredSeries('WALCL', fullHistory),
     fetchFredSeries('WTREGEN', fullHistory),
@@ -204,6 +204,8 @@ export async function refreshSignals(
     fetchBGeometrics('lth_sopr'),
     fetchBGeometrics('lth_nupl'),
     fetchBGeometrics('profit_loss'),
+    fetchBGeometrics('sth_realized_price'),
+    fetchBGeometrics('lth_realized_price'),
   ]);
 
   const rrpM = rrp.map((o) => ({ ...o, value: o.value * 1000 }));
@@ -231,7 +233,7 @@ export async function refreshSignals(
   const cachedByDate = new Map(cachedSignals.map((s) => [s.Date, s]));
   const seedKeys = [
     'BTCUSD', 'DXY', 'SAHM', 'YC_M', 'NO', 'MVRV', 'US_LIQ', 'SIP', 'LTH_SOPR',
-    'NUPL', 'ECB_RAW', 'BOJ_RAW', 'EURUSD', 'JPYUSD', 'WALCL', 'WTREGEN', 'RRPONTSYD',
+    'NUPL', 'STH_REALIZED_PRICE', 'LTH_REALIZED_PRICE', 'ECB_RAW', 'BOJ_RAW', 'EURUSD', 'JPYUSD', 'WALCL', 'WTREGEN', 'RRPONTSYD',
     'G3_ASSETS',
   ];
 
@@ -254,6 +256,8 @@ export async function refreshSignals(
   overlaySeries(mvrv, daily, allDates, 'MVRV');
   overlaySeries(lthSopr, daily, allDates, 'LTH_SOPR');
   overlaySeries(nupl, daily, allDates, 'NUPL');
+  overlaySeries(sthRealizedPrice, daily, allDates, 'STH_REALIZED_PRICE');
+  overlaySeries(lthRealizedPrice, daily, allDates, 'LTH_REALIZED_PRICE');
   overlaySeries(supplyInProfit, daily, allDates, 'SIP');
   overlaySeries(ecbAssets, daily, allDates, 'ECB_RAW');
   overlaySeries(bojAssets, daily, allDates, 'BOJ_RAW');

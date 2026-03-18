@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-  AreaChart, Area, ReferenceArea, ReferenceLine 
+  AreaChart, Area, Brush, ReferenceArea, ReferenceLine 
 } from 'recharts';
 import { SignalData } from '../App';
 import { format } from 'date-fns';
@@ -312,7 +312,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
         if (!Number.isFinite(v)) return String(value);
 
         // Prices
-        if (name.includes('BTC')) return `$${v.toLocaleString()}`;
+        if (name.includes('BTC') || name.includes('Realized Price')) return `$${v.toLocaleString()}`;
 
         // Liquidity levels (WALCL, TGA, RRP, US_LIQ) are in "millions" -> show trillions
         const trillionsKeys = new Set(['WALCL', 'WTREGEN', 'RRPONTSYD', 'US_LIQ']);
@@ -356,6 +356,17 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       return String(value);
     }
   };
+
+  const renderChartBrush = () => (
+    <Brush
+      dataKey="ts"
+      height={22}
+      stroke="#60a5fa"
+      fill="rgba(15, 23, 42, 0.92)"
+      travellerWidth={10}
+      tickFormatter={xTickFormatter}
+    />
+  );
 
   // Split LTH_SOPR into profit (>=1, green) and loss (<1, red) series for conditional coloring.
   // Each segment includes the boundary point from the other side so lines connect seamlessly.
@@ -459,6 +470,16 @@ const ChartsView: React.FC<Props> = ({ data }) => {
     const max = Math.max(...vals);
     const pad = (max - min) * 0.06 || 1;
     return { y1: min - pad, y2: max + pad };
+  }, [chartData]);
+
+  const realizedPriceDomain = useMemo(() => {
+    const vals = (chartData as any[])
+      .flatMap((d) => [Number(d.STH_REALIZED_PRICE), Number(d.LTH_REALIZED_PRICE), Number(d.BTCUSD)])
+      .filter((v) => Number.isFinite(v) && v > 0);
+    if (!vals.length) return { y1: 1, y2: 10 };
+    const min = Math.min(...vals);
+    const max = Math.max(...vals);
+    return { y1: Math.max(min * 0.9, 1e-6), y2: max * 1.1 };
   }, [chartData]);
 
   return (
@@ -932,6 +953,42 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               <Line yAxisId="nupl" type="monotone" dataKey="NUPL_POS" name="NUPL (profit)" stroke="#22c55e" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls={false} />
               <Line yAxisId="nupl" type="monotone" dataKey="NUPL_NEG" name="NUPL (loss)" stroke="#ef4444" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls={false} />
               <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.5} dot={false} isAnimationActive={false} opacity={0.5} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Box>
+      </Paper>
+      )}
+
+      {/* Supply in Profit (SIP) — Euphoria Exhaustion exit logic */}
+      {section === 'valuation' && (
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Box sx={{ mb: 2.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            Holder Realized Prices
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            Short-term and long-term holder realized prices estimate the average on-chain cost basis for each cohort.
+            <br />
+            They are useful valuation anchors for spotting when spot price reclaims or loses key holder cost-basis zones.
+          </Typography>
+        </Box>
+
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="STH Realized Price" sx={{ borderColor: '#f97316', color: '#fdba74' }} />
+          <Chip size="small" variant="outlined" label="LTH Realized Price" sx={{ borderColor: '#38bdf8', color: '#bae6fd' }} />
+          <Chip size="small" variant="outlined" label="BTCUSD (shared log scale)" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
+        </Stack>
+
+        <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart key={`holder-realized-${range}`} data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis yAxisId="price" scale="log" domain={[realizedPriceDomain.y1, realizedPriceDomain.y2]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
+              <Tooltip content={<CustomTooltip />} />
+              <Line yAxisId="price" type="monotone" dataKey="STH_REALIZED_PRICE" name="STH Realized Price" stroke="#f97316" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
+              <Line yAxisId="price" type="monotone" dataKey="LTH_REALIZED_PRICE" name="LTH Realized Price" stroke="#38bdf8" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
+              <Line yAxisId="price" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.5} dot={false} isAnimationActive={false} opacity={0.5} />
             </LineChart>
           </ResponsiveContainer>
         </Box>

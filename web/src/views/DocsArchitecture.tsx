@@ -111,7 +111,6 @@ const DocsArchitecture: React.FC = () => {
                 'Derived Metrics',
                 'Scores',
                 'Signals',
-                'Portfolio Permission',
               ].map((step) => (
                 <Chip
                   key={step}

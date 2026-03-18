@@ -84,10 +84,10 @@ const Home: React.FC<HomeProps> = ({ hasFreeAccess = false, isAuthenticated = fa
                 }}
                 sx={{ fontWeight: 900 }}
               >
-                {hasFreeAccess ? 'Open Dashboard' : isAuthenticated ? 'Open Profile' : 'Unlock Free Access'}
+                {hasFreeAccess ? 'Open Dashboard' : isAuthenticated ? 'Open Profile' : 'Sign-in'}
               </Button>
               <Button variant="outlined" size="medium" onClick={() => navigate('/docs')} sx={{ fontWeight: 900 }}>
-                See How It Works
+                Learn More
               </Button>
             </Stack>
           </Box>

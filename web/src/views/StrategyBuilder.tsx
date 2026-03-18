@@ -898,6 +898,13 @@ function seriesGroupIcon(group: string) {
 
 function formatSeriesValue(value: number | null, key: string): string {
   if (value == null) return '—';
+  if (['BTCUSD', 'STH_REALIZED_PRICE', 'LTH_REALIZED_PRICE'].includes(key)) {
+    return value.toLocaleString(undefined, {
+      style: 'currency',
+      currency: 'USD',
+      maximumFractionDigits: value >= 1000 ? 0 : 2,
+    });
+  }
   if (['CORE_ON', 'MACRO_ON', 'ACCUM_ON', 'PRICE_REGIME_ON', 'SIP_EXHAUSTED'].includes(key)) {
     return value === 1 ? 'ON' : 'OFF';
   }

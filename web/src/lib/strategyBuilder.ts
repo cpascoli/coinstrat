@@ -3,6 +3,8 @@ export const STRATEGY_SERIES_CATALOG = [
   { key: 'MVRV', label: 'MVRV', kind: 'raw', group: 'valuation', description: 'BTC market value to realized value ratio.' },
   { key: 'LTH_SOPR', label: 'LTH SOPR', kind: 'raw', group: 'valuation', description: 'Long-term holder SOPR.' },
   { key: 'NUPL', label: 'NUPL', kind: 'raw', group: 'valuation', description: 'Net unrealized profit/loss.' },
+  { key: 'STH_REALIZED_PRICE', label: 'STH Realized Price', kind: 'raw', group: 'valuation', description: 'Short-term holder realized price in USD.' },
+  { key: 'LTH_REALIZED_PRICE', label: 'LTH Realized Price', kind: 'raw', group: 'valuation', description: 'Long-term holder realized price in USD.' },
   { key: 'SIP', label: 'Supply In Profit', kind: 'raw', group: 'valuation', description: 'Supply in profit percentage.' },
   { key: 'DXY', label: 'DXY', kind: 'raw', group: 'macro', description: 'US Dollar Index.' },
   { key: 'SAHM', label: 'Sahm Rule', kind: 'raw', group: 'macro', description: 'Realtime Sahm Rule value.' },

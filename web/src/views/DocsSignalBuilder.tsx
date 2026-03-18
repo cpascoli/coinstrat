@@ -173,6 +173,22 @@ const EXAMPLE_PROMPTS: ExamplePrompt[] = [
     concepts: ['rolling_min', 'reference comparison', 'on-chain series'],
   },
   {
+    title: 'STH cost-basis reclaim',
+    prompt: 'Alert me when BTC rises above the short-term holder realized price and MVRV is below 2.5.',
+    explanation:
+      'Uses the new short-term holder realized price feed as an on-chain support/resistance anchor. '
+      + 'This is a good example of combining spot-price structure with a valuation filter.',
+    concepts: ['STH_REALIZED_PRICE', 'reference comparison', 'on-chain support', 'MVRV'],
+  },
+  {
+    title: 'Holder cost-basis spread',
+    prompt: 'Signal ON when the short-term holder realized price is above the long-term holder realized price and BTC is above the long-term holder realized price.',
+    explanation:
+      'Shows that you can reference multiple on-chain price anchors directly, without first turning them into scores. '
+      + 'This kind of setup can be useful for tracking whether recent holders and long-term holders are both in a constructive regime.',
+    concepts: ['STH_REALIZED_PRICE', 'LTH_REALIZED_PRICE', 'multi-source comparison', 'on-chain valuation'],
+  },
+  {
     title: 'Rate-of-change momentum',
     prompt: 'Signal ON when the 30-day percent change in US net liquidity is above 2% and BTC is above its 50-day moving average.',
     explanation:
@@ -231,6 +247,13 @@ function seriesGroupIcon(group: string) {
 
 function formatSeriesValue(value: number | null, key: string): string {
   if (value == null) return '—';
+  if (['BTCUSD', 'STH_REALIZED_PRICE', 'LTH_REALIZED_PRICE'].includes(key)) {
+    return value.toLocaleString(undefined, {
+      style: 'currency',
+      currency: 'USD',
+      maximumFractionDigits: value >= 1000 ? 0 : 2,
+    });
+  }
   if (['CORE_ON', 'MACRO_ON', 'ACCUM_ON', 'PRICE_REGIME_ON', 'SIP_EXHAUSTED'].includes(key)) {
     return value === 1 ? 'ON' : 'OFF';
   }

@@ -10,7 +10,13 @@ import fetch from 'node-fetch';
  * The file parameter maps to https://charts.bgeometrics.com/files/<file>.json
  */
 
-const ALLOWED_FILES = new Set(['lth_sopr', 'lth_nupl', 'profit_loss']);
+const ALLOWED_FILES = new Set([
+  'lth_sopr',
+  'lth_nupl',
+  'profit_loss',
+  'sth_realized_price',
+  'lth_realized_price',
+]);
 
 export const handler: Handler = async (event) => {
   // Extract file name from query or path

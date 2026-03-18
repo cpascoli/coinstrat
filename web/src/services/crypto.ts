@@ -163,6 +163,20 @@ export async function fetchSupplyInProfit(): Promise<PricePoint[]> {
 }
 
 /**
+ * Fetch Short-Term Holders Realized Price from BGeometrics.
+ */
+export async function fetchSTHRealizedPrice(): Promise<PricePoint[]> {
+  return fetchBGeometrics('sth_realized_price');
+}
+
+/**
+ * Fetch Long-Term Holders Realized Price from BGeometrics.
+ */
+export async function fetchLTHRealizedPrice(): Promise<PricePoint[]> {
+  return fetchBGeometrics('lth_realized_price');
+}
+
+/**
  * Fetch MVRV from Blockchain.info
  */
 export async function fetchMVRV(): Promise<PricePoint[]> {

@@ -67,6 +67,8 @@ export interface SignalData {
   YC_M?: number;
   NO_YOY?: number;
   MVRV?: number;
+  STH_REALIZED_PRICE?: number;
+  LTH_REALIZED_PRICE?: number;
   // Euphoria Exhaustion diagnostics
   SIP?: number;                // Supply in Profit (%)
   SIP_EUPHORIA_FLAG?: number;  // 1 if euphoria detected this cycle
@@ -130,16 +132,19 @@ const App: React.FC = () => {
     navigate(t?.path ?? '/dashboard');
   };
 
-  const requiresAppAccess = useMemo(() => {
+  const requiresMemberAccess = useMemo(() => {
     const p = location.pathname;
     return p === '/dashboard'
       || p === '/scores'
-      || p === '/signals'
-      || p === '/backtest'
-      || p.startsWith('/charts');
+      || p === '/signals';
   }, [location.pathname]);
 
-  const authRedirectTo = requiresAppAccess
+  const isPublicDataRoute = useMemo(() => {
+    const p = location.pathname;
+    return p === '/backtest' || p.startsWith('/charts');
+  }, [location.pathname]);
+
+  const authRedirectTo = requiresMemberAccess
     ? `${location.pathname}${location.search}${location.hash}`
     : '/dashboard';
   const modalRedirectTo = authRedirectOverride ?? authRedirectTo;
@@ -154,8 +159,31 @@ const App: React.FC = () => {
     setAuthRedirectOverride(null);
   };
 
-  const shouldLoadData = requiresAppAccess && hasFreeAccess;
+  const shouldLoadData = isPublicDataRoute || (requiresMemberAccess && hasFreeAccess);
   const showAppNavigation = hasFreeAccess;
+  const showDesktopDashboard = hasFreeAccess;
+
+  const desktopPrimaryLinks = useMemo(() => {
+    const docsActive = location.pathname.startsWith('/docs')
+      || location.pathname === '/developer'
+      || location.pathname === '/api-docs'
+      || location.pathname === '/strategy-builder';
+
+    return [
+      ...(showDesktopDashboard
+        ? [{ key: 'dashboard', path: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-5 w-5" />, active: location.pathname === '/dashboard' }]
+        : []),
+      ...(showDesktopDashboard
+        ? [
+            { key: 'signals', path: '/signals', label: 'Signals', icon: <Binary className="h-5 w-5" />, active: location.pathname === '/signals' },
+            { key: 'scores', path: '/scores', label: 'Scores', icon: <BarChart3 className="h-5 w-5" />, active: location.pathname === '/scores' },
+          ]
+        : []),
+      { key: 'docs', path: '/docs', label: 'Docs', icon: <BookOpen className="h-5 w-5" />, active: docsActive },
+      { key: 'charts', path: '/charts/system', label: 'Charts', icon: <Activity className="h-5 w-5" />, active: location.pathname.startsWith('/charts') },
+      { key: 'backtest', path: '/backtest', label: 'Backtest', icon: <FlaskConical className="h-5 w-5" />, active: location.pathname === '/backtest' },
+    ];
+  }, [location.pathname, showDesktopDashboard]);
 
   useEffect(() => {
     if (!shouldLoadData) {
@@ -218,7 +246,13 @@ const App: React.FC = () => {
     </Paper>
   );
 
-  const gate = (node: React.ReactElement) => {
+  const renderDataRoute = (node: React.ReactElement) => {
+    if (error) return DataError;
+    if (loading || !lastData) return DataLoading;
+    return node;
+  };
+
+  const gateMemberRoute = (node: React.ReactElement) => {
     if (authLoading) {
       return (
         <Paper sx={{ p: 3 }}>
@@ -276,9 +310,7 @@ const App: React.FC = () => {
       );
     }
 
-    if (error) return DataError;
-    if (loading || !lastData) return DataLoading;
-    return node;
+    return renderDataRoute(node);
   };
 
   return (
@@ -330,14 +362,14 @@ const App: React.FC = () => {
             </Typography>
           </Box>
 
-          {/* Desktop tab buttons */}
-          {isMdUp && showAppNavigation && (
+          {/* Desktop primary navigation */}
+          {isMdUp && (
             <Box sx={{ display: 'flex', gap: 1 }}>
-              {tabs.map((t) => (
+              {desktopPrimaryLinks.map((item) => (
                 <Paper
-                  key={t.key}
+                  key={item.key}
                   component="button"
-                  onClick={() => goToTab(t.key)}
+                  onClick={() => navigate(item.path)}
                   sx={{
                     cursor: 'pointer',
                     px: 1.5,
@@ -345,41 +377,18 @@ const App: React.FC = () => {
                     display: 'flex',
                     alignItems: 'center',
                     gap: 1,
-                    bgcolor: activeTab === t.key ? 'primary.main' : 'background.paper',
-                    color: activeTab === t.key ? 'primary.contrastText' : 'text.primary',
-                    borderColor: activeTab === t.key ? 'primary.main' : 'divider',
+                    bgcolor: item.active ? 'primary.main' : 'background.paper',
+                    color: item.active ? 'primary.contrastText' : 'text.primary',
+                    borderColor: item.active ? 'primary.main' : 'divider',
                     '&:hover': { borderColor: 'primary.main' },
                   }}
                 >
-                  {t.icon}
+                  {item.icon}
                   <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                    {t.label}
+                    {item.label}
                   </Typography>
                 </Paper>
               ))}
-              {!user && (
-                <Paper
-                  component="button"
-                  onClick={() => navigate('/docs')}
-                  sx={{
-                    cursor: 'pointer',
-                    px: 1.5,
-                    py: 1,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1,
-                    bgcolor: location.pathname.startsWith('/docs') ? 'primary.main' : 'background.paper',
-                    color: location.pathname.startsWith('/docs') ? 'primary.contrastText' : 'text.primary',
-                    borderColor: location.pathname.startsWith('/docs') ? 'primary.main' : 'divider',
-                    '&:hover': { borderColor: 'primary.main' },
-                  }}
-                >
-                  <BookOpen className="h-5 w-5" />
-                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                    Docs
-                  </Typography>
-                </Paper>
-              )}
             </Box>
           )}
 
@@ -445,10 +454,6 @@ const App: React.FC = () => {
                   transformOrigin={{ vertical: 'top', horizontal: 'right' }}
                   PaperProps={{ sx: { minWidth: 180 } }}
                 >
-                  <MenuItem onClick={() => { setAnchorEl(null); navigate('/docs'); }}>
-                    <ListItemIcon><BookOpen size={16} /></ListItemIcon>
-                    <ListItemText>Docs</ListItemText>
-                  </MenuItem>
                   <MenuItem onClick={() => { setAnchorEl(null); navigate('/developer'); }}>
                     <ListItemIcon><Key size={16} /></ListItemIcon>
                     <ListItemText>Developer</ListItemText>
@@ -495,11 +500,11 @@ const App: React.FC = () => {
           <Route path="/docs/scores" element={<DocsScores />} />
           <Route path="/docs/signals" element={<DocsSignals />} />
           <Route path="/docs/signal-builder" element={<DocsSignalBuilder />} />
-          <Route path="/dashboard" element={gate(<Dashboard current={lastData as SignalData} history={data} />)} />
-          <Route path="/scores" element={gate(<ScoreBreakdown current={lastData as SignalData} />)} />
-          <Route path="/signals" element={gate(<LogicFlow current={lastData as SignalData} />)} />
-          <Route path="/charts/*" element={gate(<ChartsView data={data} />)} />
-          <Route path="/backtest" element={gate(<Backtest data={data} />)} />
+          <Route path="/dashboard" element={gateMemberRoute(<Dashboard current={lastData as SignalData} history={data} />)} />
+          <Route path="/scores" element={gateMemberRoute(<ScoreBreakdown current={lastData as SignalData} />)} />
+          <Route path="/signals" element={gateMemberRoute(<LogicFlow current={lastData as SignalData} />)} />
+          <Route path="/charts/*" element={renderDataRoute(<ChartsView data={data} />)} />
+          <Route path="/backtest" element={renderDataRoute(<Backtest data={data} />)} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/admin" element={<Admin />} />
           <Route path="/api-docs" element={<Navigate to="/developer" replace />} />

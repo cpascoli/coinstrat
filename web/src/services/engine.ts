@@ -1,5 +1,14 @@
 import { fetchFredSeries, FredObservation } from './fred';
-import { fetchBTCPrice, fetchMVRV, fetchLTH_SOPR, fetchNUPL, fetchSupplyInProfit, PricePoint } from './crypto';
+import {
+  fetchBTCPrice,
+  fetchLTH_SOPR,
+  fetchLTHRealizedPrice,
+  fetchMVRV,
+  fetchNUPL,
+  fetchSTHRealizedPrice,
+  fetchSupplyInProfit,
+  PricePoint,
+} from './crypto';
 import { SignalData } from '../App';
 
 /**
@@ -56,7 +65,7 @@ export async function computeAllSignals(): Promise<SignalData[]> {
   const [
     walcl, tga, rrp, dxyRaw, sahm, yc, newOrders, btcPrice, mvrv,
     ecbAssets, bojAssets, eurUsd, jpyUsd,
-    lthSopr, nupl, supplyInProfit
+    lthSopr, nupl, supplyInProfit, sthRealizedPrice, lthRealizedPrice
   ] = await Promise.all([
     fetchFredSeries("WALCL"),
     fetchFredSeries("WTREGEN"),
@@ -76,6 +85,8 @@ export async function computeAllSignals(): Promise<SignalData[]> {
     fetchLTH_SOPR(),                // Long-Term Holder SOPR, daily
     fetchNUPL(),                    // Net Unrealized Profit/Loss, daily
     fetchSupplyInProfit(),          // Supply in Profit %, daily (Euphoria Exhaustion exit)
+    fetchSTHRealizedPrice(),        // Short-Term Holders Realized Price, daily
+    fetchLTHRealizedPrice(),        // Long-Term Holders Realized Price, daily
   ]);
 
   // Unit normalization:
@@ -129,6 +140,8 @@ export async function computeAllSignals(): Promise<SignalData[]> {
   // On-chain valuation series (LTH_SOPR used in VAL_SCORE; NUPL display-only)
   fillSeries(lthSopr, "LTH_SOPR");
   fillSeries(nupl, "NUPL");
+  fillSeries(sthRealizedPrice, "STH_REALIZED_PRICE");
+  fillSeries(lthRealizedPrice, "LTH_REALIZED_PRICE");
 
   // Supply in Profit (%) — used in Euphoria Exhaustion exit logic
   fillSeries(supplyInProfit, "SIP");
