@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  ReferenceArea,
+  Brush, ReferenceArea,
 } from 'recharts';
 import { SignalData } from '../App';
 import {
@@ -223,6 +223,17 @@ const Backtest: React.FC<Props> = ({ data }) => {
       return String(value);
     }
   };
+
+  const renderChartBrush = () => (
+    <Brush
+      dataKey="ts"
+      height={22}
+      stroke="#60a5fa"
+      fill="rgba(15, 23, 42, 0.92)"
+      travellerWidth={10}
+      tickFormatter={xTickFormatter}
+    />
+  );
 
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
@@ -518,7 +529,7 @@ const Backtest: React.FC<Props> = ({ data }) => {
                       yAxisId="pv"
                       x1={s.x1}
                       x2={s.x2}
-                      ifOverflow="extendDomain"
+                      ifOverflow="hidden"
                       fill={c.fill}
                       fillOpacity={c.alpha}
                       strokeOpacity={0}
@@ -561,6 +572,7 @@ const Backtest: React.FC<Props> = ({ data }) => {
                   }
                 />
                 <Tooltip content={<CustomTooltip />} />
+                {renderChartBrush()}
                 <Line
                   yAxisId="btcPrice"
                   type="monotone"
@@ -655,6 +667,7 @@ const Backtest: React.FC<Props> = ({ data }) => {
                   }
                 />
                 <Tooltip content={<BtcTooltip />} />
+                {renderChartBrush()}
                 {results.map(r => (
                   <Line
                     key={r.name}

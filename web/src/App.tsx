@@ -173,17 +173,16 @@ const App: React.FC = () => {
       ...(showDesktopDashboard
         ? [{ key: 'dashboard', path: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-5 w-5" />, active: location.pathname === '/dashboard' }]
         : []),
-      ...(showDesktopDashboard
+      ...(isAuthenticated
         ? [
-            { key: 'signals', path: '/signals', label: 'Signals', icon: <Binary className="h-5 w-5" />, active: location.pathname === '/signals' },
-            { key: 'scores', path: '/scores', label: 'Scores', icon: <BarChart3 className="h-5 w-5" />, active: location.pathname === '/scores' },
+            { key: 'signal-builder', path: '/strategy-builder', label: 'Signal Builder', icon: <Workflow className="h-5 w-5" />, active: location.pathname === '/strategy-builder' },
           ]
         : []),
       { key: 'docs', path: '/docs', label: 'Docs', icon: <BookOpen className="h-5 w-5" />, active: docsActive },
       { key: 'charts', path: '/charts/system', label: 'Charts', icon: <Activity className="h-5 w-5" />, active: location.pathname.startsWith('/charts') },
       { key: 'backtest', path: '/backtest', label: 'Backtest', icon: <FlaskConical className="h-5 w-5" />, active: location.pathname === '/backtest' },
     ];
-  }, [location.pathname, showDesktopDashboard]);
+  }, [isAuthenticated, location.pathname, showDesktopDashboard]);
 
   useEffect(() => {
     if (!shouldLoadData) {
@@ -407,31 +406,15 @@ const App: React.FC = () => {
               >
                 <MenuItem onClick={() => { setDocsAnchorEl(null); navigate('/docs'); }}>
                   <ListItemIcon><BookOpen size={16} /></ListItemIcon>
-                  <ListItemText>Docs Home</ListItemText>
+                  <ListItemText>Docs</ListItemText>
                 </MenuItem>
-                <MenuItem onClick={() => { setDocsAnchorEl(null); navigate('/developer'); }}>
-                  <ListItemIcon><Key size={16} /></ListItemIcon>
-                  <ListItemText>Developer</ListItemText>
-                </MenuItem>
-                <MenuItem onClick={() => { setDocsAnchorEl(null); navigate('/docs/data'); }}>
-                  <ListItemIcon><Database size={16} /></ListItemIcon>
-                  <ListItemText>Data Feeds</ListItemText>
-                </MenuItem>
-                <MenuItem onClick={() => { setDocsAnchorEl(null); navigate('/docs/architecture'); }}>
+                <MenuItem onClick={() => { setDocsAnchorEl(null); navigate('/charts/system'); }}>
                   <ListItemIcon><Activity size={16} /></ListItemIcon>
-                  <ListItemText>Architecture</ListItemText>
+                  <ListItemText>Charts</ListItemText>
                 </MenuItem>
-                <MenuItem onClick={() => { setDocsAnchorEl(null); navigate('/docs/scores'); }}>
-                  <ListItemIcon><BarChart3 size={16} /></ListItemIcon>
-                  <ListItemText>Scores</ListItemText>
-                </MenuItem>
-                <MenuItem onClick={() => { setDocsAnchorEl(null); navigate('/docs/signals'); }}>
-                  <ListItemIcon><Binary size={16} /></ListItemIcon>
-                  <ListItemText>Signals</ListItemText>
-                </MenuItem>
-                <MenuItem onClick={() => { setDocsAnchorEl(null); navigate('/docs/signal-builder'); }}>
-                  <ListItemIcon><Workflow size={16} /></ListItemIcon>
-                  <ListItemText>Signal Builder</ListItemText>
+                <MenuItem onClick={() => { setDocsAnchorEl(null); navigate('/backtest'); }}>
+                  <ListItemIcon><FlaskConical size={16} /></ListItemIcon>
+                  <ListItemText>Backtest</ListItemText>
                 </MenuItem>
               </Menu>
             </>
@@ -454,11 +437,19 @@ const App: React.FC = () => {
                   transformOrigin={{ vertical: 'top', horizontal: 'right' }}
                   PaperProps={{ sx: { minWidth: 180 } }}
                 >
+                  <MenuItem onClick={() => { setAnchorEl(null); navigate('/signals'); }}>
+                    <ListItemIcon><Binary size={16} /></ListItemIcon>
+                    <ListItemText>Signals</ListItemText>
+                  </MenuItem>
+                  <MenuItem onClick={() => { setAnchorEl(null); navigate('/scores'); }}>
+                    <ListItemIcon><BarChart3 size={16} /></ListItemIcon>
+                    <ListItemText>Scores</ListItemText>
+                  </MenuItem>
                   <MenuItem onClick={() => { setAnchorEl(null); navigate('/developer'); }}>
                     <ListItemIcon><Key size={16} /></ListItemIcon>
                     <ListItemText>Developer</ListItemText>
                   </MenuItem>
-                {hasPaidBuilderAccess && (
+                {hasPaidBuilderAccess && !isMdUp && (
                   <MenuItem onClick={() => { setAnchorEl(null); navigate('/strategy-builder'); }}>
                     <ListItemIcon><Workflow size={16} /></ListItemIcon>
                     <ListItemText>Signal Builder</ListItemText>

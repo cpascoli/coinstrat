@@ -472,16 +472,6 @@ const ChartsView: React.FC<Props> = ({ data }) => {
     return { y1: min - pad, y2: max + pad };
   }, [chartData]);
 
-  const realizedPriceDomain = useMemo(() => {
-    const vals = (chartData as any[])
-      .flatMap((d) => [Number(d.STH_REALIZED_PRICE), Number(d.LTH_REALIZED_PRICE), Number(d.BTCUSD)])
-      .filter((v) => Number.isFinite(v) && v > 0);
-    if (!vals.length) return { y1: 1, y2: 10 };
-    const min = Math.min(...vals);
-    const max = Math.max(...vals);
-    return { y1: Math.max(min * 0.9, 1e-6), y2: max * 1.1 };
-  }, [chartData]);
-
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, pb: 1.5, borderBottom: '1px solid', borderColor: 'divider' }}>
@@ -558,7 +548,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                     x2={s.x2}
                     y1={btcDomain.y1}
                     y2={btcDomain.y2}
-                    ifOverflow="extendDomain"
+                    ifOverflow="hidden"
                     fill={c.fill}
                     fillOpacity={c.alpha}
                     strokeOpacity={0}
@@ -569,6 +559,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
               <YAxis yAxisId="btc" scale="log" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
               <Tooltip content={<CustomTooltip />} />
+              {renderChartBrush()}
               <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={2} dot={false} isAnimationActive={false} />
             </LineChart>
           </ResponsiveContainer>
@@ -612,7 +603,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                     x2={s.x2}
                     y1={btcDomain.y1}
                     y2={btcDomain.y2}
-                    ifOverflow="extendDomain"
+                    ifOverflow="hidden"
                     fill={c.fill}
                     fillOpacity={c.alpha}
                     strokeOpacity={0}
@@ -658,6 +649,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                 }}
               />
               <Tooltip content={<CustomTooltip />} />
+              {renderChartBrush()}
               
               <Line 
                 yAxisId="btc"
@@ -724,6 +716,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                   tickFormatter={(v) => (typeof v === 'number' ? `$${(v / 1e6).toFixed(1)}T` : '')}
                 />
                 <Tooltip content={<CustomTooltip />} />
+                {renderChartBrush()}
                 <Line yAxisId="lvl" type="monotone" dataKey="WALCL" name="WALCL" stroke="#e5e7eb" strokeWidth={2} dot={false} isAnimationActive={false} />
                 <Line yAxisId="lvl" type="monotone" dataKey="WTREGEN" name="WTREGEN" stroke="#fbbf24" strokeWidth={2} dot={false} isAnimationActive={false} />
                 <Line yAxisId="lvl" type="monotone" dataKey="RRPONTSYD" name="RRPONTSYD" stroke="#a78bfa" strokeWidth={2} dot={false} isAnimationActive={false} />
@@ -755,6 +748,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                   tickFormatter={(v) => (typeof v === 'number' ? `${v.toFixed(0)}%` : '')}
                 />
                 <Tooltip content={<CustomTooltip />} />
+                {renderChartBrush()}
                 <Line yAxisId="liq" type="monotone" dataKey="US_LIQ" name="US_LIQ" stroke="#60a5fa" strokeWidth={2} dot={false} isAnimationActive={false} />
                 <Line yAxisId="yoy" type="monotone" dataKey="US_LIQ_YOY" name="US_LIQ_YOY" stroke="#34d399" strokeWidth={2} dot={false} isAnimationActive={false} />
               </LineChart>
@@ -803,7 +797,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                     x2={s.x2}
                     y1={btcDomain.y1}
                     y2={btcDomain.y2}
-                    ifOverflow="extendDomain"
+                    ifOverflow="hidden"
                     fill={c.fill}
                     fillOpacity={c.alpha}
                     strokeOpacity={0}
@@ -815,6 +809,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               <YAxis yAxisId="btc" scale="log" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
               <YAxis yAxisId="mvrv" orientation="right" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => (typeof v === 'number' ? v.toFixed(2) : '')} />
               <Tooltip content={<CustomTooltip />} />
+              {renderChartBrush()}
               <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={2} dot={false} isAnimationActive={false} />
               <Line yAxisId="mvrv" type="monotone" dataKey="MVRV" name="MVRV" stroke="#fbbf24" strokeWidth={2} dot={false} isAnimationActive={false} />
             </LineChart>
@@ -857,7 +852,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                   x2={s.x2}
                   y1={btcDomain.y1}
                   y2={btcDomain.y2}
-                  ifOverflow="extendDomain"
+                  ifOverflow="hidden"
                   fill={s.value === 1 ? '#22c55e' : '#ef4444'}
                   fillOpacity={0.36}
                   strokeOpacity={0}
@@ -867,6 +862,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
               <YAxis yAxisId="btc" scale="log" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
               <Tooltip content={<CustomTooltip />} />
+              {renderChartBrush()}
               <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={2} dot={false} isAnimationActive={false} />
               <Line yAxisId="btc" type="monotone" dataKey="BTC_MA40W" name="BTC 40W MA" stroke="#fbbf24" strokeWidth={2} dot={false} isAnimationActive={false} />
             </LineChart>
@@ -907,6 +903,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               <YAxis yAxisId="btc" orientation="right" scale="log" domain={[btcDomain.y1, btcDomain.y2]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
               <ReferenceLine yAxisId="sopr" y={1} stroke="#94a3b8" strokeDasharray="6 3" strokeWidth={1.5} />
               <Tooltip content={<CustomTooltip />} />
+              {renderChartBrush()}
               <Line yAxisId="sopr" type="monotone" dataKey="LTH_SOPR_PROFIT" name="LTH SOPR (profit)" stroke="#22c55e" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls={false} />
               <Line yAxisId="sopr" type="monotone" dataKey="LTH_SOPR_LOSS" name="LTH SOPR (loss)" stroke="#ef4444" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls={false} />
               <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.5} dot={false} isAnimationActive={false} opacity={0.5} />
@@ -950,6 +947,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               <ReferenceLine yAxisId="nupl" y={0} stroke="#94a3b8" strokeDasharray="6 3" strokeWidth={1.5} />
               <ReferenceLine yAxisId="nupl" y={0.75} stroke="#ef4444" strokeDasharray="4 4" strokeWidth={1} label={{ value: 'Euphoria', fill: '#fca5a5', fontSize: 10, position: 'right' }} />
               <Tooltip content={<CustomTooltip />} />
+              {renderChartBrush()}
               <Line yAxisId="nupl" type="monotone" dataKey="NUPL_POS" name="NUPL (profit)" stroke="#22c55e" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls={false} />
               <Line yAxisId="nupl" type="monotone" dataKey="NUPL_NEG" name="NUPL (loss)" stroke="#ef4444" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls={false} />
               <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.5} dot={false} isAnimationActive={false} opacity={0.5} />
@@ -976,7 +974,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
         <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
           <Chip size="small" variant="outlined" label="STH Realized Price" sx={{ borderColor: '#f97316', color: '#fdba74' }} />
           <Chip size="small" variant="outlined" label="LTH Realized Price" sx={{ borderColor: '#38bdf8', color: '#bae6fd' }} />
-          <Chip size="small" variant="outlined" label="BTCUSD (shared log scale)" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
+          <Chip size="small" variant="outlined" label="BTCUSD" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
         </Stack>
 
         <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
@@ -984,8 +982,9 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             <LineChart key={`holder-realized-${range}`} data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
               <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-              <YAxis yAxisId="price" scale="log" domain={[realizedPriceDomain.y1, realizedPriceDomain.y2]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
+              <YAxis yAxisId="price" orientation="right" scale="log" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
               <Tooltip content={<CustomTooltip />} />
+              {renderChartBrush()}
               <Line yAxisId="price" type="monotone" dataKey="STH_REALIZED_PRICE" name="STH Realized Price" stroke="#f97316" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
               <Line yAxisId="price" type="monotone" dataKey="LTH_REALIZED_PRICE" name="LTH Realized Price" stroke="#38bdf8" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
               <Line yAxisId="price" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.5} dot={false} isAnimationActive={false} opacity={0.5} />
@@ -1034,7 +1033,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                   x2={s.x2}
                   y1={0}
                   y2={100}
-                  ifOverflow="extendDomain"
+                  ifOverflow="hidden"
                   fill={s.value === 2 ? '#ef4444' : '#22c55e'}
                   fillOpacity={0.36}
                   strokeOpacity={0}
@@ -1043,6 +1042,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               <ReferenceLine yAxisId="sip" y={95} stroke="#ef4444" strokeDasharray="6 3" strokeWidth={1.5} label={{ value: '95% Euphoria', fill: '#fca5a5', fontSize: 10, position: 'left' }} />
               <ReferenceLine yAxisId="sip" y={90} stroke="#f59e0b" strokeDasharray="4 4" strokeWidth={1} label={{ value: '90% Drop', fill: '#fde68a', fontSize: 10, position: 'left' }} />
               <Tooltip content={<CustomTooltip />} />
+              {renderChartBrush()}
               <Line yAxisId="sip" type="monotone" dataKey="SIP" name="Supply in Profit (%)" stroke="#facc15" strokeWidth={2} dot={false} isAnimationActive={false} />
               <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.5} dot={false} isAnimationActive={false} opacity={0.5} />
             </LineChart>
@@ -1101,6 +1101,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                 }}
               />
               <Tooltip content={<CustomTooltip />} />
+              {renderChartBrush()}
               <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={2} dot={false} isAnimationActive={false} />
               <Line yAxisId="g3" type="monotone" dataKey="G3_ASSETS" name="G3 Assets" stroke="#60a5fa" strokeWidth={2} dot={false} isAnimationActive={false} />
             </LineChart>
@@ -1143,6 +1144,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                 tickFormatter={(v) => (typeof v === 'number' ? `$${(v / 1e6).toFixed(1)}T` : '')}
               />
               <Tooltip content={<CustomTooltip />} />
+              {renderChartBrush()}
               <Line yAxisId="cb" type="monotone" dataKey="FED_USD" name="Fed (WALCL)" stroke="#e5e7eb" strokeWidth={2} dot={false} isAnimationActive={false} />
               <Line yAxisId="cb" type="monotone" dataKey="ECB_USD" name="ECB (USD)" stroke="#a78bfa" strokeWidth={2} dot={false} isAnimationActive={false} />
               <Line yAxisId="cb" type="monotone" dataKey="BOJ_USD" name="BOJ (USD)" stroke="#fbbf24" strokeWidth={2} dot={false} isAnimationActive={false} />
@@ -1184,6 +1186,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                 tickFormatter={(v) => (typeof v === 'number' ? `${v.toFixed(0)}%` : '')}
               />
               <Tooltip content={<CustomTooltip />} />
+              {renderChartBrush()}
               <Line
                 yAxisId="yoy"
                 type="monotone"
@@ -1255,7 +1258,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                     x2={s.x2}
                     y1={btcDomain.y1}
                     y2={btcDomain.y2}
-                    ifOverflow="extendDomain"
+                    ifOverflow="hidden"
                     fill={c.fill}
                     fillOpacity={c.alpha}
                     strokeOpacity={0}
@@ -1266,6 +1269,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
               <YAxis yAxisId="btc" scale="log" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
               <Tooltip content={<CustomTooltip />} />
+              {renderChartBrush()}
               <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTC Price" stroke="#e5e7eb" strokeWidth={2} dot={false} isAnimationActive={false} />
             </LineChart>
           </ResponsiveContainer>
@@ -1303,6 +1307,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                 <YAxis yAxisId="sahm" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
                 <YAxis yAxisId="yc" orientation="right" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
                 <Tooltip content={<CustomTooltip />} />
+                {renderChartBrush()}
                 <Line yAxisId="sahm" type="monotone" dataKey="SAHM" name="SAHM" stroke="#a78bfa" strokeWidth={2} dot={false} isAnimationActive={false} />
                 <Line yAxisId="yc" type="monotone" dataKey="YC_M" name="Yield Curve (10Y-3M)" stroke="#34d399" strokeWidth={2} dot={false} isAnimationActive={false} />
               </LineChart>
@@ -1317,6 +1322,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                 <YAxis yAxisId="no" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
                 <YAxis yAxisId="noy" orientation="right" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => (typeof v === 'number' ? `${v.toFixed(0)}%` : '')} />
                 <Tooltip content={<CustomTooltip />} />
+                {renderChartBrush()}
                 <Line yAxisId="no" type="monotone" dataKey="NO" name="New Orders (level)" stroke="#60a5fa" strokeWidth={2} dot={false} isAnimationActive={false} />
                 <Line yAxisId="noy" type="monotone" dataKey="NO_YOY" name="New Orders YoY (%)" stroke="#fbbf24" strokeWidth={2} dot={false} isAnimationActive={false} />
               </LineChart>
@@ -1370,6 +1376,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                 />
                 <YAxis yAxisId="usd" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
                 <Tooltip content={<CustomTooltip />} />
+                {renderChartBrush()}
                 <Line yAxisId="usd" type="monotone" dataKey="DXY" name="DTWEXBGS" stroke="#60a5fa" strokeWidth={2} dot={false} isAnimationActive={false} />
                 <Line yAxisId="usd" type="monotone" dataKey="DXY_MA50" name="MA50" stroke="#fbbf24" strokeWidth={2} dot={false} isAnimationActive={false} />
                 <Line yAxisId="usd" type="monotone" dataKey="DXY_MA200" name="MA200" stroke="#ef4444" strokeWidth={2} dot={false} isAnimationActive={false} />
@@ -1403,6 +1410,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                   tickFormatter={(v) => (typeof v === 'number' ? `${v.toFixed(1)}%` : '')}
                 />
                 <Tooltip content={<CustomTooltip />} />
+                {renderChartBrush()}
                 {/* Color ROC20 green above 0% and red below 0% */}
                 <Line
                   yAxisId="roc"
@@ -1474,7 +1482,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                   x2={s.x2}
                   y1={btcDomain.y1}
                   y2={btcDomain.y2}
-                  ifOverflow="extendDomain"
+                  ifOverflow="hidden"
                   fill={s.value === 1 ? '#22c55e' : '#ef4444'}
                   fillOpacity={0.36}
                   strokeOpacity={0}
@@ -1484,6 +1492,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
               <YAxis yAxisId="btc" scale="log" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
               <Tooltip content={<CustomTooltip />} />
+              {renderChartBrush()}
               <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={2} dot={false} isAnimationActive={false} />
             </LineChart>
           </ResponsiveContainer>
