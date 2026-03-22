@@ -108,6 +108,24 @@ const OPERATOR_DOCS: OperatorDoc[] = [
     requiredFields: ['periods (integer >= 1, max 400)', 'scale ("ratio" or "percent")'],
     example: '{ operator: "pct_change", input: "us_liq", periods: 90, scale: "percent" }',
   },
+  {
+    key: 'rsi',
+    label: 'RSI',
+    description:
+      'Computes the Relative Strength Index on a 0-100 scale. Useful for identifying momentum exhaustion or reclaim conditions '
+      + 'such as RSI crossing back above 30 from oversold territory.',
+    requiredFields: ['length (integer >= 2, max 400)', 'timeframe ("day", "week", or "month", optional)'],
+    example: '{ operator: "rsi", input: "btcusd", length: 14, timeframe: "month" }',
+  },
+  {
+    key: 'stoch_rsi',
+    label: 'Stochastic RSI',
+    description:
+      'Computes Stochastic RSI on a 0-100 scale by normalizing RSI against its recent range. '
+      + 'Useful for prompts like "monthly stochastic RSI crosses back above 20".',
+    requiredFields: ['length (integer >= 2, max 400)', 'stochWindow (integer >= 2, max 400)', 'timeframe ("day", "week", or "month", optional)'],
+    example: '{ operator: "stoch_rsi", input: "btcusd", length: 14, stochWindow: 14, timeframe: "month" }',
+  },
 ];
 
 const COMPARATOR_DOCS = [
@@ -195,6 +213,22 @@ const EXAMPLE_PROMPTS: ExamplePrompt[] = [
       'Uses pct_change to measure liquidity momentum over a specific window, combined with a classic price trend filter. '
       + 'Demonstrates the scale parameter (percent vs ratio) on pct_change.',
     concepts: ['pct_change', 'scale: percent', 'rolling_mean', 'cross-domain conditions'],
+  },
+  {
+    title: 'Monthly Stochastic RSI reclaim',
+    prompt: 'Alert me when the bitcoin monthly stochastic RSI moves back above 20.',
+    explanation:
+      'Uses a month-end resampled BTC series, computes monthly Stochastic RSI, and triggers only when the completed monthly value crosses back above 20. '
+      + 'The latest completed monthly value is then forward-filled onto daily rows for preview and alert state display.',
+    concepts: ['stoch_rsi', 'timeframe: month', 'crosses_above', 'month-end signals'],
+  },
+  {
+    title: 'Monthly Stochastic RSI threshold',
+    prompt: 'Alert me when the bitcoin monthly stochastic RSI is above 20.',
+    explanation:
+      'Uses the latest completed monthly Stochastic RSI value and keeps that state active on daily rows until the next monthly close updates it. '
+      + 'In practice, that means the signal can stay ON for the whole month after the last completed monthly value is above 20.',
+    concepts: ['stoch_rsi', 'timeframe: month', 'gt comparator', 'completed month only'],
   },
   {
     title: 'OR logic (any condition)',
@@ -666,6 +700,8 @@ const DocsSignalBuilder: React.FC = () => {
                       'For ambiguous concepts like "dollar is weak", the LLM will default to DXY_SCORE >= 1 (CoinStrat\'s pre-computed dollar regime score).',
                       'Use "and" for conditions that must all be true, "or" for conditions where any one is sufficient.',
                       'To detect a rising moving average, the model will use diff(rolling_mean, periods=1) > 0.',
+                      'For monthly or weekly indicators, CoinStrat computes only on completed period-end bars and forward-fills the latest completed value into the daily preview.',
+                      'Comparisons on monthly or weekly metrics use the latest completed period value and stay in effect until the next completed period updates them.',
                       'You can always review and edit the generated JSON before saving.',
                     ].map((tip) => (
                       <Typography component="li" variant="body2" key={tip} sx={{ lineHeight: 1.75 }}>{tip}</Typography>

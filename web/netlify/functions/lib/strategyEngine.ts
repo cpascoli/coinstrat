@@ -6,6 +6,7 @@ import {
   type StrategyComparator,
   type StrategyConditionDefinition,
   type StrategyMetricDefinition,
+  type StrategyMetricTimeframe,
   type StrategyPreviewResult,
   type StrategyPreviewRow,
   type StrategySnapshotRow,
@@ -15,6 +16,11 @@ import {
 
 type NumericSeries = number[];
 type BooleanSeries = boolean[];
+type NumericRef = {
+  values: NumericSeries;
+  updates: BooleanSeries;
+  timeframe: StrategyMetricTimeframe;
+};
 
 function rollingMean(values: NumericSeries, window: number): NumericSeries {
   const result: NumericSeries = [];
@@ -104,6 +110,161 @@ function diff(values: NumericSeries, periods: number): NumericSeries {
   return result;
 }
 
+function rsi(values: NumericSeries, length: number): NumericSeries {
+  const result: NumericSeries = values.map(() => Number.NaN);
+  if (values.length <= length) return result;
+
+  let gainSum = 0;
+  let lossSum = 0;
+  for (let i = 1; i <= length; i += 1) {
+    const current = values[i];
+    const previous = values[i - 1];
+    if (!Number.isFinite(current) || !Number.isFinite(previous)) {
+      return result;
+    }
+    const delta = current - previous;
+    gainSum += Math.max(delta, 0);
+    lossSum += Math.max(-delta, 0);
+  }
+
+  let avgGain = gainSum / length;
+  let avgLoss = lossSum / length;
+  result[length] = avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss)));
+
+  for (let i = length + 1; i < values.length; i += 1) {
+    const current = values[i];
+    const previous = values[i - 1];
+    if (!Number.isFinite(current) || !Number.isFinite(previous)) {
+      result[i] = Number.NaN;
+      continue;
+    }
+    const delta = current - previous;
+    const gain = Math.max(delta, 0);
+    const loss = Math.max(-delta, 0);
+    avgGain = ((avgGain * (length - 1)) + gain) / length;
+    avgLoss = ((avgLoss * (length - 1)) + loss) / length;
+    result[i] = avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss)));
+  }
+
+  return result;
+}
+
+function stochRsi(values: NumericSeries, length: number, stochWindow: number): NumericSeries {
+  const rsiValues = rsi(values, length);
+  const result: NumericSeries = rsiValues.map(() => Number.NaN);
+
+  for (let i = 0; i < rsiValues.length; i += 1) {
+    if (i < stochWindow - 1 || !Number.isFinite(rsiValues[i])) {
+      continue;
+    }
+
+    let min = Number.POSITIVE_INFINITY;
+    let max = Number.NEGATIVE_INFINITY;
+    let valid = true;
+    for (let j = i - stochWindow + 1; j <= i; j += 1) {
+      if (!Number.isFinite(rsiValues[j])) {
+        valid = false;
+        break;
+      }
+      min = Math.min(min, rsiValues[j]);
+      max = Math.max(max, rsiValues[j]);
+    }
+
+    if (!valid || max === min) {
+      result[i] = Number.NaN;
+      continue;
+    }
+
+    result[i] = ((rsiValues[i] - min) / (max - min)) * 100;
+  }
+
+  return result;
+}
+
+function timeframeKey(date: string, timeframe: StrategyMetricTimeframe): string {
+  if (timeframe === 'day') return date;
+
+  const dt = new Date(`${date}T00:00:00Z`);
+  if (timeframe === 'month') {
+    return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}`;
+  }
+
+  const weekEnd = new Date(dt);
+  weekEnd.setUTCDate(weekEnd.getUTCDate() + ((7 - weekEnd.getUTCDay()) % 7));
+  return weekEnd.toISOString().slice(0, 10);
+}
+
+function applyMetricOperator(values: NumericSeries, metric: StrategyMetricDefinition): NumericSeries {
+  switch (metric.operator) {
+    case 'identity':
+      return [...values];
+    case 'rolling_mean':
+      return rollingMean(values, metric.window ?? 2);
+    case 'rolling_min':
+      return rollingMin(values, metric.window ?? 2);
+    case 'rolling_max':
+      return rollingMax(values, metric.window ?? 2);
+    case 'pct_change':
+      return pctChange(values, metric.periods ?? 1, metric.scale ?? 'ratio');
+    case 'diff':
+      return diff(values, metric.periods ?? 1);
+    case 'rsi':
+      return rsi(values, metric.length ?? 14);
+    case 'stoch_rsi':
+      return stochRsi(values, metric.length ?? 14, metric.stochWindow ?? 14);
+    default:
+      return assertNever(metric.operator);
+  }
+}
+
+function applyTimeframeMetric(
+  values: NumericSeries,
+  rows: SignalRow[],
+  metric: StrategyMetricDefinition,
+): NumericRef {
+  const timeframe = metric.timeframe ?? 'day';
+  if (timeframe === 'day') {
+    return {
+      values: applyMetricOperator(values, metric),
+      updates: values.map(() => true),
+      timeframe,
+    };
+  }
+
+  const periodEndIndices: number[] = [];
+  const compactInput: NumericSeries = [];
+  for (let i = 0; i < rows.length; i += 1) {
+    const currentKey = timeframeKey(rows[i].Date, timeframe);
+    const nextKey = i < rows.length - 1 ? timeframeKey(rows[i + 1].Date, timeframe) : null;
+    if (nextKey !== currentKey) {
+      periodEndIndices.push(i);
+      compactInput.push(values[i]);
+    }
+  }
+
+  const compactOutput = applyMetricOperator(compactInput, metric);
+  const expanded: NumericSeries = [];
+  const updates: BooleanSeries = [];
+  let compactIndex = 0;
+  let lastValue = Number.NaN;
+
+  for (let i = 0; i < rows.length; i += 1) {
+    let updated = false;
+    if (compactIndex < periodEndIndices.length && i === periodEndIndices[compactIndex]) {
+      const nextValue = compactOutput[compactIndex];
+      if (Number.isFinite(nextValue)) {
+        lastValue = nextValue;
+        updated = true;
+      }
+      compactIndex += 1;
+    }
+    expanded.push(lastValue);
+    updates.push(updated);
+  }
+
+  return { values: expanded, updates, timeframe };
+}
+
 function compareValues(comparator: StrategyComparator, previousLeft: number, left: number, previousRight: number, right: number): boolean {
   if (!Number.isFinite(left) || !Number.isFinite(right)) return false;
   switch (comparator) {
@@ -153,46 +314,38 @@ function formatSnapshotValue(value: number | boolean | null): string {
   return 'n/a';
 }
 
-function buildSourceSeries(rows: SignalRow[], seriesKey: StrategySeriesKey): NumericSeries {
-  return rows.map((row) => normalizeNumber(row[seriesKey]));
+function buildSourceSeries(rows: SignalRow[], seriesKey: StrategySeriesKey): NumericRef {
+  return {
+    values: rows.map((row) => normalizeNumber(row[seriesKey])),
+    updates: rows.map(() => true),
+    timeframe: 'day',
+  };
 }
 
-function buildMetricSeries(metric: StrategyMetricDefinition, refs: Map<string, NumericSeries>): NumericSeries {
+function buildMetricSeries(
+  metric: StrategyMetricDefinition,
+  refs: Map<string, NumericRef>,
+  rows: SignalRow[],
+) : NumericRef {
   const input = refs.get(metric.input);
   if (!input) throw new Error(`Unknown metric input ${metric.input}.`);
-
-  switch (metric.operator) {
-    case 'identity':
-      return [...input];
-    case 'rolling_mean':
-      return rollingMean(input, metric.window ?? 2);
-    case 'rolling_min':
-      return rollingMin(input, metric.window ?? 2);
-    case 'rolling_max':
-      return rollingMax(input, metric.window ?? 2);
-    case 'pct_change':
-      return pctChange(input, metric.periods ?? 1, metric.scale ?? 'ratio');
-    case 'diff':
-      return diff(input, metric.periods ?? 1);
-    default:
-      return assertNever(metric.operator);
-  }
+  return applyTimeframeMetric(input.values, rows, metric);
 }
 
-function buildConditionSeries(condition: StrategyConditionDefinition, refs: Map<string, NumericSeries>): BooleanSeries {
-  const leftSeries = refs.get(condition.left);
-  if (!leftSeries) throw new Error(`Unknown condition left operand ${condition.left}.`);
+function buildConditionSeries(condition: StrategyConditionDefinition, refs: Map<string, NumericRef>): BooleanSeries {
+  const leftRef = refs.get(condition.left);
+  if (!leftRef) throw new Error(`Unknown condition left operand ${condition.left}.`);
 
   const rightSeries = condition.rightType === 'constant'
-    ? leftSeries.map(() => condition.rightConstant ?? Number.NaN)
-    : refs.get(condition.rightRef ?? '');
+    ? leftRef.values.map(() => condition.rightConstant ?? Number.NaN)
+    : refs.get(condition.rightRef ?? '')?.values;
 
   if (!rightSeries) {
     throw new Error(`Unknown condition right operand for ${condition.id}.`);
   }
 
-  const rawSeries = leftSeries.map((left, index) => {
-    const previousLeft = index > 0 ? leftSeries[index - 1] : Number.NaN;
+  const rawSeries = leftRef.values.map((left, index) => {
+    const previousLeft = index > 0 ? leftRef.values[index - 1] : Number.NaN;
     const right = rightSeries[index];
     const previousRight = index > 0 ? rightSeries[index - 1] : Number.NaN;
     return compareValues(condition.comparator, previousLeft, left, previousRight, right);
@@ -205,14 +358,14 @@ function buildConditionSeries(condition: StrategyConditionDefinition, refs: Map<
 }
 
 export function evaluateStrategy(rows: SignalRow[], spec: StrategySpec): StrategyPreviewResult {
-  const refs = new Map<string, NumericSeries>();
+  const refs = new Map<string, NumericRef>();
 
   for (const source of spec.sources) {
     refs.set(source.id, buildSourceSeries(rows, source.seriesKey));
   }
 
   for (const metric of spec.metrics) {
-    refs.set(metric.id, buildMetricSeries(metric, refs));
+    refs.set(metric.id, buildMetricSeries(metric, refs, rows));
   }
 
   const conditionSeries = new Map<string, BooleanSeries>();
@@ -256,8 +409,8 @@ export function evaluateStrategy(rows: SignalRow[], spec: StrategySpec): Strateg
   const snapshot: StrategySnapshotRow[] = [];
 
   for (const source of spec.sources) {
-    const series = refs.get(source.id) ?? [];
-    const latestValue = series.length > 0 ? series[series.length - 1] : Number.NaN;
+    const series = refs.get(source.id) ?? { values: [], updates: [], timeframe: 'day' as const };
+    const latestValue = series.values.length > 0 ? series.values[series.values.length - 1] : Number.NaN;
     const normalized = Number.isFinite(latestValue) ? latestValue : null;
     snapshot.push({
       kind: 'source',
@@ -270,8 +423,8 @@ export function evaluateStrategy(rows: SignalRow[], spec: StrategySpec): Strateg
   }
 
   for (const metric of spec.metrics) {
-    const series = refs.get(metric.id) ?? [];
-    const latestValue = series.length > 0 ? series[series.length - 1] : Number.NaN;
+    const series = refs.get(metric.id) ?? { values: [], updates: [], timeframe: 'day' as const };
+    const latestValue = series.values.length > 0 ? series.values[series.values.length - 1] : Number.NaN;
     const normalized = Number.isFinite(latestValue) ? latestValue : null;
     snapshot.push({
       kind: 'metric',
@@ -312,8 +465,8 @@ export function evaluateStrategy(rows: SignalRow[], spec: StrategySpec): Strateg
     transitions,
     snapshot,
     metrics: spec.metrics.map((metric) => {
-      const series = refs.get(metric.id) ?? [];
-      const latestValue = series.length > 0 ? series[series.length - 1] : Number.NaN;
+      const series = refs.get(metric.id) ?? { values: [], updates: [], timeframe: 'day' as const };
+      const latestValue = series.values.length > 0 ? series.values[series.values.length - 1] : Number.NaN;
       return {
         id: metric.id,
         label: metric.label,

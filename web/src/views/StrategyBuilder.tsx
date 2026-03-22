@@ -605,8 +605,11 @@ const StrategyBuilder: React.FC = () => {
                                 <Typography sx={{ fontWeight: 700 }}>{metric.label}</Typography>
                                 <Typography variant="body2" color="text.secondary">
                                   {metric.operator} from <code>{metric.input}</code>
+                                  {metric.timeframe && metric.timeframe !== 'day' ? ` on ${metric.timeframe} bars` : ''}
                                   {metric.window ? ` over ${metric.window}d` : ''}
                                   {metric.periods ? ` over ${metric.periods} periods` : ''}
+                                  {metric.length ? ` with length ${metric.length}` : ''}
+                                  {metric.stochWindow ? ` using stoch window ${metric.stochWindow}` : ''}
                                 </Typography>
                               </Paper>
                             ))}

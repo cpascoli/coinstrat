@@ -71,7 +71,10 @@ export type StrategyMetricOperator =
   | 'pct_change'
   | 'diff'
   | 'rolling_min'
-  | 'rolling_max';
+  | 'rolling_max'
+  | 'rsi'
+  | 'stoch_rsi';
+export type StrategyMetricTimeframe = 'day' | 'week' | 'month';
 export type StrategyComparator =
   | 'gt'
   | 'gte'
@@ -95,8 +98,11 @@ export interface StrategyMetricDefinition {
   label: string;
   operator: StrategyMetricOperator;
   input: string;
+  timeframe?: StrategyMetricTimeframe;
   window?: number;
   periods?: number;
+  length?: number;
+  stochWindow?: number;
   scale?: 'ratio' | 'percent';
 }
 
@@ -200,6 +206,8 @@ export const STRATEGY_METRIC_OPERATORS: Array<{
   { key: 'diff', label: 'Difference', description: 'Absolute difference over a fixed period.' },
   { key: 'rolling_min', label: 'Rolling min', description: 'Rolling minimum over a fixed window.' },
   { key: 'rolling_max', label: 'Rolling max', description: 'Rolling maximum over a fixed window.' },
+  { key: 'rsi', label: 'RSI', description: 'Relative Strength Index over a fixed lookback length.' },
+  { key: 'stoch_rsi', label: 'Stochastic RSI', description: 'Stochastic RSI oscillator on a 0-100 scale.' },
 ];
 
 export function getStrategySeriesMeta(seriesKey: StrategySeriesKey) {
@@ -250,6 +258,10 @@ function isMetricOperator(value: unknown): value is StrategyMetricOperator {
   return typeof value === 'string' && STRATEGY_METRIC_OPERATORS.some((entry) => entry.key === value);
 }
 
+function isMetricTimeframe(value: unknown): value is StrategyMetricTimeframe {
+  return value === 'day' || value === 'week' || value === 'month';
+}
+
 function isComparator(value: unknown): value is StrategyComparator {
   return typeof value === 'string'
     && ['gt', 'gte', 'lt', 'lte', 'eq', 'crosses_above', 'crosses_below'].includes(value);
@@ -275,6 +287,8 @@ function requiresWindow(operator: StrategyMetricOperator): boolean {
     case 'identity':
     case 'pct_change':
     case 'diff':
+    case 'rsi':
+    case 'stoch_rsi':
       return false;
     default:
       return assertNever(operator);
@@ -290,6 +304,42 @@ function requiresPeriods(operator: StrategyMetricOperator): boolean {
     case 'rolling_mean':
     case 'rolling_min':
     case 'rolling_max':
+    case 'rsi':
+    case 'stoch_rsi':
+      return false;
+    default:
+      return assertNever(operator);
+  }
+}
+
+function requiresLength(operator: StrategyMetricOperator): boolean {
+  switch (operator) {
+    case 'rsi':
+    case 'stoch_rsi':
+      return true;
+    case 'identity':
+    case 'rolling_mean':
+    case 'rolling_min':
+    case 'rolling_max':
+    case 'pct_change':
+    case 'diff':
+      return false;
+    default:
+      return assertNever(operator);
+  }
+}
+
+function requiresStochWindow(operator: StrategyMetricOperator): boolean {
+  switch (operator) {
+    case 'stoch_rsi':
+      return true;
+    case 'identity':
+    case 'rolling_mean':
+    case 'rolling_min':
+    case 'rolling_max':
+    case 'pct_change':
+    case 'diff':
+    case 'rsi':
       return false;
     default:
       return assertNever(operator);
@@ -388,6 +438,9 @@ export function validateStrategySpec(input: unknown): StrategyValidationResult {
     } else if (!availableRefs.has(metric.input) && !sourceIds.has(metric.input)) {
       errors.push(`Metric ${metric.id} references unknown input ${metric.input}.`);
     }
+    if (metric.timeframe !== undefined && !isMetricTimeframe(metric.timeframe)) {
+      errors.push(`Metric ${metric.id} timeframe must be one of day, week, or month.`);
+    }
     if (requiresWindow(metric.operator)) {
       if (!isFiniteNumber(metric.window) || metric.window < 2 || metric.window > STRATEGY_LIMITS.maxWindow) {
         errors.push(`Metric ${metric.id} requires a window between 2 and ${STRATEGY_LIMITS.maxWindow}.`);
@@ -396,6 +449,16 @@ export function validateStrategySpec(input: unknown): StrategyValidationResult {
     if (requiresPeriods(metric.operator)) {
       if (!isFiniteNumber(metric.periods) || metric.periods < 1 || metric.periods > STRATEGY_LIMITS.maxWindow) {
         errors.push(`Metric ${metric.id} requires periods between 1 and ${STRATEGY_LIMITS.maxWindow}.`);
+      }
+    }
+    if (requiresLength(metric.operator)) {
+      if (!isFiniteNumber(metric.length) || metric.length < 2 || metric.length > STRATEGY_LIMITS.maxWindow) {
+        errors.push(`Metric ${metric.id} requires length between 2 and ${STRATEGY_LIMITS.maxWindow}.`);
+      }
+    }
+    if (requiresStochWindow(metric.operator)) {
+      if (!isFiniteNumber(metric.stochWindow) || metric.stochWindow < 2 || metric.stochWindow > STRATEGY_LIMITS.maxWindow) {
+        errors.push(`Metric ${metric.id} requires stochWindow between 2 and ${STRATEGY_LIMITS.maxWindow}.`);
       }
     }
     if (metric.operator === 'pct_change' && metric.scale !== 'ratio' && metric.scale !== 'percent') {

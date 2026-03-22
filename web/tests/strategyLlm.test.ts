@@ -104,6 +104,114 @@ function generateSyntheticRows(count: number) {
   return rows;
 }
 
+function buildMonthlyStochRsiSpec(): StrategySpec {
+  return {
+    version: 1,
+    name: 'BTC monthly Stochastic RSI reclaim',
+    description: 'Signal on when monthly BTC Stochastic RSI crosses back above 20.',
+    prompt: 'Alert me when the bitcoin monthly stochastic RSI moves back above 20',
+    sources: [
+      { id: 'btcusd', seriesKey: 'BTCUSD', label: 'BTC Price (USD)' },
+    ],
+    metrics: [
+      {
+        id: 'btc_monthly_stoch_rsi',
+        label: 'BTC monthly Stochastic RSI',
+        operator: 'stoch_rsi',
+        input: 'btcusd',
+        timeframe: 'month',
+        length: 2,
+        stochWindow: 2,
+      },
+    ],
+    conditions: [
+      {
+        id: 'monthly_stoch_reclaim',
+        label: 'Monthly Stoch RSI crosses above 20',
+        left: 'btc_monthly_stoch_rsi',
+        comparator: 'crosses_above',
+        rightType: 'constant',
+        rightConstant: 20,
+      },
+    ],
+    output: {
+      label: 'Monthly Stoch RSI Reclaim',
+      mode: 'all',
+      conditionIds: ['monthly_stoch_reclaim'],
+    },
+    alerts: { mode: 'state_change' },
+  };
+}
+
+function buildMonthlyStochRsiAboveSpec(): StrategySpec {
+  const spec = buildMonthlyStochRsiSpec();
+  return {
+    ...spec,
+    name: 'BTC monthly Stochastic RSI above 20',
+    description: 'Signal on when monthly BTC Stochastic RSI is above 20.',
+    conditions: [
+      {
+        id: 'monthly_stoch_above',
+        label: 'Monthly Stoch RSI above 20',
+        left: 'btc_monthly_stoch_rsi',
+        comparator: 'gt',
+        rightType: 'constant',
+        rightConstant: 20,
+      },
+    ],
+    output: {
+      label: 'Monthly Stoch RSI Above 20',
+      mode: 'all',
+      conditionIds: ['monthly_stoch_above'],
+    },
+  };
+}
+
+function generateMonthlyTrendRows(monthlyCloses: number[]) {
+  const rows: any[] = [];
+  let year = 2020;
+  let month = 0;
+
+  for (const monthlyClose of monthlyCloses) {
+    const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const date = new Date(Date.UTC(year, month, day));
+      rows.push({
+        Date: date.toISOString().slice(0, 10),
+        BTCUSD: monthlyClose,
+        DXY_SCORE: 1,
+        MVRV: 1.5,
+        VAL_SCORE: 2,
+        LIQ_SCORE: 1,
+        CYCLE_SCORE: 1,
+        US_LIQ: 6e12,
+        US_LIQ_YOY: 5,
+        US_LIQ_13W_DELTA: 1e11,
+        ACCUM_ON: 1,
+        CORE_ON: 1,
+        MACRO_ON: 0,
+        PRICE_REGIME_ON: 1,
+      });
+    }
+
+    month += 1;
+    if (month === 12) {
+      month = 0;
+      year += 1;
+    }
+  }
+
+  return rows;
+}
+
+function isMonthEnd(date: string) {
+  const dt = new Date(`${date}T00:00:00Z`);
+  const next = new Date(dt);
+  next.setUTCDate(next.getUTCDate() + 1);
+  return next.getUTCMonth() !== dt.getUTCMonth();
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -166,6 +274,18 @@ describe('strategyLlm — uptrend prompt regression', () => {
       expect(warnings.length).toBe(1);
     });
 
+    it('adds length=14 and stochWindow=14 to stoch_rsi metrics missing both', () => {
+      const metrics: StrategySpec['metrics'] = [
+        { id: 'osc', label: 'Osc', operator: 'stoch_rsi', input: 'btcusd', timeframe: 'month' },
+      ];
+      const warnings: string[] = [];
+      const fixed = autoFixMetrics(metrics, warnings);
+
+      expect(fixed[0].length).toBe(14);
+      expect(fixed[0].stochWindow).toBe(14);
+      expect(warnings.length).toBe(2);
+    });
+
     it('does not touch metrics that are already correct', () => {
       const metrics: StrategySpec['metrics'] = [
         { id: 'ma', label: 'MA', operator: 'rolling_mean', input: 'btcusd', window: 50 },
@@ -222,6 +342,12 @@ describe('strategyLlm — uptrend prompt regression', () => {
       expect(result.spec.sources.some((s) => s.seriesKey === 'BTCUSD')).toBe(true);
       expect(result.spec.sources.some((s) => s.seriesKey === 'DXY')).toBe(true);
     });
+
+    it('treats monthly "moves back above" RSI prompts as state semantics, not crossover events', () => {
+      const result = buildHeuristicSpec('Alert me when the bitcoin monthly stochastic RSI moves back above 20');
+      expect(result.provider).toBe('heuristic');
+      expect(result.spec.conditions[0]?.comparator).toBe('gt');
+    });
   });
 
   describe('engine evaluation with the corrected spec', () => {
@@ -249,6 +375,28 @@ describe('strategyLlm — uptrend prompt regression', () => {
       expect(fixedResult.currentState).toBe(correctResult.currentState);
       expect(fixedResult.summary.activeDays).toBe(correctResult.summary.activeDays);
       expect(fixedResult.summary.transitionCount).toBe(correctResult.summary.transitionCount);
+    });
+
+    it('only triggers monthly Stochastic RSI crossovers on month-end rows', () => {
+      const spec = buildMonthlyStochRsiSpec();
+      const rows = generateMonthlyTrendRows([100, 92, 84, 90, 98, 94, 86, 93, 101, 96, 88, 97]);
+      const result = evaluateStrategy(rows, spec);
+      const turnOnTransitions = result.transitions.filter((transition) => transition.next === 1);
+
+      expect(turnOnTransitions.length).toBeGreaterThan(0);
+      expect(turnOnTransitions.every((transition) => isMonthEnd(transition.Date))).toBe(true);
+    });
+
+    it('evaluates monthly threshold conditions only on month-end rows', () => {
+      const spec = buildMonthlyStochRsiAboveSpec();
+      const rows = generateMonthlyTrendRows([100, 92, 84, 90, 98, 94, 86, 93, 101, 96, 88, 97]);
+      const result = evaluateStrategy(rows, spec);
+      const turnOnTransitions = result.transitions.filter((transition) => transition.next === 1);
+      const activeNonMonthEndRows = result.rows.filter((row) => row.signal === 1 && !isMonthEnd(row.Date));
+
+      expect(turnOnTransitions.length).toBeGreaterThan(0);
+      expect(turnOnTransitions.every((transition) => isMonthEnd(transition.Date))).toBe(true);
+      expect(activeNonMonthEndRows.length).toBeGreaterThan(0);
     });
   });
 });

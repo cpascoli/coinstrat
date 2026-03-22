@@ -166,8 +166,7 @@ const App: React.FC = () => {
   const desktopPrimaryLinks = useMemo(() => {
     const docsActive = location.pathname.startsWith('/docs')
       || location.pathname === '/developer'
-      || location.pathname === '/api-docs'
-      || location.pathname === '/strategy-builder';
+      || location.pathname === '/api-docs';
 
     return [
       ...(showDesktopDashboard

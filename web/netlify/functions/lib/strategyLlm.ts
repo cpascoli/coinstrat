@@ -6,6 +6,7 @@ import {
   type StrategyComparator,
   type StrategyInterpretationResult,
   type StrategySeriesKey,
+  type StrategyMetricTimeframe,
   type StrategySpec,
 } from '../../../src/lib/strategyBuilder';
 import { buildStrategyRegistry } from './strategyEngine';
@@ -74,10 +75,30 @@ function firstWindow(prompt: string, fallback: number): number {
   return value;
 }
 
+function inferMetricTimeframe(prompt: string): StrategyMetricTimeframe {
+  const lower = prompt.toLowerCase();
+  if (lower.includes('monthly') || lower.includes('month ')) return 'month';
+  if (lower.includes('weekly') || lower.includes('week ')) return 'week';
+  return 'day';
+}
+
+function firstNumericThreshold(prompt: string, fallback: number): number {
+  const match = prompt.match(/(?:above|below|under|over|at least|at most)\s+(\d+(?:\.\d+)?)/i);
+  return match ? Number(match[1]) : fallback;
+}
+
 function heuristicComparator(prompt: string): StrategyComparator {
   const lower = prompt.toLowerCase();
-  if (lower.includes('cross above') || lower.includes('crosses above')) return 'crosses_above';
-  if (lower.includes('cross below') || lower.includes('crosses below')) return 'crosses_below';
+  const timeframe = inferMetricTimeframe(prompt);
+  const explicitCrossUp = lower.includes('cross above') || lower.includes('crosses above');
+  const explicitCrossDown = lower.includes('cross below') || lower.includes('crosses below');
+  const statefulReclaimUp = lower.includes('back above') || lower.includes('moves back above') || lower.includes('reclaims');
+  const statefulReclaimDown = lower.includes('back below') || lower.includes('moves back below');
+
+  if (explicitCrossUp) return 'crosses_above';
+  if (explicitCrossDown) return 'crosses_below';
+  if (statefulReclaimUp) return timeframe === 'day' ? 'crosses_above' : 'gt';
+  if (statefulReclaimDown) return timeframe === 'day' ? 'crosses_below' : 'lt';
   if (lower.includes('below') || lower.includes('under') || lower.includes('less than')) return 'lt';
   if (lower.includes('at least') || lower.includes('greater than or equal')) return 'gte';
   if (lower.includes('at most') || lower.includes('less than or equal')) return 'lte';
@@ -98,6 +119,82 @@ export function buildHeuristicSpec(prompt: string): StrategyInterpretationResult
   const btcSource = spec.sources.find((source) => source.seriesKey === 'BTCUSD') ?? spec.sources[0];
   const window = firstWindow(prompt, 200);
   const comparator = heuristicComparator(prompt);
+  const lower = prompt.toLowerCase();
+
+  if (lower.includes('stochastic rsi') || lower.includes('stoch rsi')) {
+    const timeframe = inferMetricTimeframe(prompt);
+    const threshold = firstNumericThreshold(prompt, 20);
+    spec.metrics = [{
+      id: 'btc_stoch_rsi',
+      label: `BTC ${timeframe} stochastic RSI`,
+      operator: 'stoch_rsi',
+      input: btcSource.id,
+      timeframe,
+      length: 14,
+      stochWindow: 14,
+    }];
+    spec.conditions = [{
+      id: 'stoch_rsi_signal',
+      label: `Stochastic RSI ${comparator === 'crosses_above' ? 'crosses above' : 'above'} ${threshold}`,
+      left: 'btc_stoch_rsi',
+      comparator,
+      rightType: 'constant',
+      rightConstant: threshold,
+    }];
+    spec.output = {
+      label: 'Custom Signal',
+      mode: 'all',
+      conditionIds: ['stoch_rsi_signal'],
+    };
+
+    const validation = validateStrategySpec(spec);
+    if (!validation.ok) {
+      throw new Error(`Heuristic strategy generation failed: ${validation.errors.join(' ')}`);
+    }
+
+    return {
+      spec,
+      warnings: ['Using fallback heuristic interpretation because no LLM provider is configured. Review the generated strategy before saving.'],
+      provider: 'heuristic',
+    };
+  }
+
+  if (lower.includes('rsi')) {
+    const timeframe = inferMetricTimeframe(prompt);
+    const threshold = firstNumericThreshold(prompt, 30);
+    spec.metrics = [{
+      id: 'btc_rsi',
+      label: `BTC ${timeframe} RSI`,
+      operator: 'rsi',
+      input: btcSource.id,
+      timeframe,
+      length: 14,
+    }];
+    spec.conditions = [{
+      id: 'rsi_signal',
+      label: `RSI ${comparator === 'crosses_above' ? 'crosses above' : 'above'} ${threshold}`,
+      left: 'btc_rsi',
+      comparator,
+      rightType: 'constant',
+      rightConstant: threshold,
+    }];
+    spec.output = {
+      label: 'Custom Signal',
+      mode: 'all',
+      conditionIds: ['rsi_signal'],
+    };
+
+    const validation = validateStrategySpec(spec);
+    if (!validation.ok) {
+      throw new Error(`Heuristic strategy generation failed: ${validation.errors.join(' ')}`);
+    }
+
+    return {
+      spec,
+      warnings: ['Using fallback heuristic interpretation because no LLM provider is configured. Review the generated strategy before saving.'],
+      provider: 'heuristic',
+    };
+  }
 
   spec.metrics = [{
     id: 'btc_trend',
@@ -179,6 +276,16 @@ export function autoFixMetrics(
     if ((op === 'rolling_mean' || op === 'rolling_min' || op === 'rolling_max') && (patched.window == null || !Number.isFinite(patched.window))) {
       patched.window = 200;
       autoFixWarnings.push(`Auto-fixed metric "${patched.id}": added default window=200 for ${op}.`);
+    }
+
+    if ((op === 'rsi' || op === 'stoch_rsi') && (patched.length == null || !Number.isFinite(patched.length))) {
+      patched.length = 14;
+      autoFixWarnings.push(`Auto-fixed metric "${patched.id}": added default length=14 for ${op}.`);
+    }
+
+    if (op === 'stoch_rsi' && (patched.stochWindow == null || !Number.isFinite(patched.stochWindow))) {
+      patched.stochWindow = 14;
+      autoFixWarnings.push(`Auto-fixed metric "${patched.id}": added default stochWindow=14 for stoch_rsi.`);
     }
 
     return patched;
@@ -347,6 +454,47 @@ function buildOpenAiMessages(prompt: string, registry: ReturnType<typeof buildSt
     warnings: [],
   };
 
+  const examplePrompt3 = 'Alert me when the bitcoin monthly stochastic RSI moves back above 20';
+  const exampleResponse3 = {
+    spec: {
+      version: 1,
+      name: 'BTC monthly Stochastic RSI reclaim',
+      description: 'Signal on when Bitcoin monthly Stochastic RSI crosses back above 20.',
+      prompt: examplePrompt3,
+      sources: [
+        { id: 'btcusd', seriesKey: 'BTCUSD', label: 'BTC Price (USD)' },
+      ],
+      metrics: [
+        {
+          id: 'btc_monthly_stoch_rsi',
+          label: 'BTC monthly Stochastic RSI',
+          operator: 'stoch_rsi',
+          input: 'btcusd',
+          timeframe: 'month',
+          length: 14,
+          stochWindow: 14,
+        },
+      ],
+      conditions: [
+        {
+          id: 'stoch_rsi_reclaims_20',
+          label: 'Monthly Stochastic RSI crosses above 20',
+          left: 'btc_monthly_stoch_rsi',
+          comparator: 'crosses_above',
+          rightType: 'constant',
+          rightConstant: 20,
+        },
+      ],
+      output: {
+        label: 'BTC Monthly Stoch RSI Signal',
+        mode: 'all',
+        conditionIds: ['stoch_rsi_reclaims_20'],
+      },
+      alerts: { mode: 'state_change' },
+    },
+    warnings: [],
+  };
+
   return [
     {
       role: 'system' as const,
@@ -355,14 +503,23 @@ function buildOpenAiMessages(prompt: string, registry: ReturnType<typeof buildSt
         'Return only JSON with top-level keys: spec and warnings.',
         'The spec must exactly conform to version 1 of the constrained strategy schema.',
         'Use only series keys that exist in the provided registry.',
-        'Use only these metric operators: identity, rolling_mean, pct_change, diff, rolling_min, rolling_max.',
+        'Use only these metric operators: identity, rolling_mean, pct_change, diff, rolling_min, rolling_max, rsi, stoch_rsi.',
         'Use only these comparators: gt, gte, lt, lte, eq, crosses_above, crosses_below.',
         '',
         'METRIC OPERATOR FIELD REQUIREMENTS (you MUST include the correct fields):',
         '- rolling_mean, rolling_min, rolling_max: REQUIRE "window" (integer >= 2).',
         '- diff: REQUIRES "periods" (integer >= 1). Computes value[i] - value[i - periods].',
         '- pct_change: REQUIRES "periods" (integer >= 1) AND "scale" ("ratio" or "percent").',
+        '- rsi: REQUIRES "length" (integer >= 2). Returns RSI on a 0-100 scale.',
+        '- stoch_rsi: REQUIRES "length" (integer >= 2) AND "stochWindow" (integer >= 2). Returns Stochastic RSI on a 0-100 scale.',
         '- identity: no extra fields needed.',
+        '',
+        'Metrics can optionally specify "timeframe": "day", "week", or "month".',
+        'For week/month timeframe metrics, CoinStrat computes on completed period-end bars only and forward-fills the latest completed value onto subsequent daily rows for preview.',
+        'When a week/month metric is used in a condition, comparisons use the latest completed weekly/monthly value and that state remains in effect on daily rows until the next completed period updates it.',
+        'For week/month prompts, phrases like "back above", "moves back above", or "reclaims" usually imply STATE semantics, so prefer gt/gte rather than crosses_above unless the user explicitly asks for a crossover event.',
+        'Reserve crosses_above / crosses_below for explicit event wording such as "crosses above", "crosses below", or "on the crossover".',
+        'For prompts like "monthly stochastic RSI", set timeframe to "month".',
         '',
         'Metrics can chain: a metric\'s "input" can reference another metric\'s id, not just a source id.',
         'To detect whether a moving average is rising, use diff on the moving average metric with periods: 1.',
@@ -399,10 +556,13 @@ function buildOpenAiMessages(prompt: string, registry: ReturnType<typeof buildSt
           metrics: [{
             id: 'string',
             label: 'string',
-            operator: 'rolling_mean|pct_change|diff|identity|rolling_min|rolling_max',
+            operator: 'rolling_mean|pct_change|diff|identity|rolling_min|rolling_max|rsi|stoch_rsi',
             input: 'source-or-metric-id (can reference another metric)',
+            timeframe: '"day" | "week" | "month" (optional; use "month" for monthly indicators)',
             window: 'integer >= 2 (REQUIRED for rolling_mean, rolling_min, rolling_max)',
             periods: 'integer >= 1 (REQUIRED for diff, pct_change)',
+            length: 'integer >= 2 (REQUIRED for rsi, stoch_rsi)',
+            stochWindow: 'integer >= 2 (REQUIRED for stoch_rsi)',
             scale: '"ratio" or "percent" (REQUIRED for pct_change)',
           }],
           conditions: [{ id: 'string', label: 'string', left: 'source-or-metric-id', comparator: 'gt|gte|lt|lte|eq|crosses_above|crosses_below', rightType: 'constant|reference' }],
@@ -412,6 +572,7 @@ function buildOpenAiMessages(prompt: string, registry: ReturnType<typeof buildSt
         examples: [
           { prompt: examplePrompt, response: exampleResponse },
           { prompt: examplePrompt2, response: exampleResponse2 },
+          { prompt: examplePrompt3, response: exampleResponse3 },
         ],
       }),
     },
