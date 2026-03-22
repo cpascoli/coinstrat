@@ -85,7 +85,7 @@ export const endpointGroups: EndpointGroup[] = [
         summary: 'Single series history',
         description:
           'Returns the full historical time series for a single catalog series key (e.g. BTCUSD, MVRV, DXY_SCORE). Includes the latest value and all daily data points.',
-        auth: 'admin_jwt',
+        auth: 'api_key',
         params: [
           {
             name: 'key',

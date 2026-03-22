@@ -115,24 +115,32 @@ function rsi(values: NumericSeries, length: number): NumericSeries {
   const result: NumericSeries = values.map(() => Number.NaN);
   if (values.length <= length) return result;
 
+  // Skip any leading NaN values — find the first run of (length+1) consecutive finite values.
+  // This makes monthly/weekly RSI robust against historical gaps in the source series
+  // (e.g. null BTCUSD entries in the blob cache for old dates).
+  let startIdx = -1;
+  outer: for (let k = 0; k + length < values.length; k += 1) {
+    for (let j = k; j <= k + length; j += 1) {
+      if (!Number.isFinite(values[j])) continue outer;
+    }
+    startIdx = k;
+    break;
+  }
+  if (startIdx === -1) return result;
+
   let gainSum = 0;
   let lossSum = 0;
-  for (let i = 1; i <= length; i += 1) {
-    const current = values[i];
-    const previous = values[i - 1];
-    if (!Number.isFinite(current) || !Number.isFinite(previous)) {
-      return result;
-    }
-    const delta = current - previous;
+  for (let i = startIdx + 1; i <= startIdx + length; i += 1) {
+    const delta = values[i] - values[i - 1];
     gainSum += Math.max(delta, 0);
     lossSum += Math.max(-delta, 0);
   }
 
   let avgGain = gainSum / length;
   let avgLoss = lossSum / length;
-  result[length] = avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss)));
+  result[startIdx + length] = avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss)));
 
-  for (let i = length + 1; i < values.length; i += 1) {
+  for (let i = startIdx + length + 1; i < values.length; i += 1) {
     const current = values[i];
     const previous = values[i - 1];
     if (!Number.isFinite(current) || !Number.isFinite(previous)) {
@@ -234,12 +242,31 @@ function applyTimeframeMetric(
 
   const periodEndIndices: number[] = [];
   const compactInput: NumericSeries = [];
+  // For monthly/weekly resampling: use the last *valid* value within each period as the
+  // period-end close, falling back to the last valid value across all prior periods.
+  // This prevents null BTCUSD entries in the blob cache (historical gaps) from
+  // propagating NaN into the RSI/Stoch RSI initialization window.
+  let lastValidAcrossPeriods = Number.NaN;
+  let lastValidInPeriod = Number.NaN;
+
   for (let i = 0; i < rows.length; i += 1) {
+    if (Number.isFinite(values[i])) {
+      lastValidInPeriod = values[i];
+    }
     const currentKey = timeframeKey(rows[i].Date, timeframe);
     const nextKey = i < rows.length - 1 ? timeframeKey(rows[i + 1].Date, timeframe) : null;
     if (nextKey !== currentKey) {
       periodEndIndices.push(i);
-      compactInput.push(values[i]);
+      const periodClose = Number.isFinite(values[i])
+        ? values[i]
+        : Number.isFinite(lastValidInPeriod)
+          ? lastValidInPeriod
+          : lastValidAcrossPeriods;
+      compactInput.push(periodClose);
+      if (Number.isFinite(periodClose)) {
+        lastValidAcrossPeriods = periodClose;
+      }
+      lastValidInPeriod = Number.NaN;
     }
   }
 

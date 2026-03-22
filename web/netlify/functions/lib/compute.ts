@@ -7,6 +7,9 @@
  * that should be appended to the cache.
  */
 import fetch from 'node-fetch';
+// JSON is imported statically so esbuild bundles it inline — no file-system
+// access at runtime and no path-resolution issues in the Lambda environment.
+import btcDailyRaw from '../../../public/data/btc_daily.json';
 
 // ── Types ───────────────────────────────────────────────────────────────
 
@@ -99,6 +102,29 @@ async function fetchBtcTail(): Promise<DataPoint[]> {
       date: new Date(e.time * 1000).toISOString().split('T')[0],
       value: e.close as number,
     }));
+}
+
+/**
+ * Full BTC series: statically-bundled JSON history (2011-01-01 → 2025-10-19)
+ * merged with a live CryptoCompare tail for any dates after the JSON's last entry.
+ *
+ * The JSON is imported at build time by esbuild so there is no file-system
+ * access at runtime — path resolution issues in Netlify Lambda are avoided
+ * entirely.
+ */
+export async function loadMergedBtcSeries(): Promise<DataPoint[]> {
+  const local: DataPoint[] = (btcDailyRaw as Array<{ date: string; close: number }>)
+    .filter((e) => typeof e.date === 'string' && Number.isFinite(e.close) && e.close > 0)
+    .map((e) => ({ date: e.date, value: e.close }));
+
+  const tail = await fetchBtcTail();
+
+  if (local.length === 0) return [...tail].sort((a, b) => a.date.localeCompare(b.date));
+  const lastLocalDate = local[local.length - 1].date;
+  const tailAfter = tail
+    .filter((p) => p.date > lastLocalDate)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  return [...local, ...tailAfter];
 }
 
 async function fetchMVRVTail(): Promise<DataPoint[]> {
@@ -195,7 +221,7 @@ export async function refreshSignals(
     fetchFredSeries('SAHMREALTIME', fullHistory),
     fetchFredSeries('T10Y3M', fullHistory),
     fetchFredSeries('AMTMNO', fullHistory),
-    fetchBtcTail(),
+    loadMergedBtcSeries(),
     fetchMVRVTail(),
     fetchFredSeries('ECBASSETSW', fullHistory),
     fetchFredSeries('JPNASSETS', fullHistory),

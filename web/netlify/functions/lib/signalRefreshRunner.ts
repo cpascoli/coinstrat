@@ -1,4 +1,4 @@
-import { refreshSignals, type SignalRow } from './compute';
+import { refreshSignals, loadMergedBtcSeries, type SignalRow } from './compute';
 import { persistSignalAlertChanges, detectAlertChanges } from './signalAlerts';
 import { signalsStore } from './store';
 import { evaluateActiveStrategies } from './strategyAlerts';
@@ -14,6 +14,13 @@ export type SignalRefreshResult =
     ok: true;
     mode: 'seed';
     count: number;
+    cached_at: string;
+  }
+  | {
+    ok: true;
+    mode: 'patch_btcusd';
+    patched: number;
+    total: number;
     cached_at: string;
   }
   | {
@@ -65,6 +72,57 @@ export async function seedSignalCache(signals: SignalRow[]): Promise<SignalRefre
     mode: 'seed',
     count: signals.length,
     cached_at: new Date().toISOString(),
+  };
+}
+
+/**
+ * Fast targeted operation: patch BTCUSD in every existing cache row using
+ * the authoritative local JSON history + a CryptoCompare tail for newer dates.
+ *
+ * Why this exists: a full `rebuild` re-fetches 13 FRED series with no date
+ * filter, which takes 20–30 seconds and hits Netlify's function timeout (502).
+ * This patch only makes two fast calls (local file read + one CryptoCompare
+ * request) and completes in ~2 seconds.
+ */
+export async function patchBtcusdInCache(): Promise<SignalRefreshResult> {
+  const store = signalsStore();
+  const cached = await loadCachedSignals();
+  const cachedData = cached?.data ?? [];
+
+  if (cachedData.length === 0) {
+    throw new Error('Cache is empty — seed the cache first before patching BTCUSD.');
+  }
+
+  const btcSeries = await loadMergedBtcSeries();
+  const btcByDate = new Map(btcSeries.map((p) => [p.date, p.value]));
+
+  let patched = 0;
+  const rows = cachedData.map((row) => {
+    const btcVal = btcByDate.get(row.Date);
+    if (btcVal !== undefined && Number.isFinite(btcVal) && btcVal > 0) {
+      if (row.BTCUSD !== btcVal) {
+        patched += 1;
+        return { ...row, BTCUSD: btcVal };
+      }
+    }
+    return row;
+  });
+
+  const cachedAt = new Date().toISOString();
+  await store.setJSON('signals_latest', {
+    timestamp: Date.now(),
+    count: rows.length,
+    data: rows,
+  });
+
+  console.log(`[signal-refresh] BTCUSD patch complete — updated ${patched} of ${rows.length} rows.`);
+
+  return {
+    ok: true,
+    mode: 'patch_btcusd',
+    patched,
+    total: rows.length,
+    cached_at: cachedAt,
   };
 }
 

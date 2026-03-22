@@ -71,6 +71,14 @@ export async function requirePaidApiKey(apiKey: string | null | undefined): Prom
     };
   }
 
+  // Admins bypass tier and rate-limit checks.
+  if (profile.is_admin) {
+    return {
+      profile: profile as AuthenticatedProfile,
+      rateLimit: { limit: 999999, remaining: 999999, resetAt: new Date(Date.now() + 86_400_000).toISOString() },
+    };
+  }
+
   if (!isPaidTier(profile.tier)) {
     return {
       statusCode: 403,

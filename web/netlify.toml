@@ -3,6 +3,10 @@
   publish = "dist"
   functions = "netlify/functions"
 
+# Bundle the full BTC daily history so serverless functions can read it at runtime.
+[functions]
+  included_files = ["public/data/btc_daily.json"]
+
 # Security headers (HSTS)
 [[headers]]
   for = "/*"

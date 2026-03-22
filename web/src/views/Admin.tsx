@@ -42,6 +42,20 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, type Profile, type Tier } from '../lib/supabase';
 
+function parseJsonOrApiFailure(status: number, text: string): { ok: true; data: unknown } | { ok: false; message: string } {
+  const trimmed = text.trim();
+  if (!trimmed) return { ok: false, message: `Empty response body (HTTP ${status})` };
+  try {
+    return { ok: true, data: JSON.parse(text) as unknown };
+  } catch {
+    const t = trimmed.toLowerCase();
+    if (t.startsWith('<!doctype') || t.startsWith('<html')) {
+      return { ok: false, message: `Got HTML instead of JSON (HTTP ${status}). Run \`netlify dev\` locally so /api routes reach Netlify functions.` };
+    }
+    return { ok: false, message: `Invalid JSON (HTTP ${status}): ${trimmed.slice(0, 200)}` };
+  }
+}
+
 interface EmailSubscriber {
   id: string;
   email: string;
@@ -181,6 +195,7 @@ const Admin: React.FC = () => {
   }>({ latestDate: null, cachedAt: null, stale: null });
   const [refreshing, setRefreshing] = useState(false);
   const [refreshResult, setRefreshResult] = useState<string | null>(null);
+  const [rebuilding, setRebuilding] = useState(false);
   const [scheduledAlertsLoading, setScheduledAlertsLoading] = useState(true);
   const [scheduledAlertsRunning, setScheduledAlertsRunning] = useState(false);
   const [scheduledAlertsStatus, setScheduledAlertsStatus] = useState<ScheduledAlertsStatus | null>(null);
@@ -446,6 +461,42 @@ const Admin: React.FC = () => {
     }
   };
 
+  const handleRebuild = async () => {
+    if (!window.confirm(
+      'This will patch BTCUSD values in every cached row using the bundled btc_daily.json history (2011→2025-10-19) plus a live CryptoCompare tail.\n\nIt runs in ~2 seconds and does not touch any other signal fields. Continue?',
+    )) return;
+
+    setRebuilding(true);
+    setRefreshResult(null);
+    setError(null);
+
+    try {
+      const res = await fetch('/api/v1/signals/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ mode: 'patch_btcusd' }),
+      });
+      const text = await res.text();
+      const parsed = parseJsonOrApiFailure(res.status, text);
+      if (!parsed.ok) {
+        setError(parsed.message);
+        return;
+      }
+      const data = parsed.data as { error?: string; patched?: number; total?: number; cached_at?: string | null };
+      if (!res.ok) {
+        setError(data.error ?? `Rebuild failed (HTTP ${res.status})`);
+      } else {
+        setRefreshResult(`BTCUSD history patched — ${data.patched ?? '?'} rows updated out of ${data.total ?? '?'} total.`);
+        setCacheInfo((prev) => ({ ...prev, cachedAt: data.cached_at ?? prev.cachedAt, stale: false }));
+      }
+      await fetchCacheInfo();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setRebuilding(false);
+    }
+  };
+
   const handleRunScheduledAlerts = async () => {
     setScheduledAlertsRunning(true);
     setScheduledAlertsResult(null);
@@ -626,11 +677,21 @@ const Admin: React.FC = () => {
               />
             </Box>
           </Box>
-          <Box sx={{ ml: 'auto' }}>
+          <Box sx={{ ml: 'auto', display: 'flex', gap: 1 }}>
+            <Button
+              variant="outlined"
+              size="small"
+              disabled={rebuilding || refreshing}
+              onClick={handleRebuild}
+              startIcon={rebuilding ? <CircularProgress size={14} color="inherit" /> : <RefreshCw size={14} />}
+              sx={{ textTransform: 'none', fontWeight: 700 }}
+            >
+              {rebuilding ? 'Rebuilding…' : 'Rebuild cache'}
+            </Button>
             <Button
               variant="contained"
               size="small"
-              disabled={refreshing}
+              disabled={refreshing || rebuilding}
               onClick={handleRefresh}
               startIcon={refreshing ? <CircularProgress size={14} color="inherit" /> : <RefreshCw size={14} />}
               sx={{ textTransform: 'none', fontWeight: 700 }}

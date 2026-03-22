@@ -1,5 +1,6 @@
 import type { Handler } from '@netlify/functions';
-import { getBearerToken, getProfileFromToken, isPaidTier } from './lib/auth';
+import { authorizeAdminOrCron, getBearerToken, getProfileFromToken, isPaidTier } from './lib/auth';
+import { requirePaidApiKey } from './lib/apiAccess';
 import { signalsStore } from './lib/store';
 import { STRATEGY_SERIES_CATALOG } from '../../src/lib/strategyBuilder';
 
@@ -26,21 +27,46 @@ export const handler: Handler = async (event) => {
     };
   }
 
-  const token = getBearerToken(event);
-  const profile = await getProfileFromToken(token, 'id, email, tier');
-  if (!profile) {
-    return {
-      statusCode: 401,
-      headers: corsHeaders(),
-      body: JSON.stringify({ error: 'Sign in required.' }),
-    };
-  }
-  if (!isPaidTier(profile.tier)) {
-    return {
-      statusCode: 403,
-      headers: corsHeaders(),
-      body: JSON.stringify({ error: 'Series detail is a Pro feature.' }),
-    };
+  // Admin / cron-secret token: bypass tier check entirely.
+  const adminResult = await authorizeAdminOrCron(event);
+  if (!adminResult) {
+    const rawBearer = getBearerToken(event);
+
+    // API-key path: X-API-Key header, OR a Bearer token that isn't a JWT
+    // (JWTs always start with "eyJ" and contain dots; api_keys are plain hex strings).
+    const apiKeyCandidate =
+      event.headers['x-api-key'] ??
+      event.headers['X-API-Key'] ??
+      (rawBearer && !rawBearer.includes('.') ? rawBearer : undefined);
+
+    if (apiKeyCandidate) {
+      const access = await requirePaidApiKey(apiKeyCandidate);
+      if ('statusCode' in access) {
+        return {
+          statusCode: access.statusCode,
+          headers: corsHeaders(),
+          body: JSON.stringify({ error: access.error }),
+        };
+      }
+      // access.profile is valid (admin bypass or paid tier) — proceed
+    } else {
+      // Supabase JWT path for regular Pro users.
+      const profile = await getProfileFromToken(rawBearer, 'id, email, tier');
+      if (!profile) {
+        return {
+          statusCode: 401,
+          headers: corsHeaders(),
+          body: JSON.stringify({ error: 'Sign in required.' }),
+        };
+      }
+      if (!isPaidTier(profile.tier)) {
+        return {
+          statusCode: 403,
+          headers: corsHeaders(),
+          body: JSON.stringify({ error: 'Series detail is a Pro feature.' }),
+        };
+      }
+    }
   }
 
   const key = event.queryStringParameters?.key;
