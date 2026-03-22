@@ -65,6 +65,8 @@ export const handler: Handler = async (event) => {
     }
 
     const preview = evaluateStrategy(rows, body.spec);
+    const rowWindow = 365;
+    const transitionWindow = 50;
     return {
       statusCode: 200,
       headers: corsHeaders(),
@@ -72,8 +74,12 @@ export const handler: Handler = async (event) => {
         ok: true,
         preview: {
           ...preview,
-          rows: preview.rows.slice(-365),
-          transitions: preview.transitions.slice(-50),
+          rows: preview.rows.slice(-rowWindow),
+          transitions: preview.transitions.slice(-transitionWindow),
+          traces: preview.traces.map((trace) => ({
+            ...trace,
+            values: trace.values.slice(-rowWindow),
+          })),
         },
         cached_at: cached?.timestamp ? new Date(cached.timestamp).toISOString() : null,
       }),

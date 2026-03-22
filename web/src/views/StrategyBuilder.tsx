@@ -27,13 +27,14 @@ import {
 import { useTheme } from '@mui/material/styles';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import {
-  BookOpen,
   Bot,
   ChevronDown,
   ChevronUp,
   DollarSign,
+  Lightbulb,
   Link2,
   Droplets,
+  FolderOpen,
   TrendingUp,
   ArrowLeftRight,
   Gauge,
@@ -67,9 +68,12 @@ import {
   summarizeStrategySpec,
   validateStrategySpec,
   type StrategyAlertMode,
+  type StrategyPreviewTrace,
   type StrategyPreviewResult,
+  type StrategySnapshotRow,
   type StrategySpec,
 } from '../lib/strategyBuilder';
+import { SignalBuilderDocsContent } from './DocsSignalBuilder';
 
 type StoredStrategy = {
   id: string;
@@ -92,7 +96,7 @@ const StrategyBuilder: React.FC = () => {
   const theme = useTheme();
   const isSmDown = useMediaQuery(theme.breakpoints.down('sm'));
   const hasPaidAccess = tier === 'pro' || tier === 'pro_plus' || tier === 'lifetime';
-  const [prompt, setPrompt] = useState('Alert me when BTC is above its 200 day moving average and MVRV is below 2.');
+  const [prompt, setPrompt] = useState('');
   const [strategyName, setStrategyName] = useState('Prompt strategy');
   const [strategyDescription, setStrategyDescription] = useState('LLM-assisted custom Pro strategy.');
   const [strategyStatus, setStrategyStatus] = useState<'draft' | 'active' | 'paused' | 'invalid'>('draft');
@@ -104,15 +108,18 @@ const StrategyBuilder: React.FC = () => {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [preview, setPreview] = useState<StrategyPreviewResult | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [selectedPreviewRows, setSelectedPreviewRows] = useState<string[]>([]);
   const [showAdvancedDetails, setShowAdvancedDetails] = useState(false);
   const [strategies, setStrategies] = useState<StoredStrategy[]>([]);
   const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(null);
   const [loadingStrategies, setLoadingStrategies] = useState(false);
+  const [savedStrategiesOpen, setSavedStrategiesOpen] = useState(false);
   const [busyAction, setBusyAction] = useState<'interpret' | 'preview' | 'save' | 'delete' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [seriesModalOpen, setSeriesModalOpen] = useState(false);
   const [seriesModalKey, setSeriesModalKey] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const groupedSeries = useMemo(() => getGroupedSeries(), []);
 
@@ -183,6 +190,26 @@ const StrategyBuilder: React.FC = () => {
     })) ?? []
   ), [preview]);
 
+  const previewTraceMap = useMemo(
+    () => new Map((preview?.traces ?? []).map((trace) => [buildPreviewRowKey(trace.kind, trace.id), trace])),
+    [preview],
+  );
+
+  const selectedPreviewCharts = useMemo(() => {
+    if (!preview) return [];
+    const selectedKeys = new Set(selectedPreviewRows);
+    return preview.snapshot
+      .filter((row) => isSelectableSnapshotRow(row) && selectedKeys.has(buildPreviewRowKey(row.kind, row.id)))
+      .flatMap((row) => {
+        const trace = previewTraceMap.get(buildPreviewRowKey(row.kind, row.id));
+        return trace ? [{ row, trace }] : [];
+      });
+  }, [preview, previewTraceMap, selectedPreviewRows]);
+
+  useEffect(() => {
+    setSelectedPreviewRows([]);
+  }, [preview]);
+
   const selectedStrategy = useMemo(
     () => strategies.find((strategy) => strategy.id === selectedStrategyId) ?? null,
     [strategies, selectedStrategyId],
@@ -229,13 +256,24 @@ const StrategyBuilder: React.FC = () => {
     setPreview(null);
     setSuccess(null);
     setError(null);
+    setSavedStrategiesOpen(false);
   };
 
   const detachSelectedStrategy = () => {
     setSelectedStrategyId(null);
-    setSuccess('Detached from the saved strategy. You can now save this draft as a new strategy.');
+    setSuccess('New draft created.');
     setError(null);
   };
+
+  const togglePreviewRow = useCallback((row: StrategySnapshotRow) => {
+    if (!isSelectableSnapshotRow(row)) return;
+    const key = buildPreviewRowKey(row.kind, row.id);
+    setSelectedPreviewRows((current) => (
+      current.includes(key)
+        ? current.filter((entry) => entry !== key)
+        : [...current, key]
+    ));
+  }, []);
 
   const interpretPrompt = async () => {
     setBusyAction('interpret');
@@ -417,9 +455,9 @@ const StrategyBuilder: React.FC = () => {
                     fontWeight: 600,
                     '&:hover': { textDecoration: 'underline' },
                   }}
-                  onClick={() => navigate('/docs/signal-builder')}
+                  onClick={() => setHelpOpen(true)}
                 >
-                <BookOpen size={13} style={{ verticalAlign: 'text-bottom', marginRight: 3 }} />
+                <Lightbulb size={13} style={{ verticalAlign: 'text-bottom', marginRight: 3 }} />
                 Learn more
               </Typography>
             </Stack>
@@ -438,27 +476,39 @@ const StrategyBuilder: React.FC = () => {
               <Stack spacing={2}>
                 <Stack direction="row" justifyContent="space-between" alignItems="center">
                   <Typography variant="h6" sx={{ fontWeight: 800 }}>Describe your strategy</Typography>
-                  <IconButton
-                    onClick={detachSelectedStrategy}
-                    disabled={busyAction !== null}
-                    size="small"
-                    sx={{ border: '1px solid', borderColor: 'divider' }}
-                    aria-label="Start a new draft"
-                    title="Start a new draft"
-                  >
-                    <Plus size={18} />
-                  </IconButton>
+                  <Stack direction="row" spacing={1}>
+                    <IconButton
+                      onClick={() => setSavedStrategiesOpen(true)}
+                      disabled={busyAction !== null}
+                      size="small"
+                      sx={{ border: '1px solid', borderColor: 'divider' }}
+                      aria-label="Load a saved strategy"
+                      title="Load a saved strategy"
+                    >
+                      <FolderOpen size={18} />
+                    </IconButton>
+                    <IconButton
+                      onClick={detachSelectedStrategy}
+                      disabled={busyAction !== null}
+                      size="small"
+                      sx={{ border: '1px solid', borderColor: 'divider' }}
+                      aria-label="Start a new draft"
+                      title="Start a new draft"
+                    >
+                      <Plus size={18} />
+                    </IconButton>
+                  </Stack>
                 </Stack>
                 <TextField
                   multiline
                   minRows={4}
                   value={prompt}
                   onChange={(event) => setPrompt(event.target.value)}
-                  placeholder="Example: Alert me when BTC crosses above its 200 day moving average and MVRV is below 2."
+                  placeholder="Example: Alert me when BTC crosses above its 200 day moving average and MVRV is above 1.2"
                 />
                 {selectedStrategy && (
                   <Alert severity="info">
-                    Editing saved strategy: <strong>{selectedStrategy.name}</strong>. Click the <strong>+</strong> icon to start a new draft.
+                    Editing saved strategy: <strong>{selectedStrategy.name}</strong>.
                   </Alert>
                 )}
                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25}>
@@ -650,53 +700,6 @@ const StrategyBuilder: React.FC = () => {
           <Stack spacing={3}>
             <Paper sx={{ p: 3 }}>
               <Stack spacing={2}>
-                <Typography variant="h6" sx={{ fontWeight: 800 }}>Saved strategies</Typography>
-                {loadingStrategies ? (
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
-                    <CircularProgress size={18} />
-                    <Typography variant="body2" color="text.secondary">Loading strategies…</Typography>
-                  </Box>
-                ) : strategies.length === 0 ? (
-                  <Typography variant="body2" color="text.secondary">
-                    No saved strategies yet. Draft one from the prompt box and save it when the preview looks sensible.
-                  </Typography>
-                ) : (
-                  <Stack spacing={1.25}>
-                    {strategies.map((strategy) => (
-                      <Paper
-                        key={strategy.id}
-                        variant="outlined"
-                        sx={{
-                          p: 1.5,
-                          cursor: 'pointer',
-                          borderColor: selectedStrategyId === strategy.id ? 'primary.main' : 'rgba(148,163,184,0.24)',
-                        }}
-                        onClick={() => applyStrategy(strategy)}
-                      >
-                        <Typography sx={{ fontWeight: 700 }}>{strategy.name}</Typography>
-                        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                          {strategy.description}
-                        </Typography>
-                        <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
-                          <Chip label={strategy.status} size="small" variant="outlined" />
-                          <Chip label={strategy.alert.enabled ? `Alerts: ${strategy.alert.mode}` : 'Alerts off'} size="small" variant="outlined" />
-                          {strategy.latest_signal_date && (
-                            <Chip
-                              label={`Latest ${strategy.latest_signal_value ?? 0} on ${strategy.latest_signal_date}`}
-                              size="small"
-                              variant="outlined"
-                            />
-                          )}
-                        </Stack>
-                      </Paper>
-                    ))}
-                  </Stack>
-                )}
-              </Stack>
-            </Paper>
-
-            <Paper sx={{ p: 3 }}>
-              <Stack spacing={2}>
                 <Box>
                   <Typography variant="h6" sx={{ fontWeight: 800 }}>Available series</Typography>
                   <Typography variant="body2" color="text.secondary">
@@ -743,6 +746,110 @@ const StrategyBuilder: React.FC = () => {
           </Stack>
         </Box>
       </Stack>
+
+      <Dialog
+        open={helpOpen}
+        onClose={() => setHelpOpen(false)}
+        fullScreen={isSmDown}
+        fullWidth
+        maxWidth="lg"
+        PaperProps={{
+          sx: {
+            bgcolor: 'background.paper',
+            m: isSmDown ? 0 : 2,
+            width: isSmDown ? '100%' : undefined,
+            maxHeight: isSmDown ? '100%' : 'calc(100% - 32px)',
+          },
+        }}
+      >
+        <DialogContent sx={{ p: isSmDown ? 1.5 : 3 }}>
+          <Stack spacing={2.5}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center">
+              <IconButton onClick={() => setHelpOpen(false)} aria-label="Close Signal Builder help">
+                <X size={18} />
+              </IconButton>
+            </Stack>
+            <SignalBuilderDocsContent showPager={false} />
+          </Stack>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={savedStrategiesOpen}
+        onClose={() => setSavedStrategiesOpen(false)}
+        fullScreen={isSmDown}
+        fullWidth
+        maxWidth="md"
+        PaperProps={{
+          sx: {
+            bgcolor: 'background.paper',
+            m: isSmDown ? 0 : 2,
+            width: isSmDown ? '100%' : undefined,
+            maxHeight: isSmDown ? '100%' : 'calc(100% - 32px)',
+          },
+        }}
+      >
+        <DialogContent sx={{ p: isSmDown ? 1.5 : 3 }}>
+          <Stack spacing={2.5}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center">
+              <Box>
+                <Typography variant={isSmDown ? 'h6' : 'h5'} sx={{ fontWeight: 900 }}>
+                  Saved strategies
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                  Load one of your saved Signal Builder strategies into the editor.
+                </Typography>
+              </Box>
+              <IconButton onClick={() => setSavedStrategiesOpen(false)} aria-label="Close saved strategies">
+                <X size={18} />
+              </IconButton>
+            </Stack>
+
+            {loadingStrategies ? (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, py: 2 }}>
+                <CircularProgress size={18} />
+                <Typography variant="body2" color="text.secondary">Loading strategies…</Typography>
+              </Box>
+            ) : strategies.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">
+                No saved strategies yet. Draft one from the prompt box and save it when the preview looks sensible.
+              </Typography>
+            ) : (
+              <Stack spacing={1.25}>
+                {strategies.map((strategy) => (
+                  <Paper
+                    key={strategy.id}
+                    variant="outlined"
+                    sx={{
+                      p: 1.5,
+                      cursor: 'pointer',
+                      borderColor: selectedStrategyId === strategy.id ? 'primary.main' : 'rgba(148,163,184,0.24)',
+                      '&:hover': { borderColor: 'primary.main' },
+                    }}
+                    onClick={() => applyStrategy(strategy)}
+                  >
+                    <Typography sx={{ fontWeight: 700 }}>{strategy.name}</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                      {strategy.description}
+                    </Typography>
+                    <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+                      <Chip label={strategy.status} size="small" variant="outlined" />
+                      <Chip label={strategy.alert.enabled ? `Alerts: ${strategy.alert.mode}` : 'Alerts off'} size="small" variant="outlined" />
+                      {strategy.latest_signal_date && (
+                        <Chip
+                          label={`Latest ${strategy.latest_signal_value ?? 0} on ${strategy.latest_signal_date}`}
+                          size="small"
+                          variant="outlined"
+                        />
+                      )}
+                    </Stack>
+                  </Paper>
+                ))}
+              </Stack>
+            )}
+          </Stack>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={previewOpen}
@@ -793,22 +900,32 @@ const StrategyBuilder: React.FC = () => {
                   <Chip label={`Active days: ${preview.summary.activeDays}`} size="small" variant="outlined" />
                 </Stack>
 
-                <Box sx={{ width: '100%', height: isSmDown ? '52vh' : 360 }}>
-                  <ResponsiveContainer>
-                    <LineChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" opacity={0.16} />
-                      <XAxis dataKey="Date" tick={{ fontSize: 12 }} minTickGap={30} />
-                      <YAxis yAxisId="signal" domain={[0, 1]} ticks={[0, 1]} />
-                      <YAxis yAxisId="btc" orientation="right" />
-                      <Tooltip />
-                      <Line yAxisId="signal" type="stepAfter" dataKey="signal" stroke="#60a5fa" dot={false} strokeWidth={2.2} />
-                      <Line yAxisId="btc" type="monotone" dataKey="btcScaled" name="BTC (scaled)" stroke="#f59e0b" dot={false} strokeWidth={1.4} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </Box>
-
                 <Stack spacing={1} sx={{ px: isSmDown ? 0.5 : 0 }}>
-                  <Typography sx={{ fontWeight: 700 }}>Current snapshot</Typography>
+                  <Stack
+                    direction={{ xs: 'column', sm: 'row' }}
+                    spacing={1}
+                    justifyContent="space-between"
+                    alignItems={{ xs: 'flex-start', sm: 'center' }}
+                  >
+                    <Box>
+                      <Typography sx={{ fontWeight: 700 }}>Current snapshot</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Tap any source, metric, or condition row to show or hide its chart below.
+                      </Typography>
+                    </Box>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <Chip label={`${selectedPreviewCharts.length} selected`} size="small" variant="outlined" />
+                      <Button
+                        variant="text"
+                        size="small"
+                        onClick={() => setSelectedPreviewRows([])}
+                        disabled={selectedPreviewRows.length === 0}
+                        sx={{ textTransform: 'none', fontWeight: 700 }}
+                      >
+                        Clear all
+                      </Button>
+                    </Stack>
+                  </Stack>
                   <TableContainer
                     component={Paper}
                     variant="outlined"
@@ -821,11 +938,21 @@ const StrategyBuilder: React.FC = () => {
                           <TableCell sx={{ fontWeight: 800 }}>Name</TableCell>
                           <TableCell sx={{ fontWeight: 800 }}>Reference</TableCell>
                           <TableCell sx={{ fontWeight: 800 }}>Current value</TableCell>
+                          <TableCell sx={{ fontWeight: 800 }}>Chart</TableCell>
                         </TableRow>
                       </TableHead>
                       <TableBody>
                         {preview.snapshot.map((row) => (
-                          <TableRow key={`${row.kind}-${row.id}`}>
+                          <TableRow
+                            key={`${row.kind}-${row.id}`}
+                            hover={isSelectableSnapshotRow(row)}
+                            selected={selectedPreviewRows.includes(buildPreviewRowKey(row.kind, row.id))}
+                            onClick={isSelectableSnapshotRow(row) ? () => togglePreviewRow(row) : undefined}
+                            sx={isSelectableSnapshotRow(row) ? {
+                              cursor: 'pointer',
+                              '& .MuiTableCell-root': { borderColor: 'rgba(148,163,184,0.18)' },
+                            } : undefined}
+                          >
                             <TableCell sx={{ whiteSpace: 'nowrap' }}>
                               <Chip
                                 label={row.kind}
@@ -841,6 +968,26 @@ const StrategyBuilder: React.FC = () => {
                             <TableCell sx={{ fontFamily: 'monospace', fontWeight: 700 }}>
                               {row.displayValue}
                             </TableCell>
+                            <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                              <Chip
+                                label={
+                                  row.kind === 'output'
+                                    ? 'Pinned'
+                                    : selectedPreviewRows.includes(buildPreviewRowKey(row.kind, row.id))
+                                      ? 'Shown'
+                                      : 'Tap to show'
+                                }
+                                size="small"
+                                variant="outlined"
+                                color={
+                                  row.kind === 'output'
+                                    ? 'default'
+                                    : selectedPreviewRows.includes(buildPreviewRowKey(row.kind, row.id))
+                                      ? 'primary'
+                                      : 'default'
+                                }
+                              />
+                            </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -853,6 +1000,41 @@ const StrategyBuilder: React.FC = () => {
                       : 'Unavailable.'}
                   </Typography>
                 </Stack>
+
+                <Stack spacing={1} sx={{ px: isSmDown ? 0.5 : 0 }}>
+                  <Typography sx={{ fontWeight: 700 }}>Signal output</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    The main chart stays pinned so you can compare contributor charts against the final signal.
+                  </Typography>
+                  <Box sx={{ width: '100%', height: isSmDown ? '48vh' : 340 }}>
+                    <ResponsiveContainer>
+                      <LineChart data={chartData}>
+                        <CartesianGrid strokeDasharray="3 3" opacity={0.16} />
+                        <XAxis dataKey="Date" tick={{ fontSize: 12 }} minTickGap={30} />
+                        <YAxis yAxisId="signal" domain={[0, 1]} ticks={[0, 1]} />
+                        <YAxis yAxisId="btc" orientation="right" />
+                        <Tooltip />
+                        <Line yAxisId="signal" type="stepAfter" dataKey="signal" stroke="#60a5fa" dot={false} strokeWidth={2.2} name="Signal" />
+                        <Line yAxisId="btc" type="monotone" dataKey="btcScaled" name="BTC (scaled)" stroke="#f59e0b" dot={false} strokeWidth={1.4} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </Box>
+                </Stack>
+
+                {selectedPreviewCharts.length > 0 && (
+                  <Stack spacing={1.25} sx={{ px: isSmDown ? 0.5 : 0 }}>
+                    <Typography sx={{ fontWeight: 700 }}>Selected contributors</Typography>
+                    {selectedPreviewCharts.map(({ row, trace }) => (
+                      <PreviewTraceChart
+                        key={buildPreviewRowKey(trace.kind, trace.id)}
+                        row={row}
+                        trace={trace}
+                        dates={preview.rows.map((previewRow) => previewRow.Date)}
+                        isSmDown={isSmDown}
+                      />
+                    ))}
+                  </Stack>
+                )}
 
                 <Stack spacing={1} sx={{ px: isSmDown ? 0.5 : 0, pb: isSmDown ? 1 : 0 }}>
                   <Typography sx={{ fontWeight: 700 }}>Recent transitions</Typography>
@@ -897,6 +1079,209 @@ function seriesGroupIcon(group: string) {
     default:
       return null;
   }
+}
+
+function buildPreviewRowKey(kind: StrategySnapshotRow['kind'], id: string) {
+  return `${kind}-${id}`;
+}
+
+function isSelectableSnapshotRow(row: StrategySnapshotRow) {
+  switch (row.kind) {
+    case 'source':
+    case 'metric':
+    case 'condition':
+      return true;
+    case 'output':
+      return false;
+    default: {
+      const exhaustiveCheck: never = row.kind;
+      return exhaustiveCheck;
+    }
+  }
+}
+
+function isBinaryPreviewTrace(trace: StrategyPreviewTrace) {
+  switch (trace.kind) {
+    case 'condition':
+    case 'output':
+      return true;
+    case 'source':
+    case 'metric':
+      return false;
+    default: {
+      const exhaustiveCheck: never = trace.kind;
+      return exhaustiveCheck;
+    }
+  }
+}
+
+function previewTraceColor(kind: StrategyPreviewTrace['kind']) {
+  switch (kind) {
+    case 'source':
+      return '#34d399';
+    case 'metric':
+      return '#f59e0b';
+    case 'condition':
+      return '#a78bfa';
+    case 'output':
+      return '#60a5fa';
+    default: {
+      const exhaustiveCheck: never = kind;
+      return exhaustiveCheck;
+    }
+  }
+}
+
+function formatGenericPreviewNumber(value: number) {
+  if (Math.abs(value) >= 1000) {
+    return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  }
+  if (Math.abs(value) < 0.01 && value !== 0) {
+    return value.toExponential(2);
+  }
+  return value.toFixed(Math.abs(value) < 10 ? 4 : 2);
+}
+
+function formatPreviewTraceValue(value: number | boolean | null, trace: StrategyPreviewTrace) {
+  if (value == null) return '—';
+  switch (trace.kind) {
+    case 'source':
+      return typeof value === 'number'
+        ? formatSeriesValue(value, trace.reference ?? '')
+        : value
+          ? 'ON'
+          : 'OFF';
+    case 'metric':
+      return typeof value === 'number' ? formatGenericPreviewNumber(value) : '—';
+    case 'condition':
+      return value === true ? 'TRUE' : 'FALSE';
+    case 'output':
+      return Number(value) === 1 ? 'ON' : 'OFF';
+    default: {
+      const exhaustiveCheck: never = trace.kind;
+      return exhaustiveCheck;
+    }
+  }
+}
+
+interface PreviewTraceChartProps {
+  row: StrategySnapshotRow;
+  trace: StrategyPreviewTrace;
+  dates: string[];
+  isSmDown: boolean;
+}
+
+function PreviewTraceChart({ row, trace, dates, isSmDown }: PreviewTraceChartProps) {
+  const binaryTrace = isBinaryPreviewTrace(trace);
+  const stroke = previewTraceColor(trace.kind);
+
+  const data = useMemo(() => (
+    dates.map((date, index) => {
+      const rawValue = trace.values[index] ?? null;
+      const value = typeof rawValue === 'boolean'
+        ? (rawValue ? 1 : 0)
+        : typeof rawValue === 'number' && Number.isFinite(rawValue)
+          ? rawValue
+          : null;
+      return {
+        Date: date,
+        value,
+        rawValue,
+      };
+    })
+  ), [dates, trace.values]);
+
+  const hasValues = data.some((point) => point.value != null);
+
+  const yDomain = useMemo(() => {
+    if (binaryTrace) return [0, 1] as [number, number];
+    const values = data
+      .map((point) => point.value)
+      .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+    if (values.length === 0) return [0, 1] as [number, number];
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const pad = (max - min) * 0.05 || Math.max(Math.abs(max) * 0.05, 1);
+    return [min - pad, max + pad] as [number, number];
+  }, [binaryTrace, data]);
+
+  return (
+    <Paper variant="outlined" sx={{ p: isSmDown ? 1.25 : 1.5 }}>
+      <Stack spacing={1.25}>
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          spacing={1}
+          justifyContent="space-between"
+          alignItems={{ xs: 'flex-start', sm: 'center' }}
+        >
+          <Box>
+            <Typography sx={{ fontWeight: 800 }}>
+              {trace.kind === 'condition' && row.reference
+                ? `${trace.label} (${row.reference})`
+                : trace.label}
+            </Typography>
+            <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
+              <Chip label={trace.kind} size="small" variant="outlined" sx={{ textTransform: 'capitalize' }} />
+              {row.reference && (
+                <Chip label={row.reference} size="small" variant="outlined" sx={{ maxWidth: '100%' }} />
+              )}
+            </Stack>
+          </Box>
+          <Chip label={`Latest: ${row.displayValue}`} size="small" sx={{ fontWeight: 700 }} />
+        </Stack>
+
+        {!hasValues ? (
+          <Typography variant="body2" color="text.secondary">
+            No historical values available for this contributor in the preview window.
+          </Typography>
+        ) : (
+          <Box sx={{ width: '100%', height: isSmDown ? 220 : 240 }}>
+            <ResponsiveContainer>
+              <LineChart data={data}>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.14} />
+                <XAxis dataKey="Date" tick={{ fontSize: 11 }} minTickGap={30} />
+                <YAxis
+                  domain={yDomain}
+                  ticks={binaryTrace ? [0, 1] : undefined}
+                  tick={{ fontSize: 11 }}
+                  tickFormatter={(value: number) => (
+                    binaryTrace
+                      ? trace.kind === 'output'
+                        ? (value === 1 ? 'ON' : 'OFF')
+                        : (value === 1 ? 'TRUE' : 'FALSE')
+                      : formatGenericPreviewNumber(value)
+                  )}
+                  width={binaryTrace ? 56 : 72}
+                />
+                <Tooltip
+                  labelFormatter={(label: string) => label}
+                  formatter={(_, __, item: { payload?: { rawValue?: number | boolean | null } }) => [
+                    formatPreviewTraceValue(item.payload?.rawValue ?? null, trace),
+                    trace.label,
+                  ]}
+                  contentStyle={{
+                    backgroundColor: 'rgba(15, 23, 42, 0.92)',
+                    border: '1px solid rgba(148,163,184,0.2)',
+                    borderRadius: 8,
+                    fontSize: 13,
+                  }}
+                />
+                <Line
+                  type={binaryTrace ? 'stepAfter' : 'monotone'}
+                  dataKey="value"
+                  stroke={stroke}
+                  strokeWidth={2}
+                  dot={false}
+                  connectNulls
+                  isAnimationActive={false}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </Box>
+        )}
+      </Stack>
+    </Paper>
+  );
 }
 
 function formatSeriesValue(value: number | null, key: string): string {

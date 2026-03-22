@@ -443,7 +443,7 @@ const SECTION_TABS = [
   { label: 'Examples' },
 ] as const;
 
-const DocsSignalBuilder: React.FC = () => {
+export const SignalBuilderDocsContent: React.FC<{ showPager?: boolean }> = ({ showPager = true }) => {
   const { session } = useAuth();
   const theme = useTheme();
   const isSmDown = useMediaQuery(theme.breakpoints.down('sm'));
@@ -459,7 +459,7 @@ const DocsSignalBuilder: React.FC = () => {
   }, []);
 
   return (
-    <DocsPageLayout>
+    <>
       <Stack spacing={3}>
         {/* Header */}
         <Box>
@@ -748,7 +748,7 @@ const DocsSignalBuilder: React.FC = () => {
           </>
         )}
 
-        <DocsPager />
+        {showPager && <DocsPager />}
       </Stack>
 
       <SeriesDetailModal
@@ -758,8 +758,14 @@ const DocsSignalBuilder: React.FC = () => {
         accessToken={session?.access_token ?? null}
         isSmDown={isSmDown}
       />
-    </DocsPageLayout>
+    </>
   );
 };
+
+const DocsSignalBuilder: React.FC = () => (
+  <DocsPageLayout>
+    <SignalBuilderDocsContent />
+  </DocsPageLayout>
+);
 
 export default DocsSignalBuilder;

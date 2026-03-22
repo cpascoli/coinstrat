@@ -172,12 +172,21 @@ export interface StrategySnapshotRow {
   displayValue: string;
 }
 
+export interface StrategyPreviewTrace {
+  kind: StrategySnapshotRow['kind'];
+  id: string;
+  label: string;
+  reference?: string;
+  values: Array<number | boolean | null>;
+}
+
 export interface StrategyPreviewResult {
   currentState: number;
   latestDate: string | null;
   rows: StrategyPreviewRow[];
   transitions: StrategyTransition[];
   snapshot: StrategySnapshotRow[];
+  traces: StrategyPreviewTrace[];
   metrics: Array<{ id: string; label: string; latestValue: number | null }>;
   conditions: Array<{ id: string; label: string; latestValue: boolean }>;
   summary: {

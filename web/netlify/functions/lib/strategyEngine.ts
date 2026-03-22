@@ -6,6 +6,7 @@ import {
   type StrategyComparator,
   type StrategyConditionDefinition,
   type StrategyMetricDefinition,
+  type StrategyPreviewTrace,
   type StrategyMetricTimeframe,
   type StrategyPreviewResult,
   type StrategyPreviewRow,
@@ -314,6 +315,10 @@ function formatSnapshotValue(value: number | boolean | null): string {
   return 'n/a';
 }
 
+function normalizeTraceValues(values: NumericSeries): Array<number | null> {
+  return values.map((value) => (Number.isFinite(value) ? value : null));
+}
+
 function buildSourceSeries(rows: SignalRow[], seriesKey: StrategySeriesKey): NumericRef {
   return {
     values: rows.map((row) => normalizeNumber(row[seriesKey])),
@@ -458,12 +463,53 @@ export function evaluateStrategy(rows: SignalRow[], spec: StrategySpec): Strateg
     displayValue: (latestRow?.signal ?? 0) === 1 ? 'ON' : 'OFF',
   });
 
+  const traces: StrategyPreviewTrace[] = [
+    ...spec.sources.map((source) => {
+      const series = refs.get(source.id) ?? { values: [], updates: [], timeframe: 'day' as const };
+      return {
+        kind: 'source' as const,
+        id: source.id,
+        label: source.label,
+        reference: source.seriesKey,
+        values: normalizeTraceValues(series.values),
+      };
+    }),
+    ...spec.metrics.map((metric) => {
+      const series = refs.get(metric.id) ?? { values: [], updates: [], timeframe: 'day' as const };
+      return {
+        kind: 'metric' as const,
+        id: metric.id,
+        label: metric.label,
+        reference: metric.operator,
+        values: normalizeTraceValues(series.values),
+      };
+    }),
+    ...spec.conditions.map((condition) => {
+      const series = conditionSeries.get(condition.id) ?? [];
+      return {
+        kind: 'condition' as const,
+        id: condition.id,
+        label: condition.label,
+        reference: describeComparator(condition.comparator),
+        values: series,
+      };
+    }),
+    {
+      kind: 'output' as const,
+      id: 'output',
+      label: spec.output.label,
+      reference: spec.output.mode,
+      values: signalSeries,
+    },
+  ];
+
   return {
     currentState: latestRow?.signal ?? 0,
     latestDate: latestRow?.Date ?? null,
     rows: previewRows,
     transitions,
     snapshot,
+    traces,
     metrics: spec.metrics.map((metric) => {
       const series = refs.get(metric.id) ?? { values: [], updates: [], timeframe: 'day' as const };
       const latestValue = series.values.length > 0 ? series.values[series.values.length - 1] : Number.NaN;

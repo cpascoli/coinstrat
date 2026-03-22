@@ -360,7 +360,21 @@ describe('strategyLlm — uptrend prompt regression', () => {
       expect(result.latestDate).toBe(rows[rows.length - 1].Date);
       expect(typeof result.currentState).toBe('number');
       expect(result.snapshot.length).toBeGreaterThan(0);
+      expect(result.traces.length).toBe(result.snapshot.length);
       expect(result.summary.activeDays + result.summary.inactiveDays).toBe(400);
+    });
+
+    it('returns aligned historical traces for sources, metrics, conditions, and output', () => {
+      const spec = buildCorrectSpec();
+      const rows = generateSyntheticRows(120);
+      const result = evaluateStrategy(rows, spec);
+
+      expect(result.traces).toHaveLength(result.snapshot.length);
+      expect(result.traces.every((trace) => trace.values.length === rows.length)).toBe(true);
+      expect(result.traces.some((trace) => trace.kind === 'source')).toBe(true);
+      expect(result.traces.some((trace) => trace.kind === 'metric')).toBe(true);
+      expect(result.traces.some((trace) => trace.kind === 'condition')).toBe(true);
+      expect(result.traces.some((trace) => trace.kind === 'output')).toBe(true);
     });
 
     it('evaluates the auto-fixed spec identically to the correct spec', () => {
