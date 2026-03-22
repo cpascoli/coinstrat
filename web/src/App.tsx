@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import clsx from 'clsx';
 import { LayoutDashboard, BarChart3, Binary, Info, Activity, FlaskConical, Github, User, LogOut, Shield, BookOpen, Database, Key, Workflow } from 'lucide-react';
 import Dashboard from './views/Dashboard';
 import ScoreBreakdown from './views/ScoreBreakdown';
@@ -46,7 +47,7 @@ import {
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import useMediaQuery from '@mui/material/useMediaQuery';
-import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 
 // Types for the signal data
 export interface SignalData {
@@ -171,16 +172,21 @@ const App: React.FC = () => {
 
     return [
       ...(showDesktopDashboard
-        ? [{ key: 'dashboard', path: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-5 w-5" />, active: location.pathname === '/dashboard' }]
+        ? [{ key: 'dashboard', path: '/dashboard', label: 'Dashboard', active: location.pathname === '/dashboard' }]
         : []),
       ...(isAuthenticated
         ? [
-            { key: 'signal-builder', path: '/strategy-builder', label: 'Signal Builder', icon: <Workflow className="h-5 w-5" />, active: location.pathname === '/strategy-builder' },
+            {
+              key: 'signal-builder',
+              path: '/strategy-builder',
+              label: 'Signal Builder',
+              active: location.pathname === '/strategy-builder',
+            },
           ]
         : []),
-      { key: 'docs', path: '/docs', label: 'Docs', icon: <BookOpen className="h-5 w-5" />, active: docsActive },
-      { key: 'charts', path: '/charts/system', label: 'Charts', icon: <Activity className="h-5 w-5" />, active: location.pathname.startsWith('/charts') },
-      { key: 'backtest', path: '/backtest', label: 'Backtest', icon: <FlaskConical className="h-5 w-5" />, active: location.pathname === '/backtest' },
+      { key: 'docs', path: '/docs', label: 'Docs', active: docsActive },
+      { key: 'charts', path: '/charts/system', label: 'Charts', active: location.pathname.startsWith('/charts') },
+      { key: 'backtest', path: '/backtest', label: 'Backtest', active: location.pathname === '/backtest' },
     ];
   }, [isAuthenticated, location.pathname, showDesktopDashboard]);
 
@@ -271,14 +277,14 @@ const App: React.FC = () => {
         <Paper sx={{ p: 3 }}>
           <Typography sx={{ fontWeight: 900, mb: 1.5 }}>Sign in to unlock CoinStrat Free</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Dashboard, signals, charts, and backtests are available to signed-in Free members. Use a magic link for the fastest access.
+            Dashboard, signal analysis and scoring are available to signed-in Free members. Use a magic link for the fastest access.
           </Typography>
           <Box sx={{ display: 'flex', gap: 1.25, flexWrap: 'wrap' }}>
             <Button variant="contained" onClick={() => openAuth(authRedirectTo)} sx={{ fontWeight: 700 }}>
               Sign in or create account
             </Button>
             <Button variant="outlined" onClick={() => navigate('/docs')} sx={{ fontWeight: 700 }}>
-              Read docs first
+              Learn more first
             </Button>
           </Box>
         </Paper>
@@ -372,30 +378,18 @@ const App: React.FC = () => {
 
           {/* Desktop primary navigation */}
           {isMdUp && (
-            <Box sx={{ display: 'flex', gap: 1 }}>
+            <Box className="flex items-center gap-8">
               {desktopPrimaryLinks.map((item) => (
-                <Paper
+                <Link
                   key={item.key}
-                  component="button"
-                  onClick={() => navigate(item.path)}
-                  sx={{
-                    cursor: 'pointer',
-                    px: 1.5,
-                    py: 1,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1,
-                    bgcolor: item.active ? 'primary.main' : 'background.paper',
-                    color: item.active ? 'primary.contrastText' : 'text.primary',
-                    borderColor: item.active ? 'primary.main' : 'divider',
-                    '&:hover': { borderColor: 'primary.main' },
-                  }}
+                  to={item.path}
+                  className={clsx(
+                    'border-b-2 pb-1 font-headline font-bold tracking-tight transition-colors no-underline',
+                    item.active ? 'border-[#2563eb] text-[#b4c5ff]' : 'border-transparent text-slate-400 hover:text-white',
+                  )}
                 >
-                  {item.icon}
-                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                    {item.label}
-                  </Typography>
-                </Paper>
+                  {item.label}
+                </Link>
               ))}
             </Box>
           )}

@@ -250,13 +250,15 @@ const Home: React.FC<HomeProps> = ({
                 </Menu>
               </>
             ) : null}
-            <button
-              type="button"
-              onClick={primaryCta}
-              className="rounded-xl bg-[#b4c5ff] px-6 py-2.5 font-black text-[#002a78] transition-all hover:shadow-[0_0_20px_-5px_rgba(180,197,255,0.4)] active:scale-95"
-            >
-              {hasFreeAccess ? 'Dashboard' : isAuthenticated ? 'Profile' : 'Get Started'}
-            </button>
+            {!(user && hasFreeAccess) && (
+              <button
+                type="button"
+                onClick={primaryCta}
+                className="rounded-xl bg-[#b4c5ff] px-6 py-2.5 font-black text-[#002a78] transition-all hover:shadow-[0_0_20px_-5px_rgba(180,197,255,0.4)] active:scale-95"
+              >
+                {hasFreeAccess ? 'Dashboard' : isAuthenticated ? 'Profile' : 'Get Started'}
+              </button>
+            )}
           </div>
         </div>
       </nav>
@@ -486,14 +488,12 @@ function FeatureCard({
 
 function StepRow({ n, title, body }: { n: string; title: string; body: string }) {
   return (
-    <div className="flex items-start gap-6">
-      <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded border border-outline-variant bg-surface-container-high font-headline text-sm font-bold tabular-nums tracking-tight text-primary">
+    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-6 gap-y-2">
+      <div className="col-start-1 row-start-1 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded border border-outline-variant bg-surface-container-high font-headline text-sm font-bold tabular-nums tracking-tight text-primary">
         {n}
       </div>
-      <div className="min-w-0 flex-1">
-        <h4 className="font-headline mb-2 text-xl font-bold leading-tight">{title}</h4>
-        <p className="text-on-surface-variant">{body}</p>
-      </div>
+      <h4 className="col-start-2 row-start-1 m-0 self-start font-headline text-xl font-bold leading-tight">{title}</h4>
+      <p className="col-start-2 row-start-2 m-0 text-on-surface-variant">{body}</p>
     </div>
   );
 }
