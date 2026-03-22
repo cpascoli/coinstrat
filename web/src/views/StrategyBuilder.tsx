@@ -50,10 +50,12 @@ import {
 import {
   Area,
   AreaChart,
+  Brush,
   CartesianGrid,
   Line,
   LineChart,
   ReferenceDot,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -68,6 +70,7 @@ import {
   summarizeStrategySpec,
   validateStrategySpec,
   type StrategyAlertMode,
+  type StrategyComparator,
   type StrategyPreviewTrace,
   type StrategyPreviewResult,
   type StrategySnapshotRow,
@@ -109,6 +112,9 @@ const StrategyBuilder: React.FC = () => {
   const [preview, setPreview] = useState<StrategyPreviewResult | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [selectedPreviewRows, setSelectedPreviewRows] = useState<string[]>([]);
+  // Shared brush selection for the preview modal — { start, end } are indices into preview.rows.
+  // Defaults to the last ~4 years of history when preview loads.
+  const [brushIndices, setBrushIndices] = useState<{ start: number; end: number } | null>(null);
   const [showAdvancedDetails, setShowAdvancedDetails] = useState(false);
   const [strategies, setStrategies] = useState<StoredStrategy[]>([]);
   const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(null);
@@ -206,8 +212,33 @@ const StrategyBuilder: React.FC = () => {
       });
   }, [preview, previewTraceMap, selectedPreviewRows]);
 
+  // For each source/metric id: collect every constant-right-hand condition that
+  // references it so PreviewTraceChart can draw horizontal threshold lines.
+  const traceThresholds = useMemo(() => {
+    const map = new Map<string, Array<{ value: number; label: string; comparator: StrategyComparator }>>();
+    for (const condition of parsedSpec?.conditions ?? []) {
+      if (condition.rightType !== 'constant' || condition.rightConstant === undefined) continue;
+      const existing = map.get(condition.left) ?? [];
+      existing.push({
+        value: condition.rightConstant,
+        label: condition.label,
+        comparator: condition.comparator,
+      });
+      map.set(condition.left, existing);
+    }
+    return map;
+  }, [parsedSpec]);
+
   useEffect(() => {
     setSelectedPreviewRows([]);
+    if (preview?.rows && preview.rows.length > 0) {
+      // Default brush: show last ~4 years so recent data is clearly visible.
+      // The user can drag the handles to the full range to see all of Bitcoin history.
+      const defaultStart = Math.max(0, preview.rows.length - 1460);
+      setBrushIndices({ start: defaultStart, end: preview.rows.length - 1 });
+    } else {
+      setBrushIndices(null);
+    }
   }, [preview]);
 
   const selectedStrategy = useMemo(
@@ -1005,17 +1036,39 @@ const StrategyBuilder: React.FC = () => {
                   <Typography sx={{ fontWeight: 700 }}>Signal output</Typography>
                   <Typography variant="caption" color="text.secondary">
                     The main chart stays pinned so you can compare contributor charts against the final signal.
+                    Drag the handles on the timeline below to zoom — all visible charts update together.
                   </Typography>
-                  <Box sx={{ width: '100%', height: isSmDown ? '48vh' : 340 }}>
+                  <Box sx={{ width: '100%', height: isSmDown ? '52vh' : 400 }}>
                     <ResponsiveContainer>
-                      <LineChart data={chartData}>
+                      {/* key forces remount (and brush reset) when the dataset changes */}
+                      <LineChart data={chartData} key={`pinned-${chartData.length}`}>
                         <CartesianGrid strokeDasharray="3 3" opacity={0.16} />
-                        <XAxis dataKey="Date" tick={{ fontSize: 12 }} minTickGap={30} />
+                        <XAxis dataKey="Date" tick={{ fontSize: 12 }} minTickGap={40} />
                         <YAxis yAxisId="signal" domain={[0, 1]} ticks={[0, 1]} />
-                        <YAxis yAxisId="btc" orientation="right" />
+                        <YAxis yAxisId="btc" orientation="right" scale="log" domain={['auto', 'auto']} tickFormatter={(v: number) => {
+                          const price = v * 100000;
+                          if (price >= 1000) return `$${(price / 1000).toFixed(0)}k`;
+                          if (price >= 1) return `$${price.toFixed(0)}`;
+                          return `$${price.toFixed(2)}`;
+                        }} />
                         <Tooltip />
-                        <Line yAxisId="signal" type="stepAfter" dataKey="signal" stroke="#60a5fa" dot={false} strokeWidth={2.2} name="Signal" />
-                        <Line yAxisId="btc" type="monotone" dataKey="btcScaled" name="BTC (scaled)" stroke="#f59e0b" dot={false} strokeWidth={1.4} />
+                        <Line yAxisId="signal" type="stepAfter" dataKey="signal" stroke="#60a5fa" dot={false} strokeWidth={2.2} name="Signal" isAnimationActive={false} />
+                        <Line yAxisId="btc" type="monotone" dataKey="btcScaled" name="BTC (scaled)" stroke="#f59e0b" dot={false} strokeWidth={1.4} isAnimationActive={false} />
+                        <Brush
+                          dataKey="Date"
+                          height={28}
+                          stroke="#60a5fa"
+                          fill="rgba(15, 23, 42, 0.85)"
+                          travellerWidth={8}
+                          startIndex={brushIndices?.start ?? Math.max(0, chartData.length - 1460)}
+                          endIndex={brushIndices?.end ?? chartData.length - 1}
+                          tickFormatter={(v: string) => v?.slice(0, 4) ?? ''}
+                          onChange={(range: { startIndex?: number; endIndex?: number }) => {
+                            if (range?.startIndex !== undefined && range?.endIndex !== undefined) {
+                              setBrushIndices({ start: range.startIndex, end: range.endIndex });
+                            }
+                          }}
+                        />
                       </LineChart>
                     </ResponsiveContainer>
                   </Box>
@@ -1030,6 +1083,9 @@ const StrategyBuilder: React.FC = () => {
                         row={row}
                         trace={trace}
                         dates={preview.rows.map((previewRow) => previewRow.Date)}
+                        brushStart={brushIndices?.start}
+                        brushEnd={brushIndices?.end}
+                        thresholds={traceThresholds.get(trace.id) ?? []}
                         isSmDown={isSmDown}
                       />
                     ))}
@@ -1168,16 +1224,26 @@ interface PreviewTraceChartProps {
   row: StrategySnapshotRow;
   trace: StrategyPreviewTrace;
   dates: string[];
+  /** Brush selection from the pinned chart — both are indices into `dates`. */
+  brushStart?: number;
+  brushEnd?: number;
+  /** Constant thresholds from conditions that reference this trace's source/metric. */
+  thresholds?: Array<{ value: number; label: string; comparator: StrategyComparator }>;
   isSmDown: boolean;
 }
 
-function PreviewTraceChart({ row, trace, dates, isSmDown }: PreviewTraceChartProps) {
+function PreviewTraceChart({ row, trace, dates, brushStart, brushEnd, thresholds = [], isSmDown }: PreviewTraceChartProps) {
   const binaryTrace = isBinaryPreviewTrace(trace);
   const stroke = previewTraceColor(trace.kind);
 
-  const data = useMemo(() => (
-    dates.map((date, index) => {
-      const rawValue = trace.values[index] ?? null;
+  const data = useMemo(() => {
+    // Slice to the same date range selected by the brush on the pinned chart.
+    const start = brushStart ?? 0;
+    const end = brushEnd !== undefined ? brushEnd + 1 : dates.length;
+    const slicedDates = dates.slice(start, end);
+    const slicedValues = trace.values.slice(start, end);
+    return slicedDates.map((date, index) => {
+      const rawValue = slicedValues[index] ?? null;
       const value = typeof rawValue === 'boolean'
         ? (rawValue ? 1 : 0)
         : typeof rawValue === 'number' && Number.isFinite(rawValue)
@@ -1188,8 +1254,8 @@ function PreviewTraceChart({ row, trace, dates, isSmDown }: PreviewTraceChartPro
         value,
         rawValue,
       };
-    })
-  ), [dates, trace.values]);
+    });
+  }, [dates, trace.values, brushStart, brushEnd]);
 
   const hasValues = data.some((point) => point.value != null);
 
@@ -1198,12 +1264,15 @@ function PreviewTraceChart({ row, trace, dates, isSmDown }: PreviewTraceChartPro
     const values = data
       .map((point) => point.value)
       .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
-    if (values.length === 0) return [0, 1] as [number, number];
-    const min = Math.min(...values);
-    const max = Math.max(...values);
+    // Include threshold values so reference lines are always within the visible domain.
+    const thresholdValues = thresholds.map((t) => t.value).filter(Number.isFinite);
+    const allValues = [...values, ...thresholdValues];
+    if (allValues.length === 0) return [0, 1] as [number, number];
+    const min = Math.min(...allValues);
+    const max = Math.max(...allValues);
     const pad = (max - min) * 0.05 || Math.max(Math.abs(max) * 0.05, 1);
     return [min - pad, max + pad] as [number, number];
-  }, [binaryTrace, data]);
+  }, [binaryTrace, data, thresholds]);
 
   return (
     <Paper variant="outlined" sx={{ p: isSmDown ? 1.25 : 1.5 }}>
@@ -1275,6 +1344,21 @@ function PreviewTraceChart({ row, trace, dates, isSmDown }: PreviewTraceChartPro
                   connectNulls
                   isAnimationActive={false}
                 />
+                {!binaryTrace && thresholds.map((t, i) => (
+                  <ReferenceLine
+                    key={i}
+                    y={t.value}
+                    stroke={stroke}
+                    strokeDasharray="5 3"
+                    strokeOpacity={0.65}
+                    label={{
+                      value: `${describeComparator(t.comparator)} ${formatGenericPreviewNumber(t.value)}`,
+                      fill: stroke,
+                      fontSize: 11,
+                      position: 'insideTopRight',
+                    }}
+                  />
+                ))}
               </LineChart>
             </ResponsiveContainer>
           </Box>

@@ -65,8 +65,6 @@ export const handler: Handler = async (event) => {
     }
 
     const preview = evaluateStrategy(rows, body.spec);
-    const rowWindow = 365;
-    const transitionWindow = 50;
     return {
       statusCode: 200,
       headers: corsHeaders(),
@@ -74,12 +72,10 @@ export const handler: Handler = async (event) => {
         ok: true,
         preview: {
           ...preview,
-          rows: preview.rows.slice(-rowWindow),
-          transitions: preview.transitions.slice(-transitionWindow),
-          traces: preview.traces.map((trace) => ({
-            ...trace,
-            values: trace.values.slice(-rowWindow),
-          })),
+          // Return the full row and trace history so the charts can display the
+          // complete Bitcoin price history back to 2011.  Only the transitions
+          // table is capped — showing thousands of flips in the UI would be noisy.
+          transitions: preview.transitions.slice(-50),
         },
         cached_at: cached?.timestamp ? new Date(cached.timestamp).toISOString() : null,
       }),

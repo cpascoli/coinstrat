@@ -196,6 +196,7 @@ const Admin: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshResult, setRefreshResult] = useState<string | null>(null);
   const [rebuilding, setRebuilding] = useState(false);
+  const [patchingMvrv, setPatchingMvrv] = useState(false);
   const [scheduledAlertsLoading, setScheduledAlertsLoading] = useState(true);
   const [scheduledAlertsRunning, setScheduledAlertsRunning] = useState(false);
   const [scheduledAlertsStatus, setScheduledAlertsStatus] = useState<ScheduledAlertsStatus | null>(null);
@@ -497,6 +498,42 @@ const Admin: React.FC = () => {
     }
   };
 
+  const handlePatchMvrv = async () => {
+    if (!window.confirm(
+      'This will fetch the full MVRV history from blockchain.info (timespan=all) and fill in every cached row where MVRV is currently null.\n\nData points are sparse (~1 per 3–4 days) and gaps are forward-filled. Continue?',
+    )) return;
+
+    setPatchingMvrv(true);
+    setRefreshResult(null);
+    setError(null);
+
+    try {
+      const res = await fetch('/api/v1/signals/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ mode: 'patch_mvrv' }),
+      });
+      const text = await res.text();
+      const parsed = parseJsonOrApiFailure(res.status, text);
+      if (!parsed.ok) {
+        setError(parsed.message);
+        return;
+      }
+      const data = parsed.data as { error?: string; patched?: number; total?: number; cached_at?: string | null };
+      if (!res.ok) {
+        setError(data.error ?? `Patch MVRV failed (HTTP ${res.status})`);
+      } else {
+        setRefreshResult(`MVRV history patched — ${data.patched ?? '?'} rows updated out of ${data.total ?? '?'} total.`);
+        setCacheInfo((prev) => ({ ...prev, cachedAt: data.cached_at ?? prev.cachedAt, stale: false }));
+      }
+      await fetchCacheInfo();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setPatchingMvrv(false);
+    }
+  };
+
   const handleRunScheduledAlerts = async () => {
     setScheduledAlertsRunning(true);
     setScheduledAlertsResult(null);
@@ -681,7 +718,17 @@ const Admin: React.FC = () => {
             <Button
               variant="outlined"
               size="small"
-              disabled={rebuilding || refreshing}
+              disabled={rebuilding || refreshing || patchingMvrv}
+              onClick={handlePatchMvrv}
+              startIcon={patchingMvrv ? <CircularProgress size={14} color="inherit" /> : <RefreshCw size={14} />}
+              sx={{ textTransform: 'none', fontWeight: 700 }}
+            >
+              {patchingMvrv ? 'Patching…' : 'Patch MVRV'}
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              disabled={rebuilding || refreshing || patchingMvrv}
               onClick={handleRebuild}
               startIcon={rebuilding ? <CircularProgress size={14} color="inherit" /> : <RefreshCw size={14} />}
               sx={{ textTransform: 'none', fontWeight: 700 }}
@@ -691,7 +738,7 @@ const Admin: React.FC = () => {
             <Button
               variant="contained"
               size="small"
-              disabled={refreshing || rebuilding}
+              disabled={refreshing || rebuilding || patchingMvrv}
               onClick={handleRefresh}
               startIcon={refreshing ? <CircularProgress size={14} color="inherit" /> : <RefreshCw size={14} />}
               sx={{ textTransform: 'none', fontWeight: 700 }}

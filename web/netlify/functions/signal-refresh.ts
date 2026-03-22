@@ -1,6 +1,6 @@
 import type { Handler } from '@netlify/functions';
 import { authorizeAdminOrCron } from './lib/auth';
-import { runSignalRefresh, seedSignalCache, patchBtcusdInCache } from './lib/signalRefreshRunner';
+import { runSignalRefresh, seedSignalCache, patchBtcusdInCache, patchMVRVInCache } from './lib/signalRefreshRunner';
 
 /**
  * Refresh the signal cache.  Modes (determined by POST body):
@@ -15,7 +15,11 @@ import { runSignalRefresh, seedSignalCache, patchBtcusdInCache } from './lib/sig
  *     tail.  Completes in ~2 s (no FRED calls).  Use this from the Admin UI
  *     to fix historical null BTCUSD values.
  *
- *  3. Body { "mode": "rebuild" } → full recompute.  Re-fetches all APIs
+ *  3. Body { "mode": "patch_mvrv" } → fast MVRV back-fill.  Fetches the full
+ *     blockchain.info MVRV history (timespan=all, sparse), forward-fills gaps,
+ *     and writes values for every cached row where MVRV was null.
+ *
+ *  4. Body { "mode": "rebuild" } → full recompute.  Re-fetches all APIs
  *     with no date filter and rewrites the entire cache.  WARNING: this
  *     hits Netlify's function timeout on most plans; prefer patch_btcusd
  *     for fixing BTCUSD, or run a manual seed via seed-cache.sh instead.
@@ -61,6 +65,12 @@ export const handler: Handler = async (event) => {
     if (mode === 'patch_btcusd') {
       // ── Mode 2: fast BTCUSD back-fill (recommended from Admin UI) ──
       const result = await patchBtcusdInCache();
+      return { statusCode: 200, body: JSON.stringify(result) };
+    }
+
+    if (mode === 'patch_mvrv') {
+      // ── Mode 3: fast MVRV back-fill ────────────────────────────────
+      const result = await patchMVRVInCache();
       return { statusCode: 200, body: JSON.stringify(result) };
     }
 

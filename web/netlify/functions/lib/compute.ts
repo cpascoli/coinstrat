@@ -127,18 +127,31 @@ export async function loadMergedBtcSeries(): Promise<DataPoint[]> {
   return [...local, ...tailAfter];
 }
 
-async function fetchMVRVTail(): Promise<DataPoint[]> {
+async function fetchMVRVTail(fullHistory = false): Promise<DataPoint[]> {
+  const timespan = fullHistory ? 'all' : '2years';
   const url =
     'https://api.blockchain.info/charts/mvrv' +
-    '?timespan=2years&sampled=true&metadata=false&daysAverageString=1d&cors=true&format=json';
+    `?timespan=${timespan}&sampled=true&metadata=false&daysAverageString=1d&cors=true&format=json`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`MVRV: HTTP ${res.status}`);
   const json = (await res.json()) as any;
 
-  return (json.values ?? []).map((v: any) => ({
-    date: new Date((v.x as number) * 1000).toISOString().split('T')[0],
-    value: v.y as number,
-  }));
+  return ((json.values ?? []) as any[])
+    .filter((v) => Number.isFinite(v.y))
+    .map((v) => ({
+      date: new Date((v.x as number) * 1000).toISOString().split('T')[0],
+      value: v.y as number,
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
+ * Fetch the full MVRV history from blockchain.info (all available dates,
+ * sparse sampled — roughly one point every 3–4 days back to 2010).
+ * Caller should apply forward-fill to cover gaps.
+ */
+export async function fetchMVRVFullHistory(): Promise<DataPoint[]> {
+  return fetchMVRVTail(true);
 }
 
 async function fetchBGeometrics(file: string): Promise<DataPoint[]> {
@@ -222,7 +235,7 @@ export async function refreshSignals(
     fetchFredSeries('T10Y3M', fullHistory),
     fetchFredSeries('AMTMNO', fullHistory),
     loadMergedBtcSeries(),
-    fetchMVRVTail(),
+    fetchMVRVTail(fullHistory),
     fetchFredSeries('ECBASSETSW', fullHistory),
     fetchFredSeries('JPNASSETS', fullHistory),
     fetchFredSeries('DEXUSEU', fullHistory),

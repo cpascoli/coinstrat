@@ -1,4 +1,4 @@
-import { refreshSignals, loadMergedBtcSeries, type SignalRow } from './compute';
+import { refreshSignals, loadMergedBtcSeries, fetchMVRVFullHistory, type SignalRow } from './compute';
 import { persistSignalAlertChanges, detectAlertChanges } from './signalAlerts';
 import { signalsStore } from './store';
 import { evaluateActiveStrategies } from './strategyAlerts';
@@ -19,6 +19,13 @@ export type SignalRefreshResult =
   | {
     ok: true;
     mode: 'patch_btcusd';
+    patched: number;
+    total: number;
+    cached_at: string;
+  }
+  | {
+    ok: true;
+    mode: 'patch_mvrv';
     patched: number;
     total: number;
     cached_at: string;
@@ -120,6 +127,65 @@ export async function patchBtcusdInCache(): Promise<SignalRefreshResult> {
   return {
     ok: true,
     mode: 'patch_btcusd',
+    patched,
+    total: rows.length,
+    cached_at: cachedAt,
+  };
+}
+
+/**
+ * Fast targeted operation: fill null MVRV values in every existing cache row
+ * using blockchain.info's full history (timespan=all, sparse ~1 point/3–4 days).
+ *
+ * The sparse points are forward-filled so every cached date gets a value based
+ * on the most recent known reading.  Only rows where MVRV is currently null or
+ * non-finite are updated.
+ */
+export async function patchMVRVInCache(): Promise<SignalRefreshResult> {
+  const store = signalsStore();
+  const cached = await loadCachedSignals();
+  const cachedData = cached?.data ?? [];
+
+  if (cachedData.length === 0) {
+    throw new Error('Cache is empty — seed the cache first before patching MVRV.');
+  }
+
+  // Fetch sparse full-history MVRV points (already sorted by date).
+  const mvrvSeries = await fetchMVRVFullHistory();
+  const pointMap = new Map(mvrvSeries.map((p) => [p.date, p.value]));
+
+  // Build a forward-filled map keyed by every cached date.
+  let lastKnown = NaN;
+  const filledByDate = new Map<string, number>();
+  for (const row of cachedData) {
+    const v = pointMap.get(row.Date);
+    if (v !== undefined && Number.isFinite(v)) lastKnown = v;
+    if (Number.isFinite(lastKnown)) filledByDate.set(row.Date, lastKnown);
+  }
+
+  let patched = 0;
+  const rows = cachedData.map((row) => {
+    if (typeof row.MVRV === 'number' && Number.isFinite(row.MVRV)) return row; // already valid
+    const filled = filledByDate.get(row.Date);
+    if (filled !== undefined) {
+      patched += 1;
+      return { ...row, MVRV: filled };
+    }
+    return row;
+  });
+
+  const cachedAt = new Date().toISOString();
+  await store.setJSON('signals_latest', {
+    timestamp: Date.now(),
+    count: rows.length,
+    data: rows,
+  });
+
+  console.log(`[signal-refresh] MVRV patch complete — updated ${patched} of ${rows.length} rows.`);
+
+  return {
+    ok: true,
+    mode: 'patch_mvrv',
     patched,
     total: rows.length,
     cached_at: cachedAt,
