@@ -159,8 +159,9 @@ const App: React.FC = () => {
     setAuthRedirectOverride(null);
   };
 
-  const shouldLoadData = isPublicDataRoute || (requiresMemberAccess && hasFreeAccess);
-  const showAppNavigation = hasFreeAccess;
+  const shouldLoadData =
+    isPublicDataRoute || (requiresMemberAccess && hasFreeAccess) || location.pathname === '/';
+  const showAppNavigation = hasFreeAccess && location.pathname !== '/';
   const showDesktopDashboard = hasFreeAccess;
 
   const desktopPrimaryLinks = useMemo(() => {
@@ -311,8 +312,17 @@ const App: React.FC = () => {
     return renderDataRoute(node);
   };
 
+  const isHome = location.pathname === '/';
+
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', pb: { xs: 8, md: 0 } }}>
+    <Box
+      sx={{
+        minHeight: '100vh',
+        bgcolor: isHome ? '#0c1322' : 'background.default',
+        pb: { xs: 8, md: 0 },
+      }}
+    >
+      {!isHome && (
       <AppBar
         position="sticky"
         color="transparent"
@@ -474,12 +484,26 @@ const App: React.FC = () => {
           </Box>
         </Toolbar>
       </AppBar>
+      )}
 
-      <Container maxWidth="lg" sx={{ py: { xs: 2.5, md: 4 } }}>
+      <Container
+        maxWidth={isHome ? false : 'lg'}
+        disableGutters={isHome}
+        sx={{ py: isHome ? 0 : { xs: 2.5, md: 4 } }}
+      >
         <Routes>
           <Route
             path="/"
-            element={<Home hasFreeAccess={hasFreeAccess} isAuthenticated={isAuthenticated} onOpenAuth={openAuth} />}
+            element={
+              <Home
+                hasFreeAccess={hasFreeAccess}
+                isAuthenticated={isAuthenticated}
+                onOpenAuth={openAuth}
+                currentSignal={lastData}
+                signalLoading={loading}
+                signalError={error}
+              />
+            }
           />
           <Route path="/docs" element={<DocsHome />} />
           <Route path="/docs/api" element={<Navigate to="/developer" replace />} />
@@ -513,7 +537,8 @@ const App: React.FC = () => {
           component="footer"
           sx={{
             mt: { xs: 4, md: 6 },
-            pt: 2,
+            pt: 3,
+            my: 3,
             borderTop: '1px solid',
             borderColor: 'divider',
             textAlign: 'center',

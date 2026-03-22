@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { SignalData } from '../App';
+import { getRecommendation } from '../lib/recommendation';
 import { AlertTriangle, CheckCircle2, PauseCircle, PlayCircle, TrendingUp, Info, Activity } from 'lucide-react';
 import {
   Box,
@@ -25,41 +26,7 @@ interface Props {
 }
 
 const Dashboard: React.FC<Props> = ({ current, history }) => {
-  // Determine recommendation (mirroring dashboard_2026.py logic)
-  const getRecommendation = () => {
-    const accum = current.ACCUM_ON;
-    const macro = current.MACRO_ON;
-    const pr = current.PRICE_REGIME_ON;
-    const dxy = current.DXY_SCORE;
-    const liq = current.LIQ_SCORE;
-    const cyc = current.CYCLE_SCORE;
-    const val = current.VAL_SCORE;
-
-    let action: 'PAUSE' | 'BASE' | 'ACCEL' = 'PAUSE';
-    let reason = '';
-    const blockers: string[] = [];
-
-    if (pr === 0) blockers.push("Price below long-term trend.");
-    if (dxy === 0) blockers.push("USD regime risk-off (DXY strengthening).");
-    if (liq === 0) blockers.push("Liquidity contracting/worsening.");
-    if (cyc === 0) blockers.push("Business cycle contraction-risk elevated.");
-    if (val === 0) blockers.push("Valuation overheated.");
-
-    if (accum === 0) {
-      action = 'PAUSE';
-      reason = "Accumulation permission is OFF. Capital protection prioritized.";
-    } else if (macro === 1) {
-      action = 'ACCEL';
-      reason = "Accumulation permitted with Macro Accelerator active (Liquidity/Business Cycle tailwinds).";
-    } else {
-      action = 'BASE';
-      reason = "Base accumulation permitted. No macro acceleration detected.";
-    }
-
-    return { action, reason, blockers };
-  };
-
-  const rec = getRecommendation();
+  const rec = getRecommendation(current);
   const trendOk = current.PRICE_REGIME_ON === 1;
 
   const actionTone = rec.action === 'PAUSE' ? 'error' : rec.action === 'ACCEL' ? 'success' : 'primary';

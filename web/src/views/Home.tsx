@@ -1,293 +1,70 @@
-import React, { useState } from 'react';
-import { Box, Button, Card, CardContent, Chip, Link, Stack, TextField, Typography, Alert } from '@mui/material';
-import { useNavigate } from 'react-router-dom';
-import { HeroIllustration } from '../components/HeroIllustration';
-import { ArrowRight, Mail, Sparkles, Zap, Crown, Check } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import clsx from 'clsx';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Avatar, IconButton, ListItemIcon, ListItemText, Menu, MenuItem } from '@mui/material';
+import { BarChart3, Binary, Crown, Key, LogOut, Shield, User } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import type { SignalData } from '../App';
+import { getRecommendation, type RecommendationAction } from '../lib/recommendation';
 
 interface HomeProps {
   hasFreeAccess?: boolean;
   isAuthenticated?: boolean;
   onOpenAuth?: (redirectTo?: string) => void;
+  currentSignal?: SignalData | null;
+  signalLoading?: boolean;
+  signalError?: string | null;
 }
 
-const Home: React.FC<HomeProps> = ({ hasFreeAccess = false, isAuthenticated = false, onOpenAuth }) => {
-  const navigate = useNavigate();
-  return (
-    <div className="mx-auto max-w-4xl space-y-12">
-
-    <Typography
-      sx={{
-        textAlign: 'left',
-        fontWeight: 1000,
-        letterSpacing: -1.2,
-        lineHeight: 1.0,
-        mb: 1.25,
-        maxWidth: '90%',
-        fontSize: { xs: 44, sm: 56, md: 62 },
-      }}
-    >
-      <Box
-        component="span"
-        sx={{
-          background: 'linear-gradient(90deg, rgba(96,165,250,1) 0%, rgba(167,139,250,1) 45%, rgba(34,197,94,1) 100%)',
-          WebkitBackgroundClip: 'text',
-          backgroundClip: 'text',
-          color: 'transparent',
-        }}
-      >
-        Your Bitcoin
-        <br />
-        Accumulation Signal
-      </Box>
-    </Typography>
-
-      <Box
-        sx={{
-          borderRadius: 3,
-          py: { xs: 2.5, sm: 3, md: 4 },
-          position: 'relative',
-          overflow: 'hidden',
-        }}
-      >
-        <Box sx={{ display: 'grid', gap: { xs: 3, md: 4 }, gridTemplateColumns: { xs: '1fr', md: '1.0fr 1.0fr' }, alignItems: 'flex-start' }}>
-          <Box>
-            <Box component="ul" sx={{ mb: 1, pl: 2.5, color: 'text.secondary' }}>
-    
-              <Box component="li" sx={{ mb: 1 }}>
-                <Typography color="text.secondary" sx={{ lineHeight: 1.75, fontSize: { xs: 14, sm: 16, md: 18 } }}>
-                  CoinStrat turns <strong>macro conditions</strong>, <strong>liquidity</strong>, and <strong>Bitcoin valuation</strong> into a clear signal
-                  so you can decide when to <strong>accumulate steadily</strong>, <strong>press harder</strong>, or <strong>stay patient</strong>.
-                </Typography>
-              </Box>
-
-              <Box component="li" sx={{ mb: 1}}>
-                <Typography color="text.secondary" sx={{ lineHeight: 1.75, fontSize: { xs: 14, sm: 16, md: 18 } }}>
-                  Built for long-term Bitcoin accumulators who want a disciplined process, not just opinions, to guide sizing and timing.
-                </Typography>
-              </Box>
-            </Box>
-
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} sx={{ mt: 5, alignItems: { sm: 'center' } }}>
-              <Button
-                variant="contained"
-                size="medium"
-                onClick={() => {
-                  if (hasFreeAccess) {
-                    navigate('/dashboard');
-                    return;
-                  }
-                  if (isAuthenticated) {
-                    navigate('/profile');
-                    return;
-                  }
-                  onOpenAuth?.('/dashboard');
-                }}
-                sx={{ fontWeight: 900 }}
-              >
-                {hasFreeAccess ? 'Open Dashboard' : isAuthenticated ? 'Open Profile' : 'Sign-in'}
-              </Button>
-              <Button variant="outlined" size="medium" onClick={() => navigate('/docs')} sx={{ fontWeight: 900 }}>
-                Learn More
-              </Button>
-            </Stack>
-          </Box>
-
-          <Box sx={{ width: { xs: '100%', md: '90%', lg: '80%' }, mx: { xs: 'auto', md: 10 } }}>
-            <HeroIllustration />
-          </Box>
-        </Box>
-      </Box>
-
-      {/* Email signup — high visibility, right below the hero */}
-      <EmailSignup />
-
-      <section className="space-y-6">
-        <div className="flex items-center gap-3 border-b pb-2">
-          <h2 className="text-2xl font-bold text-slate-100">Why CoinStrat</h2>
-        </div>
-        <Typography color="text.secondary" sx={{ lineHeight: 1.75 }}>
-          CoinStrat helps you accumulate Bitcoin with more conviction, less noise, and better timing. It gives you a disciplined read on when conditions are supportive, when risk is rising, and when it makes sense to stay patient.
-        </Typography>
-        <Box sx={{ mt: 2.5, display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' } }}>
-          <DocCard
-            title="Cut Through Noise"
-            text="Stop reacting to headlines, price swings, and social-media narratives. Focus on the macro and market signals that actually matter."
-          />
-          <DocCard
-            title="Stay Consistent"
-            text="Use a repeatable process instead of gut feel, so your Bitcoin strategy stays grounded when the market gets emotional."
-          />
-          <DocCard
-            title="Optimize BTC Accumulation"
-            text={<>Use CoinStrat to optimize how you fund <Link href="https://powerwallet.finance" target="_blank" rel="noreferrer" underline="hover" sx={{ color: 'primary.light', fontWeight: 900, whiteSpace: 'nowrap' }}>Power Wallet</Link>&apos;s Bitcoin accumulation strategies.</>}
-          />
-        </Box>
-      </section>
-
-      <section className="space-y-6">
-        <div className="flex items-center gap-3 border-b pb-2">
-          <h2 className="text-2xl font-bold text-slate-100">How CoinStrat Works</h2>
-        </div>
-        <Typography color="text.secondary" sx={{ lineHeight: 1.75 }}>
-          CoinStrat turns a complex market into a simple decision framework. It tracks on-chain activity and the macro environment, scores the setup, and translates that into practical accumulation guidance.
-        </Typography>
-        {/* Use MUI breakpoints for layout so cards reliably render in a row on desktop */}
-        <Box sx={{ mt: 2.5, display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' } }}>
-          <DocCard 
-            title="Track On-Chain Activity and the Macro Environment" 
-            text="Track on-chain activity, liquidity, macro stress, and Bitcoin market conditions in one place instead of piecing the puzzle together yourself."
-          />
-          <DocCard 
-            title="Score the Setup" 
-            text="Turn raw data into a simple read on whether conditions are supportive, neutral, or working against Bitcoin accumulation."
-          />
-          <DocCard 
-            title="Act With Discipline" 
-            text="Translate the signal stack into a practical accumulation stance so you know when to pause, buy, or accelerate."
-          />
-        </Box>
-      </section>
-
-      <section className="space-y-6">
-        <div className="flex items-center gap-3 border-b pb-2">
-         
-          <h2 className="text-2xl font-bold text-slate-100">The Two Core Layers</h2>
-        </div>
-        <Typography color="text.secondary" sx={{ lineHeight: 1.75 }}>
-          CoinStrat is built around two decisions: when Bitcoin looks attractive enough to accumulate, and when the macro environment supports pressing harder.
-        </Typography>
-        
-        <Box sx={{ mt: 2.5, display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' } }}>
-          <Card
-            sx={{
-              position: 'relative',
-              overflow: 'hidden',
-              borderColor: 'rgba(148,163,184,0.35)',
-              background:
-                'linear-gradient(180deg, rgba(2,6,23,0.35) 0%, rgba(15,23,42,0.65) 100%)',
-              boxShadow: 'none',
-              '&::before': {
-                content: '""',
-                position: 'absolute',
-                inset: 0,
-                height: 3,
-                background: 'linear-gradient(90deg, rgba(96,165,250,0.95), rgba(59,130,246,0.65))',
-                opacity: 0.95,
-              },
-            }}
-          >
-            <CardContent sx={{ pt: 2.25 }}>
-              <Typography sx={{ fontWeight: 900, color: 'text.primary', mb: 1 }}>
-                CORE Accumulation
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.65, fontStyle: 'regular' }}>
-                This is the base layer. It focuses on building position when Bitcoin looks attractive and the trend is constructive enough to justify steady accumulation.
-              </Typography>
-            </CardContent>
-          </Card>
-
-          <Card
-            sx={{
-              position: 'relative',
-              overflow: 'hidden',
-              borderColor: 'rgba(148,163,184,0.35)',
-              background:
-                'linear-gradient(180deg, rgba(2,6,23,0.35) 0%, rgba(15,23,42,0.65) 100%)',
-              boxShadow: 'none',
-              '&::before': {
-                content: '""',
-                position: 'absolute',
-                inset: 0,
-                height: 3,
-                background: 'linear-gradient(90deg, rgba(251,191,36,0.95), rgba(245,158,11,0.65))',
-                opacity: 0.95,
-              },
-            }}
-          >
-            <CardContent sx={{ pt: 2.25 }}>
-              <Typography sx={{ fontWeight: 900, color: 'text.primary', mb: 1 }}>
-                 MACRO Acceleration
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.65, fontStyle: 'regular' }}>
-                This is the conviction layer. When liquidity and macro conditions improve, CoinStrat signals when the environment may justify leaning in more aggressively.
-              </Typography>
-            </CardContent>
-          </Card>
-        </Box>
-      </section>
-
-      {/* Pricing */}
-      <PricingSection hasFreeAccess={hasFreeAccess} isAuthenticated={isAuthenticated} onOpenAuth={onOpenAuth} />
-    </div>
-  );
-};
-
-const DocCard = ({ title, text }: any) => (
-  <Card
-    sx={{
-      position: 'relative',
-      overflow: 'hidden',
-      borderColor: 'rgba(148,163,184,0.35)',
-      background:
-        'linear-gradient(180deg, rgba(2,6,23,0.35) 0%, rgba(15,23,42,0.65) 100%)',
-      boxShadow: 'none',
-      transition: 'transform 140ms ease, border-color 140ms ease, background 140ms ease',
-      '&:hover': {
-        transform: 'translateY(-2px)',
-        borderColor: 'rgba(96,165,250,0.55)',
-        background:
-          'linear-gradient(180deg, rgba(2,6,23,0.35) 0%, rgba(15,23,42,0.80) 100%)',
-      },
-      '&::before': {
-        content: '""',
-        position: 'absolute',
-        inset: 0,
-        height: 3,
-        background: 'linear-gradient(90deg, rgba(96,165,250,0.9), rgba(167,139,250,0.7), rgba(34,197,94,0.7))',
-        opacity: 0.9,
-      },
-    }}
-  >
-    <CardContent sx={{ pt: 2.25 }}>
-      <Typography sx={{ fontWeight: 900, color: 'text.primary', mb: 1 }}>
-        {title}
-      </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.6 }}>
-        {text}
-      </Typography>
-    </CardContent>
-  </Card>
-);
-
-/* ── Pricing Section ── */
+function stanceBadgeClasses(action: RecommendationAction | 'neutral') {
+  switch (action) {
+    case 'PAUSE':
+      return {
+        dot: 'bg-red-400 shadow-[0_0_8px_rgba(248,113,113,0.75)]',
+        text: 'text-red-300',
+      };
+    case 'ACCEL':
+      return {
+        dot: 'bg-secondary shadow-[0_0_8px_rgba(77,224,130,0.8)]',
+        text: 'text-secondary',
+      };
+    case 'BASE':
+      return {
+        dot: 'bg-[#60a5fa] shadow-[0_0_8px_rgba(96,165,250,0.65)]',
+        text: 'text-[#93c5fd]',
+      };
+    default:
+      return {
+        dot: 'bg-outline/60',
+        text: 'text-outline',
+      };
+  }
+}
 
 const PLANS = [
   {
     name: 'Free',
     price: '$0',
     period: 'forever',
-    color: '#94a3b8',
-    icon: null,
-    badge: null,
+    accent: 'slate' as const,
+    badge: null as string | null,
     features: [
       'Live dashboard & signals',
+      'Signal Backtest',
       'Score breakdown',
       'Charts',
-      'Backtest',
-      'Weekly email digest (optional)',
+      'Weekly email digest',
     ],
     cta: 'Unlock Free Access',
     href: '/dashboard',
-    variant: 'outlined' as const,
     tier: 'free' as const,
   },
   {
     name: 'Pro',
     price: '$9.99',
-    period: '/month',
-    color: '#60a5fa',
-    icon: <Zap size={18} />,
-    badge: null,
+    period: '/ month',
+    accent: 'primary' as const,
+    badge: 'Most Popular',
     features: [
       'Everything in Free',
       'Build custom strategies and signals',
@@ -297,15 +74,13 @@ const PLANS = [
     ],
     cta: 'Upgrade to Pro',
     href: '/profile',
-    variant: 'contained' as const,
     tier: 'pro' as const,
   },
   {
     name: 'Lifetime',
     price: '$99',
-    period: ' one-time',
-    color: '#f59e0b',
-    icon: <Crown size={18} />,
+    period: 'one-time',
+    accent: 'amber' as const,
     badge: 'First 100 Supporters',
     features: [
       'Everything in Pro — forever',
@@ -313,111 +88,417 @@ const PLANS = [
       'Lock in lifetime access',
       'Signal API (1K calls/day)',
       'All future Pro features included',
-      'Priority support',
     ],
     cta: 'Get Lifetime Access',
     href: '/profile',
-    variant: 'contained' as const,
     tier: 'lifetime' as const,
   },
 ];
 
-const PricingSection: React.FC<{ hasFreeAccess?: boolean; isAuthenticated?: boolean; onOpenAuth?: (redirectTo?: string) => void }> = ({
+const Home: React.FC<HomeProps> = ({
   hasFreeAccess = false,
   isAuthenticated = false,
   onOpenAuth,
+  currentSignal = null,
+  signalLoading = false,
+  signalError = null,
 }) => {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const { user, profile, isAdmin, signOut } = useAuth();
+  const hasPaidBuilderAccess = useMemo(
+    () => profile?.tier === 'pro' || profile?.tier === 'pro_plus' || profile?.tier === 'lifetime',
+    [profile?.tier],
+  );
+  const [navMenuEl, setNavMenuEl] = useState<null | HTMLElement>(null);
+
+  const recommendation = useMemo(
+    () => (currentSignal ? getRecommendation(currentSignal) : null),
+    [currentSignal],
+  );
+
+  const stanceUi = useMemo(() => {
+    if (recommendation) {
+      return {
+        label: recommendation.action,
+        actionKey: recommendation.action,
+        title: recommendation.reason,
+      };
+    }
+    if (signalLoading) {
+      return { label: '…', actionKey: 'neutral' as const, title: 'Loading latest signal…' };
+    }
+    if (signalError) {
+      return { label: '—', actionKey: 'neutral' as const, title: signalError };
+    }
+    return { label: '—', actionKey: 'neutral' as const, title: undefined as string | undefined };
+  }, [recommendation, signalError, signalLoading]);
+
+  const stanceStyle = stanceBadgeClasses(stanceUi.actionKey);
+
+  const primaryCta = () => {
+    if (hasFreeAccess) navigate('/dashboard');
+    else if (isAuthenticated) navigate('/profile');
+    else onOpenAuth?.('/dashboard');
+  };
+
+  const navActive = (key: string) => {
+    switch (key) {
+      case 'dashboard':
+        return pathname === '/' || pathname === '/dashboard';
+      case 'builder':
+        return pathname === '/strategy-builder';
+      case 'docs':
+        return pathname.startsWith('/docs') || pathname === '/developer';
+      case 'charts':
+        return pathname.startsWith('/charts');
+      case 'backtest':
+        return pathname === '/backtest';
+      default:
+        return false;
+    }
+  };
+
+  const NavLink = ({ to, navKey, children }: { to: string; navKey: string; children: React.ReactNode }) => {
+    const active = navActive(navKey);
+    return (
+      <Link
+        to={to}
+        className={clsx(
+          'border-b-2 pb-1 font-headline font-bold tracking-tight transition-colors',
+          active ? 'border-[#2563eb] text-[#b4c5ff]' : 'border-transparent text-slate-400 hover:text-white',
+        )}
+      >
+        {children}
+      </Link>
+    );
+  };
+
   return (
-    <section className="space-y-6">
-      <div className="flex items-center gap-3 border-b pb-2">
-        <h2 className="text-2xl font-bold text-slate-100">Pricing</h2>
-      </div>
-      <Typography color="text.secondary" sx={{ lineHeight: 1.75 }}>
-        Start free, follow the model, and upgrade when you want custom signals, real-time alerts, and more control.
-      </Typography>
-      <Box sx={{ mt: 2.5, display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' } }}>
-        {PLANS.map((plan) => (
-          <Card
-            key={plan.name}
-            sx={{
-              position: 'relative',
-              overflow: 'hidden',
-              borderColor: plan.name === 'Lifetime' ? plan.color : plan.name === 'Pro' ? plan.color : 'rgba(148,163,184,0.35)',
-              borderWidth: (plan.name === 'Pro' || plan.name === 'Lifetime') ? 2 : 1,
-              background: plan.name === 'Lifetime'
-                ? 'linear-gradient(180deg, rgba(245,158,11,0.08) 0%, rgba(15,23,42,0.65) 100%)'
-                : 'linear-gradient(180deg, rgba(2,6,23,0.35) 0%, rgba(15,23,42,0.65) 100%)',
-              boxShadow: 'none',
-              display: 'flex',
-              flexDirection: 'column',
-            }}
-          >
-            <CardContent sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-                {plan.icon}
-                <Typography sx={{ fontWeight: 800, fontSize: 18 }}>{plan.name}</Typography>
-                {plan.badge && (
-                  <Chip label={plan.badge} size="small" sx={{ bgcolor: `${plan.color}22`, color: plan.color, fontWeight: 700, fontSize: 11 }} />
-                )}
-              </Stack>
+    <div className="dark min-h-screen bg-surface font-body text-on-surface selection:bg-primary/30">
+      <nav className="fixed top-0 z-50 w-full border-b border-[#434655]/15 bg-[#0c1322]/80 shadow-2xl shadow-[#070e1d]/40 backdrop-blur-xl">
+        <div className="mx-auto flex w-full max-w-7xl items-center justify-between px-6 py-4">
+          <Link to="/" className="font-headline text-2xl font-black tracking-tighter text-[#b4c5ff]" aria-label="CoinStrat home">
+            CoinStrat
+          </Link>
 
-              <Box sx={{ mb: 2 }}>
-                <Typography component="span" sx={{ fontWeight: 900, fontSize: 32 }}>{plan.price}</Typography>
-                <Typography component="span" color="text.secondary" sx={{ fontSize: 14 }}>{plan.period}</Typography>
-              </Box>
+          <div className="hidden items-center space-x-8 md:flex">
+            <NavLink to="/dashboard" navKey="dashboard">
+              Dashboard
+            </NavLink>
+            <NavLink to="/strategy-builder" navKey="builder">
+              Signal Builder
+            </NavLink>
+            <NavLink to="/docs" navKey="docs">
+              Docs
+            </NavLink>
+            <NavLink to="/charts/system" navKey="charts">
+              Charts
+            </NavLink>
+            <NavLink to="/backtest" navKey="backtest">
+              Backtest
+            </NavLink>
+          </div>
 
-              <Stack spacing={1} sx={{ mb: 3, flex: 1 }}>
-                {plan.features.map((f) => (
-                  <Stack key={f} direction="row" spacing={1} alignItems="flex-start">
-                    <Check size={16} style={{ color: plan.color, marginTop: 3, flexShrink: 0 }} />
-                    <Typography variant="body2" color="text.secondary">{f}</Typography>
-                  </Stack>
-                ))}
-              </Stack>
+          <div className="flex items-center gap-2">
+            {user ? (
+              <>
+                <IconButton size="small" onClick={(e) => setNavMenuEl(e.currentTarget)} aria-label="Account menu">
+                  <Avatar sx={{ width: 32, height: 32, bgcolor: '#2563eb', fontSize: 14, fontWeight: 700 }}>
+                    {(profile?.email?.[0] ?? user?.email?.[0] ?? 'U').toUpperCase()}
+                  </Avatar>
+                </IconButton>
+                <Menu
+                  anchorEl={navMenuEl}
+                  open={Boolean(navMenuEl)}
+                  onClose={() => setNavMenuEl(null)}
+                  anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                  transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                  PaperProps={{ sx: { minWidth: 200 } }}
+                >
+                  <MenuItem onClick={() => { setNavMenuEl(null); navigate('/signals'); }}>
+                    <ListItemIcon><Binary size={16} /></ListItemIcon>
+                    <ListItemText>Signals</ListItemText>
+                  </MenuItem>
+                  <MenuItem onClick={() => { setNavMenuEl(null); navigate('/scores'); }}>
+                    <ListItemIcon><BarChart3 size={16} /></ListItemIcon>
+                    <ListItemText>Scores</ListItemText>
+                  </MenuItem>
+                  <MenuItem onClick={() => { setNavMenuEl(null); navigate('/developer'); }}>
+                    <ListItemIcon><Key size={16} /></ListItemIcon>
+                    <ListItemText>Developer</ListItemText>
+                  </MenuItem>
+                  {hasPaidBuilderAccess && (
+                    <MenuItem onClick={() => { setNavMenuEl(null); navigate('/strategy-builder'); }}>
+                      <ListItemText>Signal Builder</ListItemText>
+                    </MenuItem>
+                  )}
+                  <MenuItem onClick={() => { setNavMenuEl(null); navigate('/profile'); }}>
+                    <ListItemIcon><User size={16} /></ListItemIcon>
+                    <ListItemText>Profile</ListItemText>
+                  </MenuItem>
+                  {isAdmin && (
+                    <MenuItem onClick={() => { setNavMenuEl(null); navigate('/admin'); }}>
+                      <ListItemIcon><Shield size={16} /></ListItemIcon>
+                      <ListItemText>Admin</ListItemText>
+                    </MenuItem>
+                  )}
+                  <MenuItem onClick={async () => { setNavMenuEl(null); await signOut(); navigate('/'); }}>
+                    <ListItemIcon><LogOut size={16} /></ListItemIcon>
+                    <ListItemText>Sign out</ListItemText>
+                  </MenuItem>
+                </Menu>
+              </>
+            ) : null}
+            <button
+              type="button"
+              onClick={primaryCta}
+              className="rounded-xl bg-[#b4c5ff] px-6 py-2.5 font-black text-[#002a78] transition-all hover:shadow-[0_0_20px_-5px_rgba(180,197,255,0.4)] active:scale-95"
+            >
+              {hasFreeAccess ? 'Dashboard' : isAuthenticated ? 'Profile' : 'Get Started'}
+            </button>
+          </div>
+        </div>
+      </nav>
 
-              <Button
-                variant={plan.variant}
-                fullWidth
-                onClick={() => {
-                  if (plan.tier === 'free' && !hasFreeAccess) {
-                    if (isAuthenticated) {
-                      navigate('/profile');
-                    } else {
-                      onOpenAuth?.('/dashboard');
-                    }
-                    return;
-                  }
-                  if (plan.tier !== 'free' && !hasFreeAccess) {
-                    if (isAuthenticated) {
-                      navigate('/profile');
-                    } else {
-                      onOpenAuth?.('/profile');
-                    }
-                    return;
-                  }
-                  navigate(plan.href);
-                }}
-                sx={{
-                  textTransform: 'none',
-                  fontWeight: 700,
-                  py: 1.2,
-                  ...(plan.variant === 'contained' && { bgcolor: plan.color, '&:hover': { bgcolor: plan.color, filter: 'brightness(1.15)' } }),
-                }}
-              >
-                {plan.cta}
-              </Button>
-            </CardContent>
-          </Card>
-        ))}
-      </Box>
-    </section>
+      <main className="pt-32">
+        <section className="mx-auto mb-40 max-w-7xl px-6">
+          <div className="grid items-center gap-16 lg:grid-cols-12">
+            <div className="lg:col-span-7">
+              <div className="mb-8 inline-flex flex-wrap items-center gap-4">
+                <div className="inline-flex items-center gap-3 rounded-full border border-secondary/20 bg-secondary-container/10 px-4 py-2">
+                  <div className="relative flex h-2.5 w-2.5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-secondary opacity-75" />
+                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-secondary" />
+                  </div>
+                  <span className="text-[11px] font-black uppercase tracking-[0.2em] text-secondary">Live Signal</span>
+                  <span className="h-3 w-px bg-secondary/30" />
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Updated on dashboard</span>
+                </div>
+                <div className="flex items-center gap-3 rounded-lg border border-outline-variant/20 bg-surface-container-high/40 px-4 py-2">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-outline">Current Stance</span>
+                  <div className="flex items-center gap-2" title={stanceUi.title}>
+                    <div className={clsx('h-1.5 w-1.5 rounded-full', stanceStyle.dot)} />
+                    <span className={clsx('text-xs font-black tracking-tight', stanceStyle.text)}>{stanceUi.label}</span>
+                  </div>
+                </div>
+              </div>
+
+              <h1 className="font-headline mb-8 text-4xl font-black leading-[1.1] tracking-tighter text-shadow-sm md:text-6xl">
+                Your Bitcoin <br />
+                <span className="bg-gradient-to-r from-[#2563EB] via-[#60A5FA] to-[#2DD4BF] bg-clip-text pr-2 italic text-transparent">
+                  Accumulation
+                </span>
+                <br />
+                <span className="relative inline-block">
+                  Signal
+                  <span className="absolute -bottom-2 left-0 h-1.5 w-1/3 rounded-full bg-primary/40" />
+                </span>
+              </h1>
+
+              <p className="mb-12 max-w-xl text-xl font-medium leading-relaxed text-on-surface-variant">
+                CoinStrat synthesizes on-chain activity, macro conditions, and business cycle into a singular, high-precision execution framework
+                that helps you optimize your Bitcoin accumulation.
+              </p>
+
+              <div className="flex flex-col gap-5 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={primaryCta}
+                  className="group relative overflow-hidden rounded-xl bg-primary px-10 py-5 text-lg font-black text-on-primary transition-all hover:shadow-[0_0_30px_-5px_rgba(180,197,255,0.4)]"
+                >
+                  <span className="relative z-10 flex items-center gap-2">
+                    {hasFreeAccess ? 'Open Dashboard' : isAuthenticated ? 'Open Profile' : 'View Live Signal'}
+                    <span className="material-symbols-outlined text-xl transition-transform group-hover:translate-x-1">arrow_forward</span>
+                  </span>
+                  <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-white/0 via-white/10 to-white/0 transition-transform duration-700 group-hover:translate-x-full" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate('/docs')}
+                  className="group flex items-center justify-center gap-2 rounded-xl border border-outline-variant/30 bg-surface-container px-10 py-5 text-lg font-bold transition-all hover:border-primary/50"
+                >
+                  <span className="material-symbols-outlined text-xl text-outline">menu_book</span>
+                  Explore Methodology
+                </button>
+              </div>
+            </div>
+
+            <div className="relative lg:col-span-5">
+              <div className="relative flex aspect-square w-full items-center justify-center">
+                <div className="absolute inset-0 rounded-full bg-primary/20 opacity-40 mix-blend-screen blur-[120px]" />
+                <div className="blend-mask relative h-full w-full scale-125">
+                  <img
+                    alt="Abstract digital wave flows"
+                    src="/stitch/img-01-hero-wave.png"
+                    className="h-full w-full object-contain opacity-80 mix-blend-lighten"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <HomeEmailSignup />
+
+        <section className="mx-auto mb-32 max-w-7xl px-6">
+          <div className="mb-16 text-center">
+            <h2 className="mb-4 text-xs font-bold uppercase tracking-[0.3em] text-primary">The Quant Advantage</h2>
+            <h3 className="font-headline text-4xl font-black tracking-tight md:text-5xl">Why CoinStrat?</h3>
+          </div>
+          <div className="grid gap-8 md:grid-cols-3">
+            <FeatureCard
+              icon="filter_alt"
+              title="Cut Through Noise"
+              body="Stop reacting to headlines, price swings, and social-media narratives. Focus on on-chain and macro signals that actually matter."
+              hover="primary"
+            />
+            <FeatureCard
+              icon="repeat"
+              title="Stay Consistent"
+              body="Use a repeatable process instead of gut feel, so your Bitcoin strategy stays grounded when the market gets emotional."
+              hover="secondary"
+            />
+            <FeatureCard
+              icon="trending_up"
+              title="Optimize BTC Accumulation"
+              body="Use CoinStrat to optimize your Dollar-Cost Averaging strategies, getting more SATs per dollar."
+              hover="tertiary"
+            />
+          </div>
+        </section>
+
+        <section className="mx-auto mb-32 max-w-7xl rounded-[3rem] border border-outline-variant/5 bg-surface-container-lowest px-6 py-24">
+          <div className="grid items-start gap-20 lg:grid-cols-2">
+            <div className="space-y-12">
+              <div>
+                <h2 className="mb-4 text-xs font-bold uppercase tracking-[0.3em] text-secondary">The Methodology</h2>
+                <h3 className="font-headline mb-6 text-4xl font-black tracking-tight md:text-5xl">How CoinStrat Works</h3>
+              </div>
+              <div className="space-y-8">
+                <StepRow
+                  n="01"
+                  title="Track On-Chain Activity"
+                  body="Track on-chain activity, liquidity, macro stress, and Bitcoin market conditions in one place instead of piecing the puzzle together."
+                />
+                <StepRow
+                  n="02"
+                  title="Score the Setup"
+                  body="Turn raw data into a simple read on whether conditions are supportive, neutral, or working against Bitcoin accumulation."
+                />
+                <StepRow
+                  n="03"
+                  title="Act With Discipline"
+                  body="Translate signals into a practical accumulation stance so you know when to pause, buy, or accelerate"
+                />
+              </div>
+            </div>
+            <div className="relative">
+              <img alt="Data Visualization" src="/stitch/img-02-data-viz.png" className="w-full rounded-2xl object-cover shadow-3xl transition-all duration-700" />
+              <div className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-surface-container-lowest via-transparent to-transparent" />
+            </div>
+          </div>
+        </section>
+
+        <section className="mx-auto mb-32 max-w-7xl px-6">
+          <div className="mb-16 text-center">
+            <h3 className="font-headline mb-4 text-4xl font-black tracking-tight md:text-5xl">The Two Core Layers</h3>
+            <p className="mx-auto max-w-xl text-on-surface-variant">
+              Different market conditions require different levels of conviction. We split our strategy into two distinct signal layers.
+            </p>
+          </div>
+          <div className="grid gap-8 md:grid-cols-2">
+            <div className="group relative overflow-hidden rounded-3xl border border-outline-variant/10 bg-surface-container p-10">
+              <div className="absolute right-0 top-0 p-8 opacity-10 transition-opacity group-hover:opacity-20">
+                <span className="material-symbols-outlined text-7xl">timer</span>
+              </div>
+              <h4 className="font-headline mb-4 text-3xl font-black text-primary">CORE Accumulation</h4>
+              <p className="mb-8 text-lg leading-relaxed text-on-surface-variant">
+                This is the base accumulation signal. It focuses on on-chain valuation and the trend condition.
+              </p>
+              <ul className="mb-8 space-y-4">
+                <li className="flex items-center gap-3 text-sm font-bold uppercase tracking-widest text-on-surface/70">
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                  Market valuation in deep value zone
+                </li>
+                <li className="flex items-center gap-3 text-sm font-bold uppercase tracking-widest text-on-surface/70">
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                  Long-term holders capitulating
+                </li>
+              </ul>
+            </div>
+            <div className="group relative overflow-hidden rounded-3xl border border-outline-variant/10 bg-surface-container p-10">
+              <div className="absolute right-0 top-0 p-8 opacity-10 transition-opacity group-hover:opacity-20">
+                <span className="material-symbols-outlined text-7xl">rocket_launch</span>
+              </div>
+              <h4 className="font-headline mb-4 text-3xl font-black text-secondary">MACRO Acceleration</h4>
+              <p className="mb-8 text-lg leading-relaxed text-on-surface-variant">
+                It triggers during when liquidity and busines cycle align for rapid expansion.
+              </p>
+              <ul className="mb-8 space-y-4">
+                <li className="flex items-center gap-3 text-sm font-bold uppercase tracking-widest text-on-surface/70">
+                  <span className="h-1.5 w-1.5 rounded-full bg-secondary" />
+                  Fed Balance Sheet expansion
+                </li>
+                <li className="flex items-center gap-3 text-sm font-bold uppercase tracking-widest text-on-surface/70">
+                  <span className="h-1.5 w-1.5 rounded-full bg-secondary" />
+                  Business cycle recovery
+                </li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <HomePricing hasFreeAccess={hasFreeAccess} isAuthenticated={isAuthenticated} onOpenAuth={onOpenAuth} />
+      </main>
+    </div>
   );
 };
 
-/* ── Email Signup ── */
+function FeatureCard({
+  icon,
+  title,
+  body,
+  hover,
+}: {
+  icon: string;
+  title: string;
+  body: string;
+  hover: 'primary' | 'secondary' | 'tertiary';
+}) {
+  const iconBox =
+    hover === 'primary'
+      ? 'bg-primary/10 text-primary group-hover:bg-primary group-hover:text-on-primary'
+      : hover === 'secondary'
+        ? 'bg-secondary/10 text-secondary group-hover:bg-secondary group-hover:text-on-secondary'
+        : 'bg-tertiary/10 text-tertiary group-hover:bg-tertiary group-hover:text-on-tertiary';
 
-const EmailSignup: React.FC = () => {
+  return (
+    <div className="glass-panel group rounded-2xl p-8 transition-all duration-500">
+      <div className={clsx('mb-6 flex h-12 w-12 items-center justify-center rounded-lg transition-all', iconBox)}>
+        <span className="material-symbols-outlined">{icon}</span>
+      </div>
+      <h4 className="font-headline mb-4 text-xl font-bold">{title}</h4>
+      <p className="leading-relaxed text-on-surface-variant">{body}</p>
+    </div>
+  );
+}
+
+function StepRow({ n, title, body }: { n: string; title: string; body: string }) {
+  return (
+    <div className="flex items-start gap-6">
+      <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded border border-outline-variant bg-surface-container-high font-headline text-sm font-bold tabular-nums tracking-tight text-primary">
+        {n}
+      </div>
+      <div className="min-w-0 flex-1">
+        <h4 className="font-headline mb-2 text-xl font-bold leading-tight">{title}</h4>
+        <p className="text-on-surface-variant">{body}</p>
+      </div>
+    </div>
+  );
+}
+
+const HomeEmailSignup: React.FC = () => {
   const [email, setEmail] = useState('');
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [successMessage, setSuccessMessage] = useState('');
@@ -449,142 +530,194 @@ const EmailSignup: React.FC = () => {
   };
 
   return (
-    <Card
-      sx={{
-        position: 'relative',
-        overflow: 'hidden',
-        background:
-          'radial-gradient(circle at top left, rgba(96,165,250,0.16), transparent 34%), radial-gradient(circle at top right, rgba(167,139,250,0.14), transparent 28%), linear-gradient(180deg, rgba(15,23,42,0.92) 0%, rgba(15,23,42,0.78) 100%)',
-        borderColor: 'rgba(96,165,250,0.28)',
-        boxShadow: 'none',
-        '&::before': {
-          content: '""',
-          position: 'absolute',
-          inset: 0,
-          height: 3,
-          background:
-            'linear-gradient(90deg, rgba(96,165,250,0.9), rgba(167,139,250,0.8), rgba(34,197,94,0.8))',
-        },
-      }}
-    >
-      <CardContent sx={{ py: { xs: 3.5, md: 4 }, px: { xs: 2.5, md: 4 } }}>
-        <Box
-          sx={{
-            display: 'grid',
-            gap: 3,
-            gridTemplateColumns: { xs: '1fr', md: '1.15fr 0.95fr' },
-            alignItems: 'center',
-          }}
-        >
-          <Box>
-            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
-              <Chip
-                icon={<Mail size={14} />}
-                label="Newsletter"
-                size="small"
-                variant="outlined"
-                sx={{
-                  bgcolor: 'rgba(96,165,250,0.14)',
-                  color: '#bfdbfe',
-                  borderColor: 'rgba(96,165,250,0.3)',
-                  fontWeight: 800,
-                }}
-              />
-              <Chip
-                icon={<Sparkles size={14} />}
-                label="Free"
-                size="small"
-                variant="outlined"
-                sx={{
-                  bgcolor: 'rgba(34,197,94,0.14)',
-                  color: '#bbf7d0',
-                  borderColor: 'rgba(34,197,94,0.3)',
-                  fontWeight: 800,
-                }}
-              />
-            </Stack>
-
-            <Typography variant="h4" sx={{ fontWeight: 950, mb: 1.25, fontSize: { xs: 28, sm: 34 } }}>
-              Free Weekly Signal Report
-            </Typography>
-            <Typography color="text.secondary" sx={{ mb: 2.25, maxWidth: 560, lineHeight: 1.75 }}>
-              Start Sunday morning with the latest CoinStrat signal, the macro environment and liquidity read,
-              and a concise Bitcoin market brief built to help you frame the week ahead.
-            </Typography>
-
-            {/* <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} useFlexGap flexWrap="wrap">
-              {[
-                'Sunday morning delivery',
-                'Signal snapshot + score context',
-                'Concise Bitcoin market read',
-              ].map((item) => (
-                <Chip
-                  key={item}
-                  label={item}
-                  variant="outlined"
-                  sx={{
-                    borderColor: 'rgba(148,163,184,0.28)',
-                    color: 'text.secondary',
-                    bgcolor: 'rgba(2,6,23,0.24)',
-                    fontWeight: 700,
-                  }}
-                />
-              ))}
-            </Stack> */}
-          </Box>
-
-          <Box
-            sx={{
-              border: '1px solid',
-              borderColor: 'rgba(148,163,184,0.18)',
-              borderRadius: 1,
-              bgcolor: 'rgba(2,6,23,0.44)',
-              p: { xs: 2.5, sm: 3.5 },
-            }}
-          >
-            <Typography sx={{ fontWeight: 800, mb: 0.75 }}>Get the report in your inbox</Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Double opt-in, no spam, unsubscribe anytime.
-            </Typography>
-
+    <section className="mx-auto mb-32 max-w-7xl px-6">
+      <div className="glass-panel relative overflow-hidden rounded-3xl p-8 md:p-12">
+        <div className="pointer-events-none absolute right-0 top-0 h-full w-1/3 bg-gradient-to-l from-primary/5 to-transparent" />
+        <div className="relative z-10 grid items-center gap-12 md:grid-cols-2">
+          <div>
+            <h2 className="font-headline mb-4 text-3xl font-black tracking-tight text-primary md:text-4xl">Free Weekly Signal Report</h2>
+            <p className="mb-8 text-lg text-on-surface-variant">
+              Start Sunday morning with the latest CoinStrat signal, and a concise Bitcoin market brief built to help you frame the week ahead.
+            </p>
             {status === 'success' ? (
-              <Alert severity="success">
-                {successMessage}
-              </Alert>
+              <p className="rounded-lg border border-secondary/30 bg-surface-container-lowest/80 px-4 py-3 text-sm text-on-surface">{successMessage}</p>
             ) : (
-              <Box component="form" onSubmit={handleSubmit} sx={{ display: 'grid', gap: 1.25 }}>
-                <TextField
-                  placeholder="your@email.com"
+              <form className="flex flex-col gap-3 sm:flex-row" onSubmit={handleSubmit}>
+                <input
+                  className="flex-grow rounded-lg border border-outline-variant/20 bg-surface-container-lowest/50 px-6 py-4 text-on-surface outline-none transition-all placeholder:text-on-surface-variant/70 focus:ring-2 focus:ring-primary"
+                  placeholder="Enter your institutional email"
                   type="email"
-                  size="medium"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  fullWidth
-                  sx={{ '& .MuiOutlinedInput-root': { bgcolor: 'background.paper' } }}
+                  autoComplete="email"
                 />
-                <Button
+                <button
                   type="submit"
-                  variant="contained"
                   disabled={status === 'loading'}
-                  endIcon={<ArrowRight size={16} />}
-                  sx={{ textTransform: 'none', fontWeight: 800, py: 1.25 }}
+                  className="rounded-lg bg-secondary px-8 py-4 font-bold text-on-secondary shadow-lg shadow-secondary/10 transition-all hover:brightness-110 disabled:opacity-60"
                 >
-                  {status === 'loading' ? 'Joining…' : 'Get the free report'}
-                </Button>
-              </Box>
+                  {status === 'loading' ? 'Joining…' : 'Subscribe Free'}
+                </button>
+              </form>
             )}
-            {status === 'error' && (
-              <Alert severity="error" sx={{ mt: 1.5 }}>
-                Something went wrong. Please try again.
-              </Alert>
-            )}
-          </Box>
-        </Box>
-      </CardContent>
-    </Card>
+            {status === 'error' && <p className="mt-3 text-sm text-[#ffb4ab]">Something went wrong. Please try again.</p>}
+          </div>
+          <div className="hidden md:block">
+            <div className="flex flex-col gap-4">
+              <GlassBullet tone="secondary" text="On-chain liquidity flow analysis" />
+              <GlassBullet tone="primary" text="Macro-economic stress indicators" />
+              <GlassBullet tone="tertiary" text="Weekly accumulation heatmaps" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+};
+
+function GlassBullet({ tone, text }: { tone: 'primary' | 'secondary' | 'tertiary'; text: string }) {
+  const color = tone === 'primary' ? 'text-primary' : tone === 'secondary' ? 'text-secondary' : 'text-tertiary';
+  return (
+    <div className="flex items-center gap-4 rounded-xl border border-outline-variant/10 bg-surface-container-high/30 p-4 backdrop-blur-md">
+      <span className={clsx('material-symbols-outlined', color)} style={{ fontVariationSettings: "'FILL' 1" }}>
+        check_circle
+      </span>
+      <span className="font-medium">{text}</span>
+    </div>
+  );
+}
+
+const HomePricing: React.FC<{
+  hasFreeAccess?: boolean;
+  isAuthenticated?: boolean;
+  onOpenAuth?: (redirectTo?: string) => void;
+}> = ({ hasFreeAccess = false, isAuthenticated = false, onOpenAuth }) => {
+  const navigate = useNavigate();
+
+  const onPlanCta = (tier: (typeof PLANS)[number]['tier'], href: string) => {
+    if (tier === 'free' && !hasFreeAccess) {
+      if (isAuthenticated) navigate('/profile');
+      else onOpenAuth?.('/dashboard');
+      return;
+    }
+    if (tier !== 'free' && !hasFreeAccess) {
+      if (isAuthenticated) navigate('/profile');
+      else onOpenAuth?.('/profile');
+      return;
+    }
+    navigate(href);
+  };
+
+  return (
+    <section className="mx-auto mb-32 max-w-7xl px-6">
+      <div className="mb-16 text-center">
+        <h3 className="font-headline text-4xl font-black tracking-tight md:text-5xl">Choose Your Edge</h3>
+      </div>
+      <div className="grid gap-8 md:grid-cols-3">
+        {PLANS.map((plan) => {
+          if (plan.accent === 'slate') {
+            return (
+              <div key={plan.name} className="flex h-full flex-col rounded-3xl border border-outline-variant/20 bg-surface-container-low/50 p-8 transition-all duration-300 hover:bg-surface-container-low hover:shadow-xl hover:shadow-black/20">
+                <h4 className="font-headline mb-2 text-xl font-bold">{plan.name}</h4>
+                <div className="mb-6 flex items-baseline gap-1">
+                  <span className="font-headline text-4xl font-black text-on-surface">{plan.price}</span>
+                  <span className="text-sm text-outline">{plan.period}</span>
+                </div>
+                <p className="mb-8 flex-grow text-sm text-on-surface-variant">Full free tier access to the model, charts, and weekly email.</p>
+                <ul className="mb-10 flex-grow space-y-4">
+                  {plan.features.map((f) => (
+                    <li key={f} className="flex items-start gap-3 text-sm">
+                      <span className="material-symbols-outlined text-lg text-outline">check</span>
+                      {f}
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  type="button"
+                  onClick={() => onPlanCta(plan.tier, plan.href)}
+                  className="w-full rounded-xl border border-outline-variant bg-white py-3 font-bold text-gray-800 transition-all hover:bg-surface-container-high hover:text-gray-900"
+                >
+                  {plan.cta}
+                </button>
+              </div>
+            );
+          }
+          if (plan.accent === 'primary') {
+            return (
+              <div key={plan.name} className="relative z-10 flex h-full flex-col rounded-3xl border-2 border-primary bg-surface-container p-8 shadow-[0_0_40px_-10px_rgba(37,99,235,0.3)] transition-all duration-300 hover:shadow-[0_0_50px_-5px_rgba(37,99,235,0.4)] md:scale-105">
+                {plan.badge && (
+                  <div className="absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-gradient-to-r from-primary to-primary-container px-6 py-2 text-[11px] font-black uppercase tracking-[0.2em] text-on-primary shadow-lg shadow-primary/20">
+                    {plan.badge}
+                  </div>
+                )}
+                <h4 className="font-headline mb-2 mt-2 text-xl font-bold text-primary">{plan.name}</h4>
+                <div className="mb-6 flex items-baseline gap-1">
+                  <span className="font-headline text-4xl font-black text-on-surface">{plan.price}</span>
+                  <span className="text-sm text-outline">{plan.period}</span>
+                </div>
+                <p className="mb-8 flex-grow text-sm text-on-surface-variant">The full signal suite for active accumulators.</p>
+                <ul className="mb-10 flex-grow space-y-4">
+                  {plan.features.map((f) => (
+                    <li key={f} className="flex items-start gap-3 text-sm">
+                      <span className="material-symbols-outlined text-lg text-primary" style={{ fontVariationSettings: "'FILL' 1" }}>
+                        check
+                      </span>
+                      {f}
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  type="button"
+                  onClick={() => onPlanCta(plan.tier, plan.href)}
+                  className="w-full rounded-xl bg-primary py-4 font-bold text-on-primary shadow-lg shadow-primary/25 transition-all hover:brightness-110 active:scale-95"
+                >
+                  Go Pro Now
+                </button>
+              </div>
+            );
+          }
+          return (
+            <div key={plan.name} className="flex h-full flex-col rounded-3xl border-2 border-[#f59e0b] bg-gradient-to-b from-surface-container-low to-surface-container-lowest p-8 shadow-[0_0_30px_-10px_rgba(245,158,11,0.2)] transition-all duration-300 hover:shadow-[0_0_40px_-5px_rgba(245,158,11,0.3)]">
+              <h4 className="font-headline mb-2 flex items-center justify-between text-xl font-bold">
+                <span className="flex items-center gap-2">
+                  <Crown size={18} className="text-[#f59e0b]" />
+                  {plan.name}
+                </span>
+              </h4>
+              {plan.badge && (
+                <div className="mb-2 ml-auto inline-block rounded bg-[#f59e0b]/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest text-[#f59e0b]">
+                  {plan.badge}
+                </div>
+              )}
+              <div className="mb-6 flex items-baseline gap-1">
+                <span className="font-headline text-4xl font-black text-on-surface">{plan.price}</span>
+                <span className="text-sm text-outline">{plan.period}</span>
+              </div>
+              <p className="mb-8 flex-grow text-sm text-on-surface-variant">One payment. Forever access to the signal.</p>
+              <ul className="mb-10 flex-grow space-y-4">
+                {plan.features.map((f) => (
+                  <li key={f} className="flex items-start gap-3 text-sm">
+                    <span className="material-symbols-outlined text-lg text-[#f59e0b]" style={{ fontVariationSettings: "'FILL' 1" }}>
+                      verified
+                    </span>
+                    {f}
+                  </li>
+                ))}
+              </ul>
+              <button
+                type="button"
+                onClick={() => onPlanCta(plan.tier, plan.href)}
+                className="w-full rounded-xl bg-[#f59e0b] py-4 font-black text-[#0c1322] shadow-lg shadow-[#f59e0b]/20 transition-all hover:brightness-110 active:scale-95"
+              >
+                {plan.cta}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 };
 
 export default Home;
-

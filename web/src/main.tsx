@@ -1,7 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import App from './App';
 import './index.css';
+import App from './App';
 import { CssBaseline } from '@mui/material';
 import { ThemeProvider, StyledEngineProvider } from '@mui/material/styles';
 import { theme } from './theme';
@@ -20,6 +20,5 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         </BrowserRouter>
       </ThemeProvider>
     </StyledEngineProvider>
-  </React.StrictMode>
-)
-
+  </React.StrictMode>,
+);
