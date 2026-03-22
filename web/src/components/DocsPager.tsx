@@ -1,6 +1,5 @@
 import React, { useMemo } from 'react';
-import { Box, Button, Paper, Stack, Typography } from '@mui/material';
-import { ArrowLeft, ArrowRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { DOCS_NAV_ITEMS } from './DocsSectionNav';
 
@@ -26,46 +25,35 @@ const DocsPager: React.FC = () => {
   }
 
   return (
-    <Paper
-      sx={{
-        p: 2,
-        borderColor: 'rgba(148,163,184,0.22)',
-        background: 'rgba(2,6,23,0.32)',
-        boxShadow: 'none',
-      }}
-    >
-      <Stack spacing={1.5}>
-        <Typography variant="overline" color="text.secondary">
-          Continue Reading
-        </Typography>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1.5, flexWrap: 'wrap' }}>
-          <Box>
-            {previousItem && (
-              <Button
-                variant="outlined"
-                startIcon={<ArrowLeft size={16} />}
-                onClick={() => navigate(previousItem.path)}
-                sx={{ textTransform: 'none', fontWeight: 700 }}
-              >
-                {previousItem.label}
-              </Button>
-            )}
-          </Box>
-          <Box sx={{ ml: 'auto' }}>
-            {nextItem && (
-              <Button
-                variant="contained"
-                endIcon={<ArrowRight size={16} />}
-                onClick={() => navigate(nextItem.path)}
-                sx={{ textTransform: 'none', fontWeight: 700 }}
-              >
-                {nextItem.label}
-              </Button>
-            )}
-          </Box>
-        </Box>
-      </Stack>
-    </Paper>
+    <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low/80 p-6 backdrop-blur-sm">
+      <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.2em] text-on-surface-variant">Continue reading</p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          {previousItem && (
+            <button
+              type="button"
+              onClick={() => navigate(previousItem.path)}
+              className="inline-flex items-center gap-2 rounded-lg border border-outline-variant/20 bg-surface-container-high px-4 py-2.5 text-sm font-bold text-on-surface transition-colors hover:bg-surface-container-highest"
+            >
+              <ChevronLeft size={16} />
+              {previousItem.label}
+            </button>
+          )}
+        </div>
+        <div className="ml-auto">
+          {nextItem && (
+            <button
+              type="button"
+              onClick={() => navigate(nextItem.path)}
+              className="inline-flex items-center gap-2 rounded-lg bg-primary-container px-4 py-2.5 text-sm font-bold text-on-primary-container transition-all hover:opacity-90"
+            >
+              {nextItem.label}
+              <ChevronRight size={16} />
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
   );
 };
 

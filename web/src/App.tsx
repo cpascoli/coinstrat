@@ -319,12 +319,13 @@ const App: React.FC = () => {
   };
 
   const isHome = location.pathname === '/';
+  const isDocsRoute = location.pathname.startsWith('/docs');
 
   return (
     <Box
       sx={{
         minHeight: '100vh',
-        bgcolor: isHome ? '#0c1322' : 'background.default',
+        bgcolor: isHome || isDocsRoute ? '#0c1322' : 'background.default',
         pb: { xs: 8, md: 0 },
       }}
     >
@@ -481,9 +482,9 @@ const App: React.FC = () => {
       )}
 
       <Container
-        maxWidth={isHome ? false : 'lg'}
-        disableGutters={isHome}
-        sx={{ py: isHome ? 0 : { xs: 2.5, md: 4 } }}
+        maxWidth={isHome || isDocsRoute ? false : 'lg'}
+        disableGutters={isHome || isDocsRoute}
+        sx={{ py: isHome || isDocsRoute ? 0 : { xs: 2.5, md: 4 } }}
       >
         <Routes>
           <Route

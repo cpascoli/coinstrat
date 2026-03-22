@@ -1,64 +1,57 @@
 import React from 'react';
-import { Button, Paper, Stack, Typography } from '@mui/material';
-import { useLocation, useNavigate } from 'react-router-dom';
-import { Activity, BarChart3, Binary, BookOpen, Database, Workflow } from 'lucide-react';
+import clsx from 'clsx';
+import { Link, useLocation } from 'react-router-dom';
 
 export type DocsNavItem = {
   label: string;
   path: string;
-  icon: React.ReactNode;
+  /** Material Symbols Outlined ligature */
+  icon: string;
 };
 
 export const DOCS_NAV_ITEMS: DocsNavItem[] = [
-  { label: 'Docs Home', path: '/docs', icon: <BookOpen size={16} /> },
-  { label: 'Architecture', path: '/docs/architecture', icon: <Activity size={16} /> },
-  { label: 'Data Feeds', path: '/docs/data', icon: <Database size={16} /> },
-  { label: 'Scores', path: '/docs/scores', icon: <BarChart3 size={16} /> },
-  { label: 'Signals', path: '/docs/signals', icon: <Binary size={16} /> },
-  { label: 'Signal Builder', path: '/docs/signal-builder', icon: <Workflow size={16} /> },
+  { label: 'Docs Home', path: '/docs', icon: 'info' },
+  { label: 'Architecture', path: '/docs/architecture', icon: 'rocket_launch' },
+  { label: 'Data Feeds', path: '/docs/data', icon: 'database' },
+  { label: 'Scores', path: '/docs/scores', icon: 'query_stats' },
+  { label: 'Signals', path: '/docs/signals', icon: 'verified_user' },
+  { label: 'Signal Builder', path: '/docs/signal-builder', icon: 'construction' },
 ];
 
 const DocsSectionNav: React.FC = () => {
   const location = useLocation();
-  const navigate = useNavigate();
 
   return (
-    <Paper
-      sx={{
-        p: 2,
-        borderColor: 'rgba(148,163,184,0.22)',
-        background: 'rgba(2,6,23,0.32)',
-        boxShadow: 'none',
-      }}
-    >
-      <Stack spacing={1.5}>
-        <Stack spacing={1}>
-          {DOCS_NAV_ITEMS.map((item) => {
-            const active = location.pathname === item.path;
-
-            return (
-              <Button
-                key={item.path}
-                variant={active ? 'contained' : 'outlined'}
-                size="small"
-                onClick={() => navigate(item.path)}
-                startIcon={item.icon}
-                sx={{
-                  textTransform: 'none',
-                  fontWeight: 700,
-                  justifyContent: 'flex-start',
-                  px: 1.5,
-                  py: 1,
-                }}
-                fullWidth
-              >
-                {item.label}
-              </Button>
-            );
-          })}
-        </Stack>
-      </Stack>
-    </Paper>
+    <nav className="flex flex-col space-y-1 font-body text-sm font-medium tracking-wide">
+      <div className="mb-6 px-2">
+        <h3 className="font-headline text-lg font-black text-primary">Technical Guides</h3>
+        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Model reference</p>
+      </div>
+      {DOCS_NAV_ITEMS.map((item) => {
+        const active = location.pathname === item.path;
+        return (
+          <Link
+            key={item.path}
+            to={item.path}
+            className={clsx(
+              'flex items-center gap-3 rounded-md px-3 py-2 transition-colors duration-150',
+              active
+                ? 'bg-surface-container font-semibold text-primary'
+                : 'text-slate-400 hover:bg-surface-container hover:text-slate-200',
+            )}
+          >
+            <span
+              className="material-symbols-outlined text-[20px]"
+              style={active ? { fontVariationSettings: "'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24" } : undefined}
+              aria-hidden
+            >
+              {item.icon}
+            </span>
+            {item.label}
+          </Link>
+        );
+      })}
+    </nav>
   );
 };
 
