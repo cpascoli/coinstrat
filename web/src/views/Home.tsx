@@ -189,7 +189,7 @@ const Home: React.FC<HomeProps> = ({
   };
 
   return (
-    <div className="dark min-h-screen bg-surface font-body text-on-surface selection:bg-primary/30">
+    <div className="dark min-h-screen overflow-x-clip bg-surface font-body text-on-surface selection:bg-primary/30">
       <nav className="fixed top-0 z-50 w-full border-b border-[#434655]/15 bg-[#0c1322]/80 shadow-2xl shadow-[#070e1d]/40 backdrop-blur-xl">
         <div className="mx-auto flex w-full max-w-7xl items-center px-6 py-4">
           <Link
@@ -238,6 +238,7 @@ const Home: React.FC<HomeProps> = ({
                   anchorEl={mobilePublicNavEl}
                   open={Boolean(mobilePublicNavEl)}
                   onClose={() => setMobilePublicNavEl(null)}
+                  disableScrollLock
                   anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
                   transformOrigin={{ vertical: 'top', horizontal: 'right' }}
                   PaperProps={{ sx: { minWidth: 200, bgcolor: '#191f2f', border: '1px solid rgba(67, 70, 85, 0.35)' } }}
@@ -303,6 +304,7 @@ const Home: React.FC<HomeProps> = ({
                   anchorEl={navMenuEl}
                   open={Boolean(navMenuEl)}
                   onClose={() => setNavMenuEl(null)}
+                  disableScrollLock
                   anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
                   transformOrigin={{ vertical: 'top', horizontal: 'right' }}
                   PaperProps={{ sx: { minWidth: 200, bgcolor: '#191f2f', border: '1px solid rgba(67, 70, 85, 0.35)' } }}
@@ -389,11 +391,11 @@ const Home: React.FC<HomeProps> = ({
         </div>
       </nav>
 
-      <main className="pt-32">
+      <main className="pt-24">
         <section className="mx-auto mb-40 max-w-7xl px-6">
           <div className="grid items-center gap-16 lg:grid-cols-12">
             <div className="lg:col-span-7">
-              <div className="mb-8 inline-flex flex-wrap items-center gap-4">
+              <div className="mb-0 inline-flex flex-wrap items-center gap-4">
                 <div className="inline-flex items-center gap-3 rounded-full border border-secondary/20 bg-secondary-container/10 px-4 py-2">
                   <div className="relative flex h-2.5 w-2.5">
                     <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-secondary opacity-75" />
@@ -413,10 +415,8 @@ const Home: React.FC<HomeProps> = ({
                 <span className="bg-gradient-to-r from-[#F5F5F5] via-[#FAB81F] to-[#FAB81F] bg-clip-text pr-2 italic text-transparent">
                   Your Bitcoin
                 </span>
-                
-                 <br />
-                 <span className="bg-gradient-to-r from-[#F0FFEC] via-[#C5F4F6] to-[#5EFFAF] bg-clip-text pr-2 italic text-transparent">
-
+                <br />
+                <span className="bg-gradient-to-r from-[#F0FFEC] via-[#C5F4F6] to-[#5EFFAF] bg-clip-text pr-2 italic text-transparent">
                   Accumulation
                 </span>
                 <br />
@@ -454,8 +454,8 @@ const Home: React.FC<HomeProps> = ({
               </div>
             </div>
 
-            <div className="relative lg:col-span-5">
-              <div className="relative flex aspect-square w-full items-center justify-center">
+            <div className="relative min-w-0 lg:col-span-5">
+              <div className="relative flex aspect-square w-full items-center justify-center overflow-hidden">
                 <div className="absolute inset-0 rounded-full bg-primary/20 opacity-40 mix-blend-screen blur-[120px]" />
                 <div className="blend-mask relative h-full w-full scale-125">
                   <img
@@ -471,7 +471,7 @@ const Home: React.FC<HomeProps> = ({
 
         <HomeEmailSignup />
 
-        <section className="mx-auto mb-32 max-w-7xl px-6">
+        <section className="mx-auto mb-32 max-w-7xl px-4">
           <div className="mb-16 text-center">
             <h2 className="mb-4 text-xs font-bold uppercase tracking-[0.3em] text-primary">The Quant Advantage</h2>
             <h3 className="font-headline text-4xl font-black tracking-tight md:text-5xl">Why CoinStrat?</h3>

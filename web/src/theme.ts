@@ -39,6 +39,10 @@ export const theme = createTheme({
     },
     MuiCssBaseline: {
       styleOverrides: {
+        html: {
+          // Avoid stable gutter reserving ~15–17px when scrollbars are overlay (feels like extra right inset on mobile).
+          scrollbarGutter: 'auto',
+        },
         body: {
           backgroundColor: '#0b1220',
         },

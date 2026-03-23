@@ -370,14 +370,10 @@ const App: React.FC = () => {
           }}
         >
           <Box
+            className="mx-auto flex w-full max-w-7xl items-center px-6"
             sx={{
-              display: 'flex',
-              alignItems: 'center',
-              width: '100%',
-              maxWidth: `${SITE_CONTENT_MAX_WIDTH_PX}px`,
-              mx: 'auto',
-              px: { xs: 2, sm: 3 },
               py: { xs: 1.5, sm: 2 },
+              pr: { xs: 0, sm: 3 },
             }}
           >
             <Link
@@ -388,7 +384,7 @@ const App: React.FC = () => {
               CoinStrat
             </Link>
 
-            <Box className="flex min-w-0 flex-1 items-center justify-end gap-6 md:gap-8">
+            <Box className="flex min-w-0 flex-1 items-center justify-end gap-0 md:gap-8">
               {/* Desktop primary navigation — matches homepage link treatment */}
               {isMdUp && (
                 <Box className="flex items-center space-x-8">
@@ -423,6 +419,7 @@ const App: React.FC = () => {
                     anchorEl={mobilePublicNavEl}
                     open={Boolean(mobilePublicNavEl)}
                     onClose={() => setMobilePublicNavEl(null)}
+                    disableScrollLock
                     anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
                     transformOrigin={{ vertical: 'top', horizontal: 'right' }}
                     PaperProps={{
@@ -500,6 +497,7 @@ const App: React.FC = () => {
                       anchorEl={anchorEl}
                       open={Boolean(anchorEl)}
                       onClose={() => setAnchorEl(null)}
+                      disableScrollLock
                       anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
                       transformOrigin={{ vertical: 'top', horizontal: 'right' }}
                       PaperProps={{
