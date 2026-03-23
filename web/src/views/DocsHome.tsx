@@ -9,7 +9,7 @@ const DocsHome: React.FC = () => {
 
   return (
     <DocsPageLayout>
-      <div className="mx-auto max-w-6xl">
+      <div className="w-full">
         <header className="relative mb-12 md:mb-16">
           <div className="flex flex-col justify-between gap-8 md:flex-row md:items-end">
             <div className="space-y-4">

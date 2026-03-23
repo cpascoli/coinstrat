@@ -1,6 +1,23 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
-import { LayoutDashboard, BarChart3, Binary, Info, Activity, FlaskConical, Github, User, LogOut, Shield, BookOpen, Database, Key, Workflow } from 'lucide-react';
+import {
+  LayoutDashboard,
+  BarChart3,
+  Binary,
+  Info,
+  Activity,
+  FlaskConical,
+  Github,
+  User,
+  LogOut,
+  LogIn,
+  Shield,
+  BookOpen,
+  Database,
+  Key,
+  Workflow,
+  Menu as MenuIcon,
+} from 'lucide-react';
 import Dashboard from './views/Dashboard';
 import ScoreBreakdown from './views/ScoreBreakdown';
 import LogicFlow from './views/LogicFlow';
@@ -39,6 +56,7 @@ import {
   MenuItem,
   ListItemIcon,
   ListItemText,
+  Divider,
   Paper,
   Toolbar,
   Typography,
@@ -48,6 +66,7 @@ import {
 import { useTheme } from '@mui/material/styles';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { SITE_CONTENT_MAX_WIDTH_PX } from './layoutConstants';
 
 // Types for the signal data
 export interface SignalData {
@@ -87,7 +106,7 @@ const App: React.FC = () => {
   const [authOpen, setAuthOpen] = useState(false);
   const [authRedirectOverride, setAuthRedirectOverride] = useState<string | null>(null);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
-  const [docsAnchorEl, setDocsAnchorEl] = useState<null | HTMLElement>(null);
+  const [mobilePublicNavEl, setMobilePublicNavEl] = useState<null | HTMLElement>(null);
 
   const {
     user,
@@ -333,158 +352,212 @@ const App: React.FC = () => {
       <AppBar
         position="sticky"
         color="transparent"
+        elevation={0}
         sx={{
-          bgcolor: 'rgba(10, 15, 28, 0.78)', // dark glass
-          backdropFilter: 'blur(10px)',
+          bgcolor: 'rgba(12, 19, 34, 0.8)',
+          backdropFilter: 'blur(24px)',
+          WebkitBackdropFilter: 'blur(24px)',
           borderBottom: '1px solid',
-          borderColor: 'rgba(148,163,184,0.18)',
+          borderColor: 'rgba(67, 70, 85, 0.15)',
+          boxShadow: '0 25px 50px -12px rgba(7, 14, 29, 0.4)',
         }}
       >
-        <Toolbar sx={{ minHeight: 64 }}>
+        <Toolbar
+          disableGutters
+          sx={{
+            minHeight: { xs: 64, sm: 72 },
+            justifyContent: 'center',
+          }}
+        >
           <Box
-            component="button"
-            onClick={() => navigate('/')}
-            aria-label="Go to homepage"
             sx={{
               display: 'flex',
               alignItems: 'center',
-              gap: 1.5,
-              flexGrow: 1,
-              cursor: 'pointer',
-              border: 'none',
-              background: 'transparent',
-              color: 'inherit',
-              p: 0,
-              textAlign: 'left',
+              width: '100%',
+              maxWidth: `${SITE_CONTENT_MAX_WIDTH_PX}px`,
+              mx: 'auto',
+              px: { xs: 2, sm: 3 },
+              py: { xs: 1.5, sm: 2 },
             }}
           >
-            <Box
-              sx={{
-                height: 34,
-                width: 34,
-                borderRadius: 1.5,
-                bgcolor: 'primary.main',
-                color: 'primary.contrastText',
-                display: 'grid',
-                placeItems: 'center',
-                fontWeight: 900,
-              }}
+            <Link
+              to="/"
+              className="shrink-0 font-headline text-2xl font-black tracking-tighter text-[#b4c5ff] no-underline"
+              aria-label="CoinStrat home"
             >
-              CS
-            </Box>
-            <Typography variant="h6" sx={{ fontWeight: 900, letterSpacing: -0.4 }}>
-              Coin <Box component="span" sx={{ color: 'primary.main' }}>Strat</Box>
-            </Typography>
-          </Box>
+              CoinStrat
+            </Link>
 
-          {/* Desktop primary navigation */}
-          {isMdUp && (
-            <Box className="flex items-center gap-8">
-              {desktopPrimaryLinks.map((item) => (
-                <Link
-                  key={item.key}
-                  to={item.path}
-                  className={clsx(
-                    'border-b-2 pb-1 font-headline font-bold tracking-tight transition-colors no-underline',
-                    item.active ? 'border-[#2563eb] text-[#b4c5ff]' : 'border-transparent text-slate-400 hover:text-white',
-                  )}
-                >
-                  {item.label}
-                </Link>
-              ))}
-            </Box>
-          )}
+            <Box className="flex min-w-0 flex-1 items-center justify-end gap-6 md:gap-8">
+              {/* Desktop primary navigation — matches homepage link treatment */}
+              {isMdUp && (
+                <Box className="flex items-center space-x-8">
+                  {desktopPrimaryLinks.map((item) => (
+                    <Link
+                      key={item.key}
+                      to={item.path}
+                      className={clsx(
+                        'border-b-2 pb-1 font-headline font-bold tracking-tight transition-colors no-underline',
+                        item.active
+                          ? 'border-[#2563eb] text-[#b4c5ff]'
+                          : 'border-transparent text-slate-400 hover:text-white',
+                      )}
+                    >
+                      {item.label}
+                    </Link>
+                  ))}
+                </Box>
+              )}
 
-          {!isMdUp && !user && (
-            <>
-              <IconButton onClick={(e) => setDocsAnchorEl(e.currentTarget)} size="small" sx={{ mr: 0.5 }}>
-                <BookOpen size={18} />
-              </IconButton>
-              <Menu
-                anchorEl={docsAnchorEl}
-                open={Boolean(docsAnchorEl)}
-                onClose={() => setDocsAnchorEl(null)}
-                anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-                transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-                PaperProps={{ sx: { minWidth: 200 } }}
-              >
-                <MenuItem onClick={() => { setDocsAnchorEl(null); navigate('/docs'); }}>
-                  <ListItemIcon><BookOpen size={16} /></ListItemIcon>
-                  <ListItemText>Docs</ListItemText>
-                </MenuItem>
-                <MenuItem onClick={() => { setDocsAnchorEl(null); navigate('/charts/system'); }}>
-                  <ListItemIcon><Activity size={16} /></ListItemIcon>
-                  <ListItemText>Charts</ListItemText>
-                </MenuItem>
-                <MenuItem onClick={() => { setDocsAnchorEl(null); navigate('/backtest'); }}>
-                  <ListItemIcon><FlaskConical size={16} /></ListItemIcon>
-                  <ListItemText>Backtest</ListItemText>
-                </MenuItem>
-              </Menu>
-            </>
-          )}
-
-          {/* Auth / User menu */}
-          <Box sx={{ ml: { xs: 0, md: 1.5 } }}>
-            {user ? (
-              <>
-                <IconButton onClick={(e) => setAnchorEl(e.currentTarget)} size="small">
-                  <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main', fontSize: 14, fontWeight: 700 }}>
-                    {(profile?.email?.[0] ?? user?.email?.[0] ?? 'U').toUpperCase()}
-                  </Avatar>
-                </IconButton>
-                <Menu
-                  anchorEl={anchorEl}
-                  open={Boolean(anchorEl)}
-                  onClose={() => setAnchorEl(null)}
-                  anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-                  transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-                  PaperProps={{ sx: { minWidth: 180 } }}
-                >
-                  <MenuItem onClick={() => { setAnchorEl(null); navigate('/signals'); }}>
-                    <ListItemIcon><Binary size={16} /></ListItemIcon>
-                    <ListItemText>Signals</ListItemText>
-                  </MenuItem>
-                  <MenuItem onClick={() => { setAnchorEl(null); navigate('/scores'); }}>
-                    <ListItemIcon><BarChart3 size={16} /></ListItemIcon>
-                    <ListItemText>Scores</ListItemText>
-                  </MenuItem>
-                  <MenuItem onClick={() => { setAnchorEl(null); navigate('/developer'); }}>
-                    <ListItemIcon><Key size={16} /></ListItemIcon>
-                    <ListItemText>Developer</ListItemText>
-                  </MenuItem>
-                {hasPaidBuilderAccess && !isMdUp && (
-                  <MenuItem onClick={() => { setAnchorEl(null); navigate('/strategy-builder'); }}>
-                    <ListItemIcon><Workflow size={16} /></ListItemIcon>
-                    <ListItemText>Signal Builder</ListItemText>
-                  </MenuItem>
-                )}
-                  <MenuItem onClick={() => { setAnchorEl(null); navigate('/profile'); }}>
-                    <ListItemIcon><User size={16} /></ListItemIcon>
-                    <ListItemText>Profile</ListItemText>
-                  </MenuItem>
-                  {isAdmin && (
-                    <MenuItem onClick={() => { setAnchorEl(null); navigate('/admin'); }}>
-                      <ListItemIcon><Shield size={16} /></ListItemIcon>
-                      <ListItemText>Admin</ListItemText>
+              {!user && (
+                <div className="md:hidden">
+                  <IconButton
+                    size="small"
+                    onClick={(e) => setMobilePublicNavEl(e.currentTarget)}
+                    aria-label="Open navigation menu"
+                    sx={{ color: '#94a3b8' }}
+                  >
+                    <MenuIcon size={22} />
+                  </IconButton>
+                  <Menu
+                    anchorEl={mobilePublicNavEl}
+                    open={Boolean(mobilePublicNavEl)}
+                    onClose={() => setMobilePublicNavEl(null)}
+                    anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                    transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                    PaperProps={{
+                      sx: { minWidth: 200, bgcolor: '#191f2f', border: '1px solid rgba(67, 70, 85, 0.35)' },
+                    }}
+                  >
+                    <MenuItem
+                      component={Link}
+                      to="/docs"
+                      onClick={() => setMobilePublicNavEl(null)}
+                      sx={{ color: '#dce2f7', py: 1.25 }}
+                    >
+                      <ListItemIcon sx={{ color: 'inherit', minWidth: 36 }}>
+                        <BookOpen size={18} />
+                      </ListItemIcon>
+                      <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Docs</ListItemText>
                     </MenuItem>
-                  )}
-                  <MenuItem onClick={async () => { setAnchorEl(null); await signOut(); navigate('/'); }}>
-                    <ListItemIcon><LogOut size={16} /></ListItemIcon>
-                    <ListItemText>Sign out</ListItemText>
-                  </MenuItem>
-                </Menu>
-              </>
-            ) : null}
+                    <MenuItem
+                      component={Link}
+                      to="/charts/system"
+                      onClick={() => setMobilePublicNavEl(null)}
+                      sx={{ color: '#dce2f7', py: 1.25 }}
+                    >
+                      <ListItemIcon sx={{ color: 'inherit', minWidth: 36 }}>
+                        <Activity size={18} />
+                      </ListItemIcon>
+                      <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Charts</ListItemText>
+                    </MenuItem>
+                    <MenuItem
+                      component={Link}
+                      to="/backtest"
+                      onClick={() => setMobilePublicNavEl(null)}
+                      sx={{ color: '#dce2f7', py: 1.25 }}
+                    >
+                      <ListItemIcon sx={{ color: 'inherit', minWidth: 36 }}>
+                        <FlaskConical size={18} />
+                      </ListItemIcon>
+                      <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Backtest</ListItemText>
+                    </MenuItem>
+                    <Divider sx={{ borderColor: 'rgba(148,163,184,0.15)', my: 0.5 }} />
+                    <MenuItem
+                      onClick={() => {
+                        setMobilePublicNavEl(null);
+                        openAuth();
+                      }}
+                      sx={{ color: '#dce2f7', py: 1.25 }}
+                    >
+                      <ListItemIcon sx={{ color: 'inherit', minWidth: 36 }}>
+                        <LogIn size={18} />
+                      </ListItemIcon>
+                      <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Sign In</ListItemText>
+                    </MenuItem>
+                  </Menu>
+                </div>
+              )}
+
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                {isMdUp && !user && (
+                  <button
+                    type="button"
+                    onClick={() => openAuth()}
+                    className="rounded-xl bg-[#b4c5ff] px-6 py-2.5 font-headline font-medium text-[#002a78] transition-all hover:shadow-[0_0_20px_-5px_rgba(180,197,255,0.4)] active:scale-95"
+                  >
+                    Get Started
+                  </button>
+                )}
+                {user ? (
+                  <>
+                    <IconButton onClick={(e) => setAnchorEl(e.currentTarget)} size="small">
+                      <Avatar sx={{ width: 32, height: 32, bgcolor: '#2563eb', fontSize: 14, fontWeight: 700 }}>
+                        {(profile?.email?.[0] ?? user?.email?.[0] ?? 'U').toUpperCase()}
+                      </Avatar>
+                    </IconButton>
+                    <Menu
+                      anchorEl={anchorEl}
+                      open={Boolean(anchorEl)}
+                      onClose={() => setAnchorEl(null)}
+                      anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                      transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                      PaperProps={{
+                        sx: { minWidth: 200, bgcolor: '#191f2f', border: '1px solid rgba(67, 70, 85, 0.35)' },
+                      }}
+                    >
+                      <MenuItem onClick={() => { setAnchorEl(null); navigate('/signals'); }}>
+                        <ListItemIcon><Binary size={16} /></ListItemIcon>
+                        <ListItemText>Signals</ListItemText>
+                      </MenuItem>
+                      <MenuItem onClick={() => { setAnchorEl(null); navigate('/scores'); }}>
+                        <ListItemIcon><BarChart3 size={16} /></ListItemIcon>
+                        <ListItemText>Scores</ListItemText>
+                      </MenuItem>
+                      <MenuItem onClick={() => { setAnchorEl(null); navigate('/developer'); }}>
+                        <ListItemIcon><Key size={16} /></ListItemIcon>
+                        <ListItemText>Developer</ListItemText>
+                      </MenuItem>
+                      {hasPaidBuilderAccess && !isMdUp && (
+                        <MenuItem onClick={() => { setAnchorEl(null); navigate('/strategy-builder'); }}>
+                          <ListItemIcon><Workflow size={16} /></ListItemIcon>
+                          <ListItemText>Signal Builder</ListItemText>
+                        </MenuItem>
+                      )}
+                      <MenuItem onClick={() => { setAnchorEl(null); navigate('/profile'); }}>
+                        <ListItemIcon><User size={16} /></ListItemIcon>
+                        <ListItemText>Profile</ListItemText>
+                      </MenuItem>
+                      {isAdmin && (
+                        <MenuItem onClick={() => { setAnchorEl(null); navigate('/admin'); }}>
+                          <ListItemIcon><Shield size={16} /></ListItemIcon>
+                          <ListItemText>Admin</ListItemText>
+                        </MenuItem>
+                      )}
+                      <MenuItem onClick={async () => { setAnchorEl(null); await signOut(); navigate('/'); }}>
+                        <ListItemIcon><LogOut size={16} /></ListItemIcon>
+                        <ListItemText>Sign out</ListItemText>
+                      </MenuItem>
+                    </Menu>
+                  </>
+                ) : null}
+              </Box>
+            </Box>
           </Box>
         </Toolbar>
       </AppBar>
       )}
 
       <Container
-        maxWidth={isHome || isDocsRoute ? false : 'lg'}
-        disableGutters={isHome || isDocsRoute}
-        sx={{ py: isHome || isDocsRoute ? 0 : { xs: 2.5, md: 4 } }}
+        maxWidth={false}
+        disableGutters
+        sx={{
+          maxWidth: isHome ? undefined : `${SITE_CONTENT_MAX_WIDTH_PX}px`,
+          mx: isHome ? undefined : 'auto',
+          px: isHome ? 0 : { xs: 2, sm: 3 },
+          py: isHome || isDocsRoute ? 0 : { xs: 2.5, md: 4 },
+          width: '100%',
+        }}
       >
         <Routes>
           <Route

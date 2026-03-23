@@ -1,8 +1,21 @@
 import React, { useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Avatar, IconButton, ListItemIcon, ListItemText, Menu, MenuItem } from '@mui/material';
-import { BarChart3, Binary, Crown, Key, LogOut, Shield, User } from 'lucide-react';
+import { Avatar, Divider, IconButton, ListItemIcon, ListItemText, Menu, MenuItem } from '@mui/material';
+import {
+  Activity,
+  BarChart3,
+  Binary,
+  BookOpen,
+  Crown,
+  FlaskConical,
+  Key,
+  LogIn,
+  LogOut,
+  Menu as MenuIcon,
+  Shield,
+  User,
+} from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import type { SignalData } from '../App';
 import { getRecommendation, type RecommendationAction } from '../lib/recommendation';
@@ -111,6 +124,7 @@ const Home: React.FC<HomeProps> = ({
     [profile?.tier],
   );
   const [navMenuEl, setNavMenuEl] = useState<null | HTMLElement>(null);
+  const [mobilePublicNavEl, setMobilePublicNavEl] = useState<null | HTMLElement>(null);
 
   const recommendation = useMemo(
     () => (currentSignal ? getRecommendation(currentSignal) : null),
@@ -177,30 +191,107 @@ const Home: React.FC<HomeProps> = ({
   return (
     <div className="dark min-h-screen bg-surface font-body text-on-surface selection:bg-primary/30">
       <nav className="fixed top-0 z-50 w-full border-b border-[#434655]/15 bg-[#0c1322]/80 shadow-2xl shadow-[#070e1d]/40 backdrop-blur-xl">
-        <div className="mx-auto flex w-full max-w-7xl items-center justify-between px-6 py-4">
-          <Link to="/" className="font-headline text-2xl font-black tracking-tighter text-[#b4c5ff]" aria-label="CoinStrat home">
+        <div className="mx-auto flex w-full max-w-7xl items-center px-6 py-4">
+          <Link
+            to="/"
+            className="shrink-0 font-headline text-2xl font-black tracking-tighter text-[#b4c5ff]"
+            aria-label="CoinStrat home"
+          >
             CoinStrat
           </Link>
 
-          <div className="hidden items-center space-x-8 md:flex">
-            <NavLink to="/dashboard" navKey="dashboard">
-              Dashboard
-            </NavLink>
-            <NavLink to="/strategy-builder" navKey="builder">
-              Signal Builder
-            </NavLink>
-            <NavLink to="/docs" navKey="docs">
-              Docs
-            </NavLink>
-            <NavLink to="/charts/system" navKey="charts">
-              Charts
-            </NavLink>
-            <NavLink to="/backtest" navKey="backtest">
-              Backtest
-            </NavLink>
-          </div>
+          <div className="flex min-w-0 flex-1 items-center justify-end gap-6 md:gap-8">
+            <div className="hidden items-center space-x-8 md:flex">
+              {user ? (
+                <>
+                  <NavLink to="/dashboard" navKey="dashboard">
+                    Dashboard
+                  </NavLink>
+                  <NavLink to="/strategy-builder" navKey="builder">
+                    Signal Builder
+                  </NavLink>
+                </>
+              ) : null}
+              <NavLink to="/docs" navKey="docs">
+                Docs
+              </NavLink>
+              <NavLink to="/charts/system" navKey="charts">
+                Charts
+              </NavLink>
+              <NavLink to="/backtest" navKey="backtest">
+                Backtest
+              </NavLink>
+            </div>
 
-          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2">
+            {!user && (
+              <div className="md:hidden">
+                <IconButton
+                  size="small"
+                  onClick={(e) => setMobilePublicNavEl(e.currentTarget)}
+                  aria-label="Open navigation menu"
+                  sx={{ color: '#94a3b8' }}
+                >
+                  <MenuIcon size={22} />
+                </IconButton>
+                <Menu
+                  anchorEl={mobilePublicNavEl}
+                  open={Boolean(mobilePublicNavEl)}
+                  onClose={() => setMobilePublicNavEl(null)}
+                  anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                  transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                  PaperProps={{ sx: { minWidth: 200, bgcolor: '#191f2f', border: '1px solid rgba(67, 70, 85, 0.35)' } }}
+                >
+                  <MenuItem
+                    component={Link}
+                    to="/docs"
+                    onClick={() => setMobilePublicNavEl(null)}
+                    sx={{ color: '#dce2f7', py: 1.25 }}
+                  >
+                    <ListItemIcon sx={{ color: 'inherit', minWidth: 36 }}>
+                      <BookOpen size={18} />
+                    </ListItemIcon>
+                    <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Docs</ListItemText>
+                  </MenuItem>
+                  <MenuItem
+                    component={Link}
+                    to="/charts/system"
+                    onClick={() => setMobilePublicNavEl(null)}
+                    sx={{ color: '#dce2f7', py: 1.25 }}
+                  >
+                    <ListItemIcon sx={{ color: 'inherit', minWidth: 36 }}>
+                      <Activity size={18} />
+                    </ListItemIcon>
+                    <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Charts</ListItemText>
+                  </MenuItem>
+                  <MenuItem
+                    component={Link}
+                    to="/backtest"
+                    onClick={() => setMobilePublicNavEl(null)}
+                    sx={{ color: '#dce2f7', py: 1.25 }}
+                  >
+                    <ListItemIcon sx={{ color: 'inherit', minWidth: 36 }}>
+                      <FlaskConical size={18} />
+                    </ListItemIcon>
+                    <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Backtest</ListItemText>
+                  </MenuItem>
+                  <Divider sx={{ borderColor: 'rgba(148,163,184,0.15)', my: 0.5 }} />
+                  <MenuItem
+                    onClick={() => {
+                      setMobilePublicNavEl(null);
+                      onOpenAuth?.('/dashboard');
+                    }}
+                    sx={{ color: '#dce2f7', py: 1.25 }}
+                  >
+                    <ListItemIcon sx={{ color: 'inherit', minWidth: 36 }}>
+                      <LogIn size={18} />
+                    </ListItemIcon>
+                    <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Sign In</ListItemText>
+                  </MenuItem>
+                </Menu>
+              </div>
+            )}
+
             {user ? (
               <>
                 <IconButton size="small" onClick={(e) => setNavMenuEl(e.currentTarget)} aria-label="Account menu">
@@ -214,8 +305,42 @@ const Home: React.FC<HomeProps> = ({
                   onClose={() => setNavMenuEl(null)}
                   anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
                   transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-                  PaperProps={{ sx: { minWidth: 200 } }}
+                  PaperProps={{ sx: { minWidth: 200, bgcolor: '#191f2f', border: '1px solid rgba(67, 70, 85, 0.35)' } }}
                 >
+                  <MenuItem
+                    component={Link}
+                    to="/docs"
+                    onClick={() => setNavMenuEl(null)}
+                    sx={{ display: { xs: 'flex', md: 'none' }, color: '#dce2f7', py: 1.25 }}
+                  >
+                    <ListItemIcon sx={{ color: 'inherit', minWidth: 36 }}>
+                      <BookOpen size={18} />
+                    </ListItemIcon>
+                    <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Docs</ListItemText>
+                  </MenuItem>
+                  <MenuItem
+                    component={Link}
+                    to="/charts/system"
+                    onClick={() => setNavMenuEl(null)}
+                    sx={{ display: { xs: 'flex', md: 'none' }, color: '#dce2f7', py: 1.25 }}
+                  >
+                    <ListItemIcon sx={{ color: 'inherit', minWidth: 36 }}>
+                      <Activity size={18} />
+                    </ListItemIcon>
+                    <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Charts</ListItemText>
+                  </MenuItem>
+                  <MenuItem
+                    component={Link}
+                    to="/backtest"
+                    onClick={() => setNavMenuEl(null)}
+                    sx={{ display: { xs: 'flex', md: 'none' }, color: '#dce2f7', py: 1.25 }}
+                  >
+                    <ListItemIcon sx={{ color: 'inherit', minWidth: 36 }}>
+                      <FlaskConical size={18} />
+                    </ListItemIcon>
+                    <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Backtest</ListItemText>
+                  </MenuItem>
+                  <Divider sx={{ display: { xs: 'block', md: 'none' }, borderColor: 'rgba(148,163,184,0.15)', my: 0.5 }} />
                   <MenuItem onClick={() => { setNavMenuEl(null); navigate('/signals'); }}>
                     <ListItemIcon><Binary size={16} /></ListItemIcon>
                     <ListItemText>Signals</ListItemText>
@@ -254,11 +379,12 @@ const Home: React.FC<HomeProps> = ({
               <button
                 type="button"
                 onClick={primaryCta}
-                className="rounded-xl bg-[#b4c5ff] px-6 py-2.5 font-black text-[#002a78] transition-all hover:shadow-[0_0_20px_-5px_rgba(180,197,255,0.4)] active:scale-95"
+                className="hidden rounded-xl bg-[#b4c5ff] px-6 py-2.5 font-headline font-medium text-[#002a78] transition-all hover:shadow-[0_0_20px_-5px_rgba(180,197,255,0.4)] active:scale-95 md:inline-flex"
               >
                 {hasFreeAccess ? 'Dashboard' : isAuthenticated ? 'Profile' : 'Get Started'}
               </button>
             )}
+            </div>
           </div>
         </div>
       </nav>
@@ -273,12 +399,9 @@ const Home: React.FC<HomeProps> = ({
                     <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-secondary opacity-75" />
                     <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-secondary" />
                   </div>
-                  <span className="text-[11px] font-black uppercase tracking-[0.2em] text-secondary">Live Signal</span>
-                  <span className="h-3 w-px bg-secondary/30" />
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Updated on dashboard</span>
+                  <span className="text-[7px] font-black uppercase tracking-[0.2em] text-secondary">Live Signal</span>
                 </div>
                 <div className="flex items-center gap-3 rounded-lg border border-outline-variant/20 bg-surface-container-high/40 px-4 py-2">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-outline">Current Stance</span>
                   <div className="flex items-center gap-2" title={stanceUi.title}>
                     <div className={clsx('h-1.5 w-1.5 rounded-full', stanceStyle.dot)} />
                     <span className={clsx('text-xs font-black tracking-tight', stanceStyle.text)}>{stanceUi.label}</span>
@@ -286,9 +409,14 @@ const Home: React.FC<HomeProps> = ({
                 </div>
               </div>
 
-              <h1 className="font-headline mb-8 text-4xl font-black leading-[1.1] tracking-tighter text-shadow-sm md:text-6xl">
-                Your Bitcoin <br />
-                <span className="bg-gradient-to-r from-[#2563EB] via-[#60A5FA] to-[#2DD4BF] bg-clip-text pr-2 italic text-transparent">
+              <h1 className="font-headline mb-8 text-5xl font-black leading-[1.1] tracking-tighter text-shadow-sm md:text-7xl">
+                <span className="bg-gradient-to-r from-[#F5F5F5] via-[#FAB81F] to-[#FAB81F] bg-clip-text pr-2 italic text-transparent">
+                  Your Bitcoin
+                </span>
+                
+                 <br />
+                 <span className="bg-gradient-to-r from-[#F0FFEC] via-[#C5F4F6] to-[#5EFFAF] bg-clip-text pr-2 italic text-transparent">
+
                   Accumulation
                 </span>
                 <br />
@@ -364,7 +492,7 @@ const Home: React.FC<HomeProps> = ({
             <FeatureCard
               icon="trending_up"
               title="Optimize BTC Accumulation"
-              body="Use CoinStrat to optimize your Dollar-Cost Averaging strategies, getting more SATs per dollar."
+              body="Use CoinStrat to optimize your Dollar-Cost Averaging strategies, getting more SATs for your dollar."
               hover="tertiary"
             />
           </div>
@@ -381,17 +509,17 @@ const Home: React.FC<HomeProps> = ({
                 <StepRow
                   n="01"
                   title="Track On-Chain Activity"
-                  body="Track on-chain activity, liquidity, macro stress, and Bitcoin market conditions in one place instead of piecing the puzzle together."
+                  body="Track on-chain activity, liquidity and macro conditions in one place instead of piecing the puzzle together."
                 />
                 <StepRow
                   n="02"
                   title="Score the Setup"
-                  body="Turn raw data into a simple read on whether conditions are supportive, neutral, or working against Bitcoin accumulation."
+                  body="Turn raw data into a simple read on whether conditions are supportive, neutral, or risky for Bitcoin accumulation."
                 />
                 <StepRow
                   n="03"
-                  title="Act With Discipline"
-                  body="Translate signals into a practical accumulation stance so you know when to pause, buy, or accelerate"
+                  title="Act with Discipline"
+                  body="Translate signals into a practical strategy so you know when to pause, buy, or accelerate"
                 />
               </div>
             </div>
@@ -406,7 +534,7 @@ const Home: React.FC<HomeProps> = ({
           <div className="mb-16 text-center">
             <h3 className="font-headline mb-4 text-4xl font-black tracking-tight md:text-5xl">The Two Core Layers</h3>
             <p className="mx-auto max-w-xl text-on-surface-variant">
-              Different market conditions require different levels of conviction. We split our strategy into two distinct signal layers.
+              Different market conditions require different levels of conviction. <br /> We split our strategy into two distinct signal layers.
             </p>
           </div>
           <div className="grid gap-8 md:grid-cols-2">
@@ -435,7 +563,7 @@ const Home: React.FC<HomeProps> = ({
               </div>
               <h4 className="font-headline mb-4 text-3xl font-black text-secondary">MACRO Acceleration</h4>
               <p className="mb-8 text-lg leading-relaxed text-on-surface-variant">
-                It triggers during when liquidity and busines cycle align for rapid expansion.
+                It triggers when liquidity and busines cycle align for rapid expansion.
               </p>
               <ul className="mb-8 space-y-4">
                 <li className="flex items-center gap-3 text-sm font-bold uppercase tracking-widest text-on-surface/70">
@@ -565,9 +693,9 @@ const HomeEmailSignup: React.FC = () => {
           </div>
           <div className="hidden md:block">
             <div className="flex flex-col gap-4">
-              <GlassBullet tone="secondary" text="On-chain liquidity flow analysis" />
-              <GlassBullet tone="primary" text="Macro-economic stress indicators" />
-              <GlassBullet tone="tertiary" text="Weekly accumulation heatmaps" />
+              <GlassBullet tone="secondary" text="On-chain liquidity and valuation analysis" />
+              <GlassBullet tone="primary" text="Macro-economic indicators" />
+              <GlassBullet tone="tertiary" text="Weekly accumulation signal updates" />
             </div>
           </div>
         </div>
