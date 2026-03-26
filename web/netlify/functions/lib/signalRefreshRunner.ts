@@ -1,4 +1,10 @@
-import { refreshSignals, loadMergedBtcSeries, fetchMVRVFullHistory, type SignalRow } from './compute';
+import {
+  refreshSignals,
+  loadMergedBtcSeries,
+  fetchMVRVFullHistory,
+  fetchBGeometrics,
+  type SignalRow,
+} from './compute';
 import { persistSignalAlertChanges, detectAlertChanges } from './signalAlerts';
 import { signalsStore } from './store';
 import { evaluateActiveStrategies } from './strategyAlerts';
@@ -26,6 +32,13 @@ export type SignalRefreshResult =
   | {
     ok: true;
     mode: 'patch_mvrv';
+    patched: number;
+    total: number;
+    cached_at: string;
+  }
+  | {
+    ok: true;
+    mode: 'patch_sth_lth_rp';
     patched: number;
     total: number;
     cached_at: string;
@@ -186,6 +199,95 @@ export async function patchMVRVInCache(): Promise<SignalRefreshResult> {
   return {
     ok: true,
     mode: 'patch_mvrv',
+    patched,
+    total: rows.length,
+    cached_at: cachedAt,
+  };
+}
+
+/**
+ * Back-fill STH / LTH realized price for every cached row from BGeometrics full JSON
+ * (same source as incremental refresh), forward-filled along the cache timeline.
+ *
+ * Why this exists: incremental `refreshSignals` only *appends* new dates; it never
+ * rewrites older rows. When `STH_REALIZED_PRICE` / `LTH_REALIZED_PRICE` were added
+ * after the cache was seeded, historical dates stay null in the blob — Strategy
+ * Builder reads `signals_latest` via series-detail and charts look truncated.
+ * This patch is the fast fix (two HTTP fetches), analogous to `patchMVRVInCache`.
+ */
+export async function patchSthLthRealizedPriceInCache(): Promise<SignalRefreshResult> {
+  const store = signalsStore();
+  const cached = await loadCachedSignals();
+  const cachedData = cached?.data ?? [];
+
+  if (cachedData.length === 0) {
+    throw new Error(
+      'Cache is empty — seed the cache first before patching STH/LTH realized price.',
+    );
+  }
+
+  const [sthSeries, lthSeries] = await Promise.all([
+    fetchBGeometrics('sth_realized_price'),
+    fetchBGeometrics('lth_realized_price'),
+  ]);
+
+  const dates = cachedData.map((r) => r.Date);
+
+  const forwardFill = (
+    orderedDates: string[],
+    series: { date: string; value: number }[],
+  ): Map<string, number> => {
+    const pointMap = new Map(series.map((p) => [p.date, p.value]));
+    let last = NaN;
+    const out = new Map<string, number>();
+    for (const d of orderedDates) {
+      const v = pointMap.get(d);
+      if (v !== undefined && Number.isFinite(v)) last = v;
+      if (Number.isFinite(last)) out.set(d, last);
+    }
+    return out;
+  };
+
+  const sthFilled = forwardFill(dates, sthSeries);
+  const lthFilled = forwardFill(dates, lthSeries);
+
+  let patched = 0;
+  const rows = cachedData.map((row) => {
+    const sth = sthFilled.get(row.Date);
+    const lth = lthFilled.get(row.Date);
+    const sthOk =
+      typeof row.STH_REALIZED_PRICE === 'number' && Number.isFinite(row.STH_REALIZED_PRICE);
+    const lthOk =
+      typeof row.LTH_REALIZED_PRICE === 'number' && Number.isFinite(row.LTH_REALIZED_PRICE);
+
+    let next = row;
+    let changed = false;
+    if (sth !== undefined && !sthOk) {
+      next = { ...next, STH_REALIZED_PRICE: sth };
+      changed = true;
+    }
+    if (lth !== undefined && !lthOk) {
+      next = { ...next, LTH_REALIZED_PRICE: lth };
+      changed = true;
+    }
+    if (changed) patched += 1;
+    return next;
+  });
+
+  const cachedAt = new Date().toISOString();
+  await store.setJSON('signals_latest', {
+    timestamp: Date.now(),
+    count: rows.length,
+    data: rows,
+  });
+
+  console.log(
+    `[signal-refresh] STH/LTH realized price patch complete — updated ${patched} of ${rows.length} rows.`,
+  );
+
+  return {
+    ok: true,
+    mode: 'patch_sth_lth_rp',
     patched,
     total: rows.length,
     cached_at: cachedAt,

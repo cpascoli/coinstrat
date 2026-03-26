@@ -197,6 +197,8 @@ const Admin: React.FC = () => {
   const [refreshResult, setRefreshResult] = useState<string | null>(null);
   const [rebuilding, setRebuilding] = useState(false);
   const [patchingMvrv, setPatchingMvrv] = useState(false);
+  const [patchingSthLthRp, setPatchingSthLthRp] = useState(false);
+  const signalPatchBusy = patchingMvrv || patchingSthLthRp;
   const [scheduledAlertsLoading, setScheduledAlertsLoading] = useState(true);
   const [scheduledAlertsRunning, setScheduledAlertsRunning] = useState(false);
   const [scheduledAlertsStatus, setScheduledAlertsStatus] = useState<ScheduledAlertsStatus | null>(null);
@@ -534,6 +536,44 @@ const Admin: React.FC = () => {
     }
   };
 
+  const handlePatchSthLthRp = async () => {
+    if (!window.confirm(
+      'This will fetch full STH and LTH realized price history from BGeometrics and fill every cached row where those values are missing (same source as scheduled refreshes).\n\nContinue?',
+    )) return;
+
+    setPatchingSthLthRp(true);
+    setRefreshResult(null);
+    setError(null);
+
+    try {
+      const res = await fetch('/api/v1/signals/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ mode: 'patch_sth_lth_rp' }),
+      });
+      const text = await res.text();
+      const parsed = parseJsonOrApiFailure(res.status, text);
+      if (!parsed.ok) {
+        setError(parsed.message);
+        return;
+      }
+      const data = parsed.data as { error?: string; patched?: number; total?: number; cached_at?: string | null };
+      if (!res.ok) {
+        setError(data.error ?? `Patch STH/LTH realized price failed (HTTP ${res.status})`);
+      } else {
+        setRefreshResult(
+          `STH/LTH realized price patched — ${data.patched ?? '?'} rows updated out of ${data.total ?? '?'} total.`,
+        );
+        setCacheInfo((prev) => ({ ...prev, cachedAt: data.cached_at ?? prev.cachedAt, stale: false }));
+      }
+      await fetchCacheInfo();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setPatchingSthLthRp(false);
+    }
+  };
+
   const handleRunScheduledAlerts = async () => {
     setScheduledAlertsRunning(true);
     setScheduledAlertsResult(null);
@@ -718,7 +758,7 @@ const Admin: React.FC = () => {
             <Button
               variant="outlined"
               size="small"
-              disabled={rebuilding || refreshing || patchingMvrv}
+              disabled={rebuilding || refreshing || signalPatchBusy}
               onClick={handlePatchMvrv}
               startIcon={patchingMvrv ? <CircularProgress size={14} color="inherit" /> : <RefreshCw size={14} />}
               sx={{ textTransform: 'none', fontWeight: 700 }}
@@ -728,7 +768,17 @@ const Admin: React.FC = () => {
             <Button
               variant="outlined"
               size="small"
-              disabled={rebuilding || refreshing || patchingMvrv}
+              disabled={rebuilding || refreshing || signalPatchBusy}
+              onClick={handlePatchSthLthRp}
+              startIcon={patchingSthLthRp ? <CircularProgress size={14} color="inherit" /> : <RefreshCw size={14} />}
+              sx={{ textTransform: 'none', fontWeight: 700 }}
+            >
+              {patchingSthLthRp ? 'Patching…' : 'Patch STH/LTH RP'}
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              disabled={rebuilding || refreshing || signalPatchBusy}
               onClick={handleRebuild}
               startIcon={rebuilding ? <CircularProgress size={14} color="inherit" /> : <RefreshCw size={14} />}
               sx={{ textTransform: 'none', fontWeight: 700 }}
@@ -738,7 +788,7 @@ const Admin: React.FC = () => {
             <Button
               variant="contained"
               size="small"
-              disabled={refreshing || rebuilding || patchingMvrv}
+              disabled={refreshing || rebuilding || signalPatchBusy}
               onClick={handleRefresh}
               startIcon={refreshing ? <CircularProgress size={14} color="inherit" /> : <RefreshCw size={14} />}
               sx={{ textTransform: 'none', fontWeight: 700 }}

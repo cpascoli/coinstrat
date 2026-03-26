@@ -154,7 +154,7 @@ export async function fetchMVRVFullHistory(): Promise<DataPoint[]> {
   return fetchMVRVTail(true);
 }
 
-async function fetchBGeometrics(file: string): Promise<DataPoint[]> {
+export async function fetchBGeometrics(file: string): Promise<DataPoint[]> {
   const url = `https://charts.bgeometrics.com/files/${file}.json`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`BGeometrics ${file}: HTTP ${res.status}`);

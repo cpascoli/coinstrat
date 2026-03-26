@@ -673,7 +673,7 @@ const HomeEmailSignup: React.FC = () => {
               <form className="flex flex-col gap-3 sm:flex-row" onSubmit={handleSubmit}>
                 <input
                   className="flex-grow rounded-lg border border-outline-variant/20 bg-surface-container-lowest/50 px-6 py-4 text-on-surface outline-none transition-all placeholder:text-on-surface-variant/70 focus:ring-2 focus:ring-primary"
-                  placeholder="Enter your institutional email"
+                  placeholder="Enter your email"
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}

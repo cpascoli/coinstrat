@@ -1,6 +1,12 @@
 import type { Handler } from '@netlify/functions';
 import { authorizeAdminOrCron } from './lib/auth';
-import { runSignalRefresh, seedSignalCache, patchBtcusdInCache, patchMVRVInCache } from './lib/signalRefreshRunner';
+import {
+  runSignalRefresh,
+  seedSignalCache,
+  patchBtcusdInCache,
+  patchMVRVInCache,
+  patchSthLthRealizedPriceInCache,
+} from './lib/signalRefreshRunner';
 
 /**
  * Refresh the signal cache.  Modes (determined by POST body):
@@ -18,6 +24,10 @@ import { runSignalRefresh, seedSignalCache, patchBtcusdInCache, patchMVRVInCache
  *  3. Body { "mode": "patch_mvrv" } → fast MVRV back-fill.  Fetches the full
  *     blockchain.info MVRV history (timespan=all, sparse), forward-fills gaps,
  *     and writes values for every cached row where MVRV was null.
+ *
+ *  3b. Body { "mode": "patch_sth_lth_rp" } → back-fill STH/LTH realized price
+ *      from BGeometrics full JSON for every cached row where those fields are
+ *      null (fixes historical gaps when the series was added after seeding).
  *
  *  4. Body { "mode": "rebuild" } → full recompute.  Re-fetches all APIs
  *     with no date filter and rewrites the entire cache.  WARNING: this
@@ -71,6 +81,11 @@ export const handler: Handler = async (event) => {
     if (mode === 'patch_mvrv') {
       // ── Mode 3: fast MVRV back-fill ────────────────────────────────
       const result = await patchMVRVInCache();
+      return { statusCode: 200, body: JSON.stringify(result) };
+    }
+
+    if (mode === 'patch_sth_lth_rp') {
+      const result = await patchSthLthRealizedPriceInCache();
       return { statusCode: 200, body: JSON.stringify(result) };
     }
 
