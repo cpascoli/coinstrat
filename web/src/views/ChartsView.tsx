@@ -415,24 +415,46 @@ const ChartsView: React.FC<Props> = ({ data }) => {
     });
   }, [chartData]);
 
-  // Euphoria Exhaustion spans: 0 = normal, 1 = armed (euphoria detected), 2 = exhausted
-  const sipSpans = useMemo(() => {
+  // SIP chart only: background shading (not raw engine flags). 0 = no fill (pre‑first‑arm), 1 = green, 2 = red.
+  // Red latches when SIP_EXHAUSTED first fires and stays until the next SIP_EUPHORIA_FLAG rising edge (new arm).
+  // After the first arm, we never use state 0 — only green or red so the plot is never “plain” again.
+  const sipChartBackgroundSpans = useMemo(() => {
     const spans: { x1: number; x2: number; value: 0 | 1 | 2 }[] = [];
     if (!chartData.length) return spans;
-    const mapState = (d: any): 0 | 1 | 2 => {
-      if (Number(d.SIP_EXHAUSTED) === 1) return 2;
-      if (Number(d.SIP_EUPHORIA_FLAG) === 1) return 1;
-      return 0;
-    };
-    let current = mapState(chartData[0]);
+
+    let holdRedUntilNextArm = false;
+    let everArmed = false;
+    const visual: (0 | 1 | 2)[] = [];
+
+    for (let i = 0; i < chartData.length; i++) {
+      const d = chartData[i] as any;
+      const armed = Number(d.SIP_EUPHORIA_FLAG) === 1;
+      const exhausted = Number(d.SIP_EXHAUSTED) === 1;
+      const prev = i > 0 ? (chartData[i - 1] as any) : null;
+      const prevArmed = prev ? Number(prev.SIP_EUPHORIA_FLAG) === 1 : false;
+      const prevExhausted = prev ? Number(prev.SIP_EXHAUSTED) === 1 : false;
+
+      if (exhausted && !prevExhausted) holdRedUntilNextArm = true;
+      if (armed && !prevArmed) holdRedUntilNextArm = false;
+
+      let v: 0 | 1 | 2;
+      if (!everArmed) v = armed ? 1 : 0;
+      else if (holdRedUntilNextArm) v = 2;
+      else v = 1;
+
+      if (armed) everArmed = true;
+      visual.push(v);
+    }
+
+    let current = visual[0];
     let startTs = (chartData[0] as any).ts;
     for (let i = 1; i < chartData.length; i++) {
-      const v = mapState(chartData[i]);
+      const vi = visual[i];
       const ts = (chartData[i] as any).ts;
-      if (v !== current) {
+      if (vi !== current) {
         const prevTs = (chartData[i - 1] as any).ts;
         if (prevTs > startTs) spans.push({ x1: startTs, x2: prevTs, value: current });
-        current = v;
+        current = vi;
         startTs = ts;
       }
     }
@@ -1001,6 +1023,8 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             <br />
             Used in the Euphoria Exhaustion exit logic: when SIP stays above 95% for 14+ days the exit is armed;
             if SIP then drops below 90% and fails to reclaim 95% within 45 days, exhaustion is confirmed.
+            <br />
+            Chart shading only: red stays on from the first exhaustion day until the next euphoria‑arm day (rising edge of SIP_EUPHORIA_FLAG); after the first arm, the background is only green or red (never unshaded).
           </Typography>
         </Box>
 
@@ -1020,7 +1044,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
               <YAxis yAxisId="sip" domain={[0, 100]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => (typeof v === 'number' ? `${v}%` : '')} />
               <YAxis yAxisId="btc" orientation="right" scale="log" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => { if (typeof v !== 'number' || isNaN(v)) return ''; return v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v.toFixed(0); }} />
-              {sipSpans.filter(s => s.value > 0).map((s, i) => (
+              {sipChartBackgroundSpans.filter((s) => s.value > 0).map((s, i) => (
                 <ReferenceArea
                   key={`sip-span-${i}`}
                   yAxisId="sip"

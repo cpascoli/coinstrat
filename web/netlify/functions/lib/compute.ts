@@ -503,9 +503,7 @@ export async function refreshSignals(
       }
     }
 
-    d.SIP_EUPHORIA_FLAG = euphoriaFlag ? 1 : 0;
-    d.SIP_EXHAUSTED = sipExhausted ? 1 : 0;
-    d.SIP_OBS_DAYS = observationStart >= 0 ? i - observationStart : 0;
+    const sipExhaustedBeforeCore = sipExhausted;
 
     if (coreState === 0) {
       if (val >= 3 || (val >= 1 && pr === 1)) {
@@ -517,6 +515,10 @@ export async function refreshSignals(
       if ((pr === 0 && val <= 1) || sipExhausted) coreState = 0;
     }
     d.CORE_ON = coreState;
+
+    d.SIP_EUPHORIA_FLAG = euphoriaFlag ? 1 : 0;
+    d.SIP_EXHAUSTED = sipExhausted || sipExhaustedBeforeCore ? 1 : 0;
+    d.SIP_OBS_DAYS = observationStart >= 0 ? i - observationStart : 0;
 
     const ab = d.LIQ_SCORE + d.CYCLE_SCORE;
     d.AB_SCORE = ab;

@@ -496,10 +496,9 @@ export async function computeAllSignals(): Promise<SignalData[]> {
       }
     }
 
-    // Expose diagnostic fields for the UI
-    d.SIP_EUPHORIA_FLAG = euphoriaFlag ? 1 : 0;
-    d.SIP_EXHAUSTED = sipExhausted ? 1 : 0;
-    d.SIP_OBS_DAYS = observationStart >= 0 ? (i - observationStart) : 0;
+    // Snapshot before CORE: entry resets sipExhausted in memory, but the row should
+    // still record exhaustion on the day it fired (charts / history); otherwise green→blue with no red.
+    const sipExhaustedBeforeCore = sipExhausted;
 
     // --- CORE state machine ---
 
@@ -537,6 +536,11 @@ export async function computeAllSignals(): Promise<SignalData[]> {
       }
     }
     d.CORE_ON = coreState;
+
+    // SIP diagnostics after CORE (euphoria flags reflect post-entry state)
+    d.SIP_EUPHORIA_FLAG = euphoriaFlag ? 1 : 0;
+    d.SIP_EXHAUSTED = sipExhausted || sipExhaustedBeforeCore ? 1 : 0;
+    d.SIP_OBS_DAYS = observationStart >= 0 ? (i - observationStart) : 0;
 
     const abScore = d.LIQ_SCORE + d.CYCLE_SCORE;
     d.MACRO_ON = (abScore >= 3 && dxy >= 1) ? 1 : 0;
