@@ -14,7 +14,7 @@ interface Props {
 }
 
 type RangeKey = 'all' | '10y' | '5y' | '2y' | '1y';
-type ChartsSection = 'system' | 'valuation' | 'liquidity' | 'business' | 'global';
+type ChartsSection = 'system' | 'valuation' | 'liquidity' | 'business' | 'global' | 'usd';
 
 type RegimeKey = 'LIQ_SCORE' | 'CYCLE_SCORE';
 type RegimeSpan = { x1: number; x2: number; value: 0 | 1 | 2 };
@@ -236,7 +236,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
   const section: ChartsSection = useMemo(() => {
     const m = location.pathname.match(/^\/charts\/([^/]+)/);
     const seg = (m?.[1] ?? 'system').toLowerCase();
-    if (seg === 'system' || seg === 'valuation' || seg === 'liquidity' || seg === 'business' || seg === 'global') return seg as ChartsSection;
+    if (seg === 'system' || seg === 'valuation' || seg === 'liquidity' || seg === 'business' || seg === 'global' || seg === 'usd') return seg as ChartsSection;
     return 'system';
   }, [location.pathname]);
 
@@ -248,7 +248,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
     }
     const m = location.pathname.match(/^\/charts\/([^/]+)/);
     const seg = (m?.[1] ?? '').toLowerCase();
-    if (seg && seg !== 'system' && seg !== 'valuation' && seg !== 'liquidity' && seg !== 'business' && seg !== 'global') {
+    if (seg && seg !== 'system' && seg !== 'valuation' && seg !== 'liquidity' && seg !== 'business' && seg !== 'global' && seg !== 'usd') {
       navigate('/charts/system', { replace: true });
     }
   }, [location.pathname, navigate]);
@@ -494,6 +494,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           <Tab value="liquidity" label="Liquidity" sx={{ minHeight: 40 }} />
           <Tab value="global" label="Global Liq." sx={{ minHeight: 40 }} />
           <Tab value="business" label="Business Cycle" sx={{ minHeight: 40 }} />
+          <Tab value="usd" label="USD" sx={{ minHeight: 40 }} />
         </Tabs>
 
         <ToggleButtonGroup
@@ -519,12 +520,11 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             System State (CORE + MACRO)
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            BTCUSD shaded by the engine’s state machine. 
+            CORE is driven by VAL_SCORE + PRICE_REGIME
+            <br/>
+            MACRO is driven by (LIQ_SCORE + BIZ_CYCLE_SCORE) with persistence-filtered DXY_SCORE as a gate. 
             <br />
-            CORE is driven by VAL_SCORE + PRICE_REGIME with persistence-filtered DXY_SCORE as a gate;
-            MACRO is driven by (LIQ_SCORE + CYCLE_SCORE) with persistence-filtered DXY_SCORE as a gate. 
-            <br />
-            Both PRICE_REGIME and DXY_SCORE use a 20/30-day persistence filter. ACCUM = CORE (sole gatekeeper); MACRO only modifies DCA intensity (3×) when CORE is ON.
+            Both PRICE_REGIME and DXY_SCORE use a 20/30-day persistence filter. 
           </Typography>
         </Box>
 
@@ -766,7 +766,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             BTC Valuation (VAL_SCORE)
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            BTCUSD shaded by the 4-tier VAL_SCORE and plotted with the MVRV ratio (right axis). 
+            BTCUSD shaded by the 4-tier VAL_SCORE. 
             <br />
             Score 3 = extreme (MVRV &lt; 1 + LTH SOPR &lt; 1); Score 2 = strong (deep value or capitulation);
             Score 1 = fair/neutral (MVRV 1.8–3.5); Score 0 = euphoria (MVRV ≥ 3.5).
@@ -781,12 +781,11 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           <Chip size="small" variant="outlined" label="Score 1 — Fair" sx={{ borderColor: '#94a3b8', color: '#cbd5e1' }} />
           <Chip size="small" variant="outlined" label="Score 0 — Euphoria" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
           <Chip size="small" variant="outlined" label="BTCUSD" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
-          <Chip size="small" variant="outlined" label="MVRV" sx={{ borderColor: '#fbbf24', color: '#fde68a' }} />
         </Stack>
 
         <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart key={`mvrv-${range}`} data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+            <LineChart key={`val-score-${range}`} data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
               {mvrvSpans.map((s, i) => {
                 const c = mvrvColor(s.value);
                 return (
@@ -807,11 +806,51 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
               <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
               <YAxis yAxisId="btc" scale="log" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
-              <YAxis yAxisId="mvrv" orientation="right" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => (typeof v === 'number' ? v.toFixed(2) : '')} />
               <Tooltip content={<CustomTooltip />} />
               {renderChartBrush()}
               <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={2} dot={false} isAnimationActive={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Box>
+      </Paper>
+      )}
+
+      {/* MVRV ratio: dual-axis with key valuation thresholds */}
+      {section === 'valuation' && (
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Box sx={{ mb: 2.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            Market Value to Realized Value Ratio (MVRV)
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            MVRV = Market Cap / Realized Cap.
+            <br />
+            Reference lines mark CoinStrat valuation bands: 1.0 (deep value / cycle floor context), 1.8 (fair zone lower bound), 3.5 (euphoria threshold).
+          </Typography>
+        </Box>
+
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="MVRV" sx={{ borderColor: '#fbbf24', color: '#fde68a' }} />
+          <Chip size="small" variant="outlined" label="BTCUSD (right, log)" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
+          <Chip size="small" variant="outlined" label="MVRV = 1.0" sx={{ borderColor: '#94a3b8', color: '#cbd5e1' }} />
+          <Chip size="small" variant="outlined" label="MVRV = 1.8" sx={{ borderColor: '#94a3b8', color: '#cbd5e1' }} />
+          <Chip size="small" variant="outlined" label="MVRV = 3.5" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
+        </Stack>
+
+        <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart key={`mvrv-ratio-${range}`} data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis yAxisId="mvrv" domain={['auto', 'auto']} allowDataOverflow tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => (typeof v === 'number' ? v.toFixed(2) : '')} />
+              <YAxis yAxisId="btc" orientation="right" scale="log" domain={[btcDomain.y1, btcDomain.y2]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
+              <ReferenceLine yAxisId="mvrv" y={1} stroke="#94a3b8" strokeDasharray="6 3" strokeWidth={1.5} label={{ value: '1.0', fill: '#cbd5e1', fontSize: 10, position: 'right' }} />
+              <ReferenceLine yAxisId="mvrv" y={1.8} stroke="#94a3b8" strokeDasharray="6 3" strokeWidth={1.5} label={{ value: '1.8', fill: '#cbd5e1', fontSize: 10, position: 'right' }} />
+              <ReferenceLine yAxisId="mvrv" y={3.5} stroke="#ef4444" strokeDasharray="4 4" strokeWidth={1} label={{ value: '3.5', fill: '#fca5a5', fontSize: 10, position: 'right' }} />
+              <Tooltip content={<CustomTooltip />} />
+              {renderChartBrush()}
               <Line yAxisId="mvrv" type="monotone" dataKey="MVRV" name="MVRV" stroke="#fbbf24" strokeWidth={2} dot={false} isAnimationActive={false} />
+              <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.5} dot={false} isAnimationActive={false} opacity={0.5} />
             </LineChart>
           </ResponsiveContainer>
         </Box>
@@ -913,51 +952,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       </Paper>
       )}
 
-      {/* Net Unrealized Profit / Loss (NUPL) */}
-      {section === 'valuation' && (
-      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
-        <Box sx={{ mb: 2.5 }}>
-          <Typography variant="h6" sx={{ fontWeight: 800 }}>
-            Net Unrealized Profit / Loss (NUPL)
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            NUPL = (Market Cap − Realized Cap) / Market Cap. 
-            <br />
-            Measures collective investor sentiment: high values (&gt; 0.75) signal euphoria / potential tops;
-            low or negative values (&lt; 0) signal capitulation / potential bottoms. 
-            <br />
-            NUPL is a useful complement to MVRV for gauging market-cycle positioning.
-          </Typography>
-        </Box>
-
-        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
-          <Chip size="small" variant="outlined" label="NUPL ≥ 0 (profit)" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
-          <Chip size="small" variant="outlined" label="NUPL < 0 (loss)" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
-          <Chip size="small" variant="outlined" label="NUPL = 0 (break-even)" sx={{ borderColor: '#94a3b8', color: '#cbd5e1' }} />
-          <Chip size="small" variant="outlined" label="BTCUSD (right, log)" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
-        </Stack>
-
-        <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart key={`nupl-${range}`} data={nuplChartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
-              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-              <YAxis yAxisId="nupl" domain={[-1, 1]} allowDataOverflow tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => (typeof v === 'number' ? v.toFixed(2) : '')} />
-              <YAxis yAxisId="btc" orientation="right" scale="log" domain={[btcDomain.y1, btcDomain.y2]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
-              <ReferenceLine yAxisId="nupl" y={0} stroke="#94a3b8" strokeDasharray="6 3" strokeWidth={1.5} />
-              <ReferenceLine yAxisId="nupl" y={0.75} stroke="#ef4444" strokeDasharray="4 4" strokeWidth={1} label={{ value: 'Euphoria', fill: '#fca5a5', fontSize: 10, position: 'right' }} />
-              <Tooltip content={<CustomTooltip />} />
-              {renderChartBrush()}
-              <Line yAxisId="nupl" type="monotone" dataKey="NUPL_POS" name="NUPL (profit)" stroke="#22c55e" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls={false} />
-              <Line yAxisId="nupl" type="monotone" dataKey="NUPL_NEG" name="NUPL (loss)" stroke="#ef4444" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls={false} />
-              <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.5} dot={false} isAnimationActive={false} opacity={0.5} />
-            </LineChart>
-          </ResponsiveContainer>
-        </Box>
-      </Paper>
-      )}
-
-      {/* Supply in Profit (SIP) — Euphoria Exhaustion exit logic */}
+      {/* Holder realized prices (STH / LTH cost basis vs spot) */}
       {section === 'valuation' && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
@@ -1044,6 +1039,50 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               <Tooltip content={<CustomTooltip />} />
               {renderChartBrush()}
               <Line yAxisId="sip" type="monotone" dataKey="SIP" name="Supply in Profit (%)" stroke="#facc15" strokeWidth={2} dot={false} isAnimationActive={false} />
+              <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.5} dot={false} isAnimationActive={false} opacity={0.5} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Box>
+      </Paper>
+      )}
+
+      {/* Net Unrealized Profit / Loss (NUPL) */}
+      {section === 'valuation' && (
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Box sx={{ mb: 2.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            Net Unrealized Profit / Loss (NUPL)
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            NUPL = (Market Cap − Realized Cap) / Market Cap. 
+            <br />
+            Measures collective investor sentiment: high values (&gt; 0.75) signal euphoria / potential tops;
+            low or negative values (&lt; 0) signal capitulation / potential bottoms. 
+            <br />
+            NUPL is a useful complement to MVRV for gauging market-cycle positioning.
+          </Typography>
+        </Box>
+
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="NUPL ≥ 0 (profit)" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="NUPL < 0 (loss)" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
+          <Chip size="small" variant="outlined" label="NUPL = 0 (break-even)" sx={{ borderColor: '#94a3b8', color: '#cbd5e1' }} />
+          <Chip size="small" variant="outlined" label="BTCUSD (right, log)" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
+        </Stack>
+
+        <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart key={`nupl-${range}`} data={nuplChartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis yAxisId="nupl" domain={[-1, 1]} allowDataOverflow tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => (typeof v === 'number' ? v.toFixed(2) : '')} />
+              <YAxis yAxisId="btc" orientation="right" scale="log" domain={[btcDomain.y1, btcDomain.y2]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
+              <ReferenceLine yAxisId="nupl" y={0} stroke="#94a3b8" strokeDasharray="6 3" strokeWidth={1.5} />
+              <ReferenceLine yAxisId="nupl" y={0.75} stroke="#ef4444" strokeDasharray="4 4" strokeWidth={1} label={{ value: 'Euphoria', fill: '#fca5a5', fontSize: 10, position: 'right' }} />
+              <Tooltip content={<CustomTooltip />} />
+              {renderChartBrush()}
+              <Line yAxisId="nupl" type="monotone" dataKey="NUPL_POS" name="NUPL (profit)" stroke="#22c55e" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls={false} />
+              <Line yAxisId="nupl" type="monotone" dataKey="NUPL_NEG" name="NUPL (loss)" stroke="#ef4444" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls={false} />
               <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.5} dot={false} isAnimationActive={false} opacity={0.5} />
             </LineChart>
           </ResponsiveContainer>
@@ -1333,7 +1372,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* USD Regime Inputs (DTWEXBGS proxy) */}
-      {section === 'system' && (
+      {section === 'usd' && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1450,7 +1489,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* DXY Persistence Regime: BTCUSD shaded by DXY_PERSIST */}
-      {section === 'system' && (
+      {section === 'usd' && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>

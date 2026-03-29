@@ -158,7 +158,7 @@ const AuthModal: React.FC<Props> = ({ open, onClose, redirectTo = '/dashboard' }
       ? 'Send magic link'
       : tab === 'register'
         ? 'Create account'
-        : 'Authenticate account';
+        : 'Sign in';
 
   return (
     <Dialog
@@ -197,9 +197,6 @@ const AuthModal: React.FC<Props> = ({ open, onClose, redirectTo = '/dashboard' }
             <div className="mb-2 font-headline text-3xl font-black tracking-tighter text-white">
               CoinStrat
             </div>
-            <p className="text-sm font-medium tracking-wide text-on-surface-variant">
-              Bitcoin Intelligence
-            </p>
           </div>
 
           {!supabase && (
@@ -392,9 +389,9 @@ const AuthModal: React.FC<Props> = ({ open, onClose, redirectTo = '/dashboard' }
             </div>
           </form>
 
-          <div className="mt-10 border-t border-outline-variant/10 pt-6 text-center">
+          <div className="mt-0 border-t border-outline-variant/10 pt-6 text-center">
             <p className="px-4 font-label text-[11px] leading-relaxed text-outline">
-              By signing in, you agree to our{' '}
+              By signing in, you agree to {' '}
               <a
                 href="/terms"
                 target="_blank"
