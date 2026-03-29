@@ -32,6 +32,7 @@ export default {
         'primary-fixed': '#dbe1ff',
         background: '#0c1322',
         primary: '#b4c5ff',
+        'inverse-primary': '#0053db',
         'secondary-container': '#00b55d',
         'on-tertiary': '#620040',
       },
