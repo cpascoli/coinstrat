@@ -2,8 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import {
   LayoutDashboard,
-  BarChart3,
-  Binary,
   Info,
   Activity,
   FlaskConical,
@@ -18,9 +16,7 @@ import {
   Workflow,
   Menu as MenuIcon,
 } from 'lucide-react';
-import Dashboard from './views/Dashboard';
-import ScoreBreakdown from './views/ScoreBreakdown';
-import LogicFlow from './views/LogicFlow';
+import MemberDashboard from './views/MemberDashboard';
 import ChartsView from './views/ChartsView';
 import Home from './views/Home';
 import Backtest from './views/Backtest';
@@ -97,7 +93,7 @@ export interface SignalData {
   [key: string]: any;
 }
 
-type TabKey = 'dashboard' | 'scores' | 'logic' | 'charts' | 'backtest';
+type TabKey = 'dashboard' | 'charts' | 'backtest';
 
 const App: React.FC = () => {
   const [data, setData] = useState<SignalData[]>([]);
@@ -127,8 +123,6 @@ const App: React.FC = () => {
   const tabs = useMemo(
     () => [
       { key: 'dashboard' as const, path: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-5 w-5" /> },
-      { key: 'logic' as const, path: '/signals', label: 'Signals', icon: <Binary className="h-5 w-5" /> },
-      { key: 'scores' as const, path: '/scores', label: 'Scores', icon: <BarChart3 className="h-5 w-5" /> },
       // Default to the System subpage under Charts
       { key: 'charts' as const, path: '/charts/system', label: 'Charts', icon: <Activity className="h-5 w-5" /> },
       { key: 'backtest' as const, path: '/backtest', label: 'Backtest', icon: <FlaskConical className="h-5 w-5" /> },
@@ -138,6 +132,7 @@ const App: React.FC = () => {
 
   const activeTab: TabKey | false = useMemo(() => {
     const p = location.pathname;
+    if (p === '/dashboard' || p.startsWith('/dashboard/')) return 'dashboard';
     const found = tabs.find((t) => p === t.path);
     if (found) return found.key;
     // Treat any /charts/* route as the Charts tab
@@ -155,6 +150,7 @@ const App: React.FC = () => {
   const requiresMemberAccess = useMemo(() => {
     const p = location.pathname;
     return p === '/dashboard'
+      || p.startsWith('/dashboard/')
       || p === '/scores'
       || p === '/signals';
   }, [location.pathname]);
@@ -191,7 +187,12 @@ const App: React.FC = () => {
 
     return [
       ...(showDesktopDashboard
-        ? [{ key: 'dashboard', path: '/dashboard', label: 'Dashboard', active: location.pathname === '/dashboard' }]
+        ? [{
+            key: 'dashboard',
+            path: '/dashboard',
+            label: 'Dashboard',
+            active: location.pathname === '/dashboard' || location.pathname.startsWith('/dashboard/'),
+          }]
         : []),
       ...(isAuthenticated
         ? [
@@ -504,14 +505,6 @@ const App: React.FC = () => {
                         sx: { minWidth: 200, bgcolor: '#191f2f', border: '1px solid rgba(67, 70, 85, 0.35)' },
                       }}
                     >
-                      <MenuItem onClick={() => { setAnchorEl(null); navigate('/signals'); }}>
-                        <ListItemIcon><Binary size={16} /></ListItemIcon>
-                        <ListItemText>Signals</ListItemText>
-                      </MenuItem>
-                      <MenuItem onClick={() => { setAnchorEl(null); navigate('/scores'); }}>
-                        <ListItemIcon><BarChart3 size={16} /></ListItemIcon>
-                        <ListItemText>Scores</ListItemText>
-                      </MenuItem>
                       <MenuItem onClick={() => { setAnchorEl(null); navigate('/developer'); }}>
                         <ListItemIcon><Key size={16} /></ListItemIcon>
                         <ListItemText>Developer</ListItemText>
@@ -580,9 +573,14 @@ const App: React.FC = () => {
           <Route path="/docs/scores" element={<DocsScores />} />
           <Route path="/docs/signals" element={<DocsSignals />} />
           <Route path="/docs/signal-builder" element={<DocsSignalBuilder />} />
-          <Route path="/dashboard" element={gateMemberRoute(<Dashboard current={lastData as SignalData} history={data} />)} />
-          <Route path="/scores" element={gateMemberRoute(<ScoreBreakdown current={lastData as SignalData} />)} />
-          <Route path="/signals" element={gateMemberRoute(<LogicFlow current={lastData as SignalData} />)} />
+          <Route path="/signals" element={<Navigate to="/dashboard/signals" replace />} />
+          <Route path="/scores" element={<Navigate to="/dashboard/scores" replace />} />
+          <Route
+            path="/dashboard/*"
+            element={gateMemberRoute(
+              <MemberDashboard current={lastData as SignalData} history={data} />,
+            )}
+          />
           <Route path="/charts/*" element={renderDataRoute(<ChartsView data={data} />)} />
           <Route path="/backtest" element={renderDataRoute(<Backtest data={data} />)} />
           <Route path="/profile" element={<Profile />} />

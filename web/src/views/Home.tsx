@@ -1,12 +1,24 @@
 import React, { useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Avatar, Divider, IconButton, ListItemIcon, ListItemText, Menu, MenuItem } from '@mui/material';
+import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
+  Avatar,
+  Divider,
+  IconButton,
+  ListItemIcon,
+  ListItemText,
+  Menu,
+  MenuItem,
+  Typography,
+} from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import {
   Activity,
-  BarChart3,
-  Binary,
   BookOpen,
+  LayoutDashboard,
   Crown,
   FlaskConical,
   Key,
@@ -159,7 +171,7 @@ const Home: React.FC<HomeProps> = ({
   const navActive = (key: string) => {
     switch (key) {
       case 'dashboard':
-        return pathname === '/' || pathname === '/dashboard';
+        return pathname === '/' || pathname === '/dashboard' || pathname.startsWith('/dashboard/');
       case 'builder':
         return pathname === '/strategy-builder';
       case 'docs':
@@ -343,13 +355,13 @@ const Home: React.FC<HomeProps> = ({
                     <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Backtest</ListItemText>
                   </MenuItem>
                   <Divider sx={{ display: { xs: 'block', md: 'none' }, borderColor: 'rgba(148,163,184,0.15)', my: 0.5 }} />
-                  <MenuItem onClick={() => { setNavMenuEl(null); navigate('/signals'); }}>
-                    <ListItemIcon><Binary size={16} /></ListItemIcon>
-                    <ListItemText>Signals</ListItemText>
-                  </MenuItem>
-                  <MenuItem onClick={() => { setNavMenuEl(null); navigate('/scores'); }}>
-                    <ListItemIcon><BarChart3 size={16} /></ListItemIcon>
-                    <ListItemText>Scores</ListItemText>
+                  <MenuItem
+                    component={Link}
+                    to="/dashboard"
+                    onClick={() => setNavMenuEl(null)}
+                  >
+                    <ListItemIcon><LayoutDashboard size={16} /></ListItemIcon>
+                    <ListItemText>Dashboard</ListItemText>
                   </MenuItem>
                   <MenuItem onClick={() => { setNavMenuEl(null); navigate('/developer'); }}>
                     <ListItemIcon><Key size={16} /></ListItemIcon>
@@ -519,7 +531,7 @@ const Home: React.FC<HomeProps> = ({
                 <StepRow
                   n="03"
                   title="Act with Discipline"
-                  body="Translate signals into a practical strategy so you know when to pause, buy, or accelerate"
+                  body="Translate signals into a practical strategy so you know when to pause, buy, or accelerate your bitcoin accumulation."
                 />
               </div>
             </div>
@@ -544,7 +556,7 @@ const Home: React.FC<HomeProps> = ({
               </div>
               <h4 className="font-headline mb-4 text-3xl font-black text-primary">CORE Accumulation</h4>
               <p className="mb-8 text-lg leading-relaxed text-on-surface-variant">
-                This is the base accumulation signal. It focuses on on-chain valuation and the trend condition.
+                This is the base signal. It focuses on on-chain valuation and the trend condition and determines whether accumulation is allowed.
               </p>
               <ul className="mb-8 space-y-4">
                 <li className="flex items-center gap-3 text-sm font-bold uppercase tracking-widest text-on-surface/70">
@@ -555,6 +567,10 @@ const Home: React.FC<HomeProps> = ({
                   <span className="h-1.5 w-1.5 rounded-full bg-primary" />
                   Long-term holders capitulating
                 </li>
+                <li className="flex items-center gap-3 text-sm font-bold uppercase tracking-widest text-on-surface/70">
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                  Supportive trend condition
+                </li>
               </ul>
             </div>
             <div className="group relative overflow-hidden rounded-3xl border border-outline-variant/10 bg-surface-container p-10">
@@ -563,7 +579,7 @@ const Home: React.FC<HomeProps> = ({
               </div>
               <h4 className="font-headline mb-4 text-3xl font-black text-secondary">MACRO Acceleration</h4>
               <p className="mb-8 text-lg leading-relaxed text-on-surface-variant">
-                It triggers when liquidity and busines cycle align for rapid expansion.
+                It triggers when liquidity and busines cycle align for rapid expansion to signal accelerated accumulation.
               </p>
               <ul className="mb-8 space-y-4">
                 <li className="flex items-center gap-3 text-sm font-bold uppercase tracking-widest text-on-surface/70">
@@ -574,12 +590,17 @@ const Home: React.FC<HomeProps> = ({
                   <span className="h-1.5 w-1.5 rounded-full bg-secondary" />
                   Business cycle recovery
                 </li>
+                <li className="flex items-center gap-3 text-sm font-bold uppercase tracking-widest text-on-surface/70">
+                  <span className="h-1.5 w-1.5 rounded-full bg-secondary" />
+                  Weak dollar regime
+                </li>
               </ul>
             </div>
           </div>
         </section>
 
         <HomePricing hasFreeAccess={hasFreeAccess} isAuthenticated={isAuthenticated} onOpenAuth={onOpenAuth} />
+        <HomeFaq />
       </main>
     </div>
   );
@@ -715,6 +736,132 @@ function GlassBullet({ tone, text }: { tone: 'primary' | 'secondary' | 'tertiary
     </div>
   );
 }
+
+const HOME_FAQ_ITEMS: { q: string; a: React.ReactNode }[] = [
+  {
+    q: 'Who is it for?',
+    a: (
+      <>
+        <strong className="text-on-surface">Self-directed Bitcoin holders</strong> who are in for the long run and want a clear
+        framework. CoinStrat is built for people stacking over years, who care whether valuation,
+        liquidity, and macro line up before they add size. If your edge is discipline and consistency, this is for you. If you need
+        intraday calls or guaranteed returns, it isn’t.
+      </>
+    ),
+  },
+  {
+    q: 'Why Bitcoin accumulation?',
+    a: (
+      <>
+        Bitcoin’s supply schedule and adoption story reward <strong className="text-on-surface">steady accumulation</strong> when
+        conditions support it, not panic buying at highs or freezing at lows. Rules beat emotion: you decide your size and cadence;
+        CoinStrat tells you when the model says conditions are favorable, neutral, or worth pausing.
+        <br />
+        We’re not claiming to nail
+        every wiggle, but we give you a <strong className="text-on-surface">repeatable read</strong> on the setup so your DCA stays
+        intentional.
+      </>
+    ),
+  },
+  {
+    q: "What's behind the CoinStrat signal?",
+    a: (
+      <>
+        A <strong className="text-on-surface">transparent engine</strong>, not a black box.{' '}
+        <strong className="text-on-surface">CORE</strong> is a state machine driven by on-chain valuation and price regime: 
+        entry, hold, and exit rules are explicit. 
+        {' '}
+        <strong className="text-on-surface">MACRO</strong> layers liquidity, business cycle, and
+        dollar strength to modulate intensity when CORE is already on. 
+        Factor scores (liquidity, cycle, dollar, valuation) are broken down in the app. 
+        <br />
+        Open {' '} <strong className="text-on-surface">Dashboard → Signals and Scores</strong> to see the live logic, and read the{' '}
+        <Link to="/docs" className="font-semibold text-primary underline-offset-2 hover:underline">
+          Docs
+        </Link>{' '}
+        for architecture and data.
+      </>
+    ),
+  },
+  {
+    q: 'Why go Pro?',
+    a: (
+      <>
+        <strong className="text-on-surface">Free is the full CORE model</strong>: dashboard, charts, backtest context, and the
+        weekly email. <strong className="text-on-surface">Pro is the power layer</strong> for who wants to define their own rules:
+        {` `}
+        <strong className="text-on-surface">Signal Builder</strong> (AI-powered strategy builder), email alerts, API access, and OpenClaw so
+        you can wire signals into your own workflows. Upgrade when you’re ready to design and automate.
+      </>
+    ),
+  },
+  {
+    q: 'How can you build your own custom signals?',
+    a: (
+      <>
+        With Pro, open{' '}
+        <Link to="/strategy-builder" className="font-semibold text-primary underline-offset-2 hover:underline">
+          Signal Builder
+        </Link>
+        , describe what you want in natural language, and inspect the generated spec before you trust it. Preview on historical data,
+        iterate, then save strategies and turn on alerts when you’re satisfied. Start from curated built-in templates or from
+        scratch—your call. The{' '}
+        <Link to="/docs/signal-builder" className="font-semibold text-primary underline-offset-2 hover:underline">
+          Signal Builder docs
+        </Link>{' '}
+        list available series, metric operators, and example prompts so you know exactly what the engine can express.
+      </>
+    ),
+  },
+];
+
+const HomeFaq: React.FC = () => (
+  <section className="mx-auto mb-32 max-w-3xl px-6 md:max-w-4xl">
+    <div className="mb-10 text-center">
+      <h2 className="mb-3 text-xs font-bold uppercase tracking-[0.3em] text-primary">Questions</h2>
+      <h3 className="font-headline text-3xl font-black tracking-tight md:text-4xl">Quick answers</h3>
+      <p className="mx-auto mt-4 max-w-xl text-on-surface-variant">
+        A few things people ask before signing in or upgrading. 
+        <br/>
+        This isn’t personalized advice — always do your own research.
+      </p>
+    </div>
+    <div className="flex flex-col gap-2">
+      {HOME_FAQ_ITEMS.map((item) => (
+        <Accordion
+          key={item.q}
+          disableGutters
+          elevation={0}
+          sx={{
+            borderRadius: '16px !important',
+            border: '1px solid rgba(148, 163, 184, 0.15)',
+            bgcolor: 'rgba(15, 23, 42, 0.45)',
+            '&:before': { display: 'none' },
+            overflow: 'hidden',
+          }}
+        >
+          <AccordionSummary
+            expandIcon={<ExpandMoreIcon sx={{ color: 'rgba(148, 163, 184, 0.9)' }} />}
+            sx={{
+              px: 2.5,
+              py: 0.5,
+              '& .MuiAccordionSummary-content': { my: 1.25 },
+            }}
+          >
+            <Typography component="p" sx={{ fontWeight: 800, fontSize: '1rem' }}>
+              {item.q}
+            </Typography>
+          </AccordionSummary>
+          <AccordionDetails sx={{ px: 2.5, pb: 2.5, pt: 0 }}>
+            <Typography component="div" variant="body2" sx={{ color: 'rgba(226, 232, 240, 0.82)', lineHeight: 1.65 }}>
+              {item.a}
+            </Typography>
+          </AccordionDetails>
+        </Accordion>
+      ))}
+    </div>
+  </section>
+);
 
 const HomePricing: React.FC<{
   hasFreeAccess?: boolean;

@@ -20,6 +20,8 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  Tab,
+  Tabs,
   TextField,
   Tooltip as MuiTooltip,
   Typography,
@@ -76,6 +78,11 @@ import {
   type StrategySnapshotRow,
   type StrategySpec,
 } from '../lib/strategyBuilder';
+import {
+  SYSTEM_STRATEGY_ALERT_DEFAULT,
+  SYSTEM_STRATEGY_TEMPLATES,
+  type SystemStrategyTemplate,
+} from '../lib/systemStrategies';
 import { SignalBuilderDocsContent } from './DocsSignalBuilder';
 
 type StoredStrategy = {
@@ -120,6 +127,8 @@ const StrategyBuilder: React.FC = () => {
   const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(null);
   const [loadingStrategies, setLoadingStrategies] = useState(false);
   const [savedStrategiesOpen, setSavedStrategiesOpen] = useState(false);
+  /** 0 = your saved strategies, 1 = built-in templates */
+  const [loadStrategyTab, setLoadStrategyTab] = useState(0);
   const [busyAction, setBusyAction] = useState<'interpret' | 'preview' | 'save' | 'delete' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -287,6 +296,22 @@ const StrategyBuilder: React.FC = () => {
     setPreview(null);
     setSuccess(null);
     setError(null);
+    setSavedStrategiesOpen(false);
+  };
+
+  const applySystemStrategyTemplate = (template: SystemStrategyTemplate) => {
+    setSelectedStrategyId(null);
+    setPrompt(template.prompt);
+    setStrategyName(template.spec.name);
+    setStrategyDescription(template.spec.description);
+    setStrategyStatus('draft');
+    setAlertEnabled(SYSTEM_STRATEGY_ALERT_DEFAULT.enabled);
+    setAlertMode(SYSTEM_STRATEGY_ALERT_DEFAULT.mode);
+    setDraftSpec(template.spec);
+    setJsonSpec(JSON.stringify(template.spec, null, 2));
+    setPreview(null);
+    setError(null);
+    setSuccess(`Loaded system template: ${template.name}. Preview or save a copy to your account.`);
     setSavedStrategiesOpen(false);
   };
 
@@ -509,12 +534,15 @@ const StrategyBuilder: React.FC = () => {
                   <Typography variant="h6" sx={{ fontWeight: 800 }}>Describe your strategy</Typography>
                   <Stack direction="row" spacing={1}>
                     <IconButton
-                      onClick={() => setSavedStrategiesOpen(true)}
+                      onClick={() => {
+                        setLoadStrategyTab(0);
+                        setSavedStrategiesOpen(true);
+                      }}
                       disabled={busyAction !== null}
                       size="small"
                       sx={{ border: '1px solid', borderColor: 'divider' }}
-                      aria-label="Load a saved strategy"
-                      title="Load a saved strategy"
+                      aria-label="Load a strategy"
+                      title="Load a strategy"
                     >
                       <FolderOpen size={18} />
                     </IconButton>
@@ -821,61 +849,129 @@ const StrategyBuilder: React.FC = () => {
         }}
       >
         <DialogContent sx={{ p: isSmDown ? 1.5 : 3 }}>
-          <Stack spacing={2.5}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center">
-              <Box>
+          <Stack spacing={2}>
+            <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+              <Box sx={{ minWidth: 0 }}>
                 <Typography variant={isSmDown ? 'h6' : 'h5'} sx={{ fontWeight: 900 }}>
-                  Saved strategies
+                  Load strategy
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                  Load one of your saved Signal Builder strategies into the editor.
+                  Open one of your saved strategies or a built-in template. Built-ins are not stored in your account;
+                  save a copy if you want your own editable version.
                 </Typography>
               </Box>
-              <IconButton onClick={() => setSavedStrategiesOpen(false)} aria-label="Close saved strategies">
+              <IconButton onClick={() => setSavedStrategiesOpen(false)} aria-label="Close load strategy" sx={{ flexShrink: 0 }}>
                 <X size={18} />
               </IconButton>
             </Stack>
 
-            {loadingStrategies ? (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, py: 2 }}>
-                <CircularProgress size={18} />
-                <Typography variant="body2" color="text.secondary">Loading strategies…</Typography>
-              </Box>
-            ) : strategies.length === 0 ? (
-              <Typography variant="body2" color="text.secondary">
-                No saved strategies yet. Draft one from the prompt box and save it when the preview looks sensible.
-              </Typography>
-            ) : (
-              <Stack spacing={1.25}>
-                {strategies.map((strategy) => (
-                  <Paper
-                    key={strategy.id}
-                    variant="outlined"
-                    sx={{
-                      p: 1.5,
-                      cursor: 'pointer',
-                      borderColor: selectedStrategyId === strategy.id ? 'primary.main' : 'rgba(148,163,184,0.24)',
-                      '&:hover': { borderColor: 'primary.main' },
-                    }}
-                    onClick={() => applyStrategy(strategy)}
-                  >
-                    <Typography sx={{ fontWeight: 700 }}>{strategy.name}</Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                      {strategy.description}
+            <Tabs
+              value={loadStrategyTab}
+              onChange={(_, v: number) => setLoadStrategyTab(v)}
+              variant="fullWidth"
+              sx={{
+                borderBottom: 1,
+                borderColor: 'divider',
+                '& .MuiTab-root': { fontWeight: 700, textTransform: 'none', minHeight: 44 },
+              }}
+            >
+              <Tab label="Yours" id="load-strategy-tab-yours" aria-controls="load-strategy-panel-yours" />
+              <Tab label="Built-in" id="load-strategy-tab-builtin" aria-controls="load-strategy-panel-builtin" />
+            </Tabs>
+
+            {loadStrategyTab === 0 && (
+              <Stack spacing={1} role="tabpanel" id="load-strategy-panel-yours" aria-labelledby="load-strategy-tab-yours">
+                {loadingStrategies ? (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, py: 2 }}>
+                    <CircularProgress size={18} />
+                    <Typography variant="body2" color="text.secondary">Loading strategies…</Typography>
+                  </Box>
+                ) : strategies.length === 0 ? (
+                  <Stack spacing={2} sx={{ py: 1 }}>
+                    <Typography variant="body2" color="text.secondary">
+                      No saved strategies yet. Draft one from the prompt box and save it when the preview looks sensible.
                     </Typography>
-                    <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
-                      <Chip label={strategy.status} size="small" variant="outlined" />
-                      <Chip label={strategy.alert.enabled ? `Alerts: ${strategy.alert.mode}` : 'Alerts off'} size="small" variant="outlined" />
-                      {strategy.latest_signal_date && (
-                        <Chip
-                          label={`Latest ${strategy.latest_signal_value ?? 0} on ${strategy.latest_signal_date}`}
-                          size="small"
-                          variant="outlined"
-                        />
-                      )}
-                    </Stack>
-                  </Paper>
-                ))}
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      onClick={() => setLoadStrategyTab(1)}
+                      sx={{ alignSelf: 'flex-start', fontWeight: 700, textTransform: 'none' }}
+                    >
+                      Browse built-in templates
+                    </Button>
+                  </Stack>
+                ) : (
+                  <Stack spacing={1.25}>
+                    {strategies.map((strategy) => (
+                      <Paper
+                        key={strategy.id}
+                        variant="outlined"
+                        sx={{
+                          p: 1.5,
+                          cursor: 'pointer',
+                          borderColor: selectedStrategyId === strategy.id ? 'primary.main' : 'rgba(148,163,184,0.24)',
+                          '&:hover': { borderColor: 'primary.main' },
+                        }}
+                        onClick={() => applyStrategy(strategy)}
+                      >
+                        <Typography sx={{ fontWeight: 700 }}>{strategy.name}</Typography>
+                        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                          {strategy.description}
+                        </Typography>
+                        <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+                          <Chip label={strategy.status} size="small" variant="outlined" />
+                          <Chip label={strategy.alert.enabled ? `Alerts: ${strategy.alert.mode}` : 'Alerts off'} size="small" variant="outlined" />
+                          {strategy.latest_signal_date && (
+                            <Chip
+                              label={`Latest ${strategy.latest_signal_value ?? 0} on ${strategy.latest_signal_date}`}
+                              size="small"
+                              variant="outlined"
+                            />
+                          )}
+                        </Stack>
+                      </Paper>
+                    ))}
+                  </Stack>
+                )}
+              </Stack>
+            )}
+
+            {loadStrategyTab === 1 && (
+              <Stack spacing={1.25} role="tabpanel" id="load-strategy-panel-builtin" aria-labelledby="load-strategy-tab-builtin">
+                <Typography variant="body2" color="text.secondary">
+                  Curated starting points—tap a card to load it into the builder.
+                </Typography>
+                <Stack spacing={1.25}>
+                  {SYSTEM_STRATEGY_TEMPLATES.map((template) => (
+                    <Paper
+                      key={template.id}
+                      variant="outlined"
+                      onClick={() => applySystemStrategyTemplate(template)}
+                      sx={{
+                        p: 1.5,
+                        cursor: 'pointer',
+                        borderColor: 'rgba(148,163,184,0.24)',
+                        '&:hover': { borderColor: 'primary.main' },
+                      }}
+                    >
+                      <Typography sx={{ fontWeight: 700 }}>{template.name}</Typography>
+                      <Typography variant="body1" sx={{ mt: 1.25, color: 'text.primary', fontWeight: 500, lineHeight: 1.5 }}>
+                        <Box component="span" sx={{ fontWeight: 800 }}>
+                          Prompt:{' '}
+                        </Box>
+                        {template.prompt}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 1.25, lineHeight: 1.55 }}>
+                        {template.modalDescription}
+                      </Typography>
+                      <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+                        {template.characteristicChips.map((label) => (
+                          <Chip key={label} label={label} size="small" variant="outlined" />
+                        ))}
+                      </Stack>
+                    </Paper>
+                  ))}
+                </Stack>
               </Stack>
             )}
           </Stack>
@@ -1034,10 +1130,6 @@ const StrategyBuilder: React.FC = () => {
 
                 <Stack spacing={1} sx={{ px: isSmDown ? 0.5 : 0 }}>
                   <Typography sx={{ fontWeight: 700 }}>Signal output</Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    The main chart stays pinned so you can compare contributor charts against the final signal.
-                    Drag the handles on the timeline below to zoom — all visible charts update together.
-                  </Typography>
                   <Box sx={{ width: '100%', height: isSmDown ? '52vh' : 400 }}>
                     <ResponsiveContainer>
                       {/* key forces remount (and brush reset) when the dataset changes */}
@@ -1053,7 +1145,7 @@ const StrategyBuilder: React.FC = () => {
                         }} />
                         <Tooltip />
                         <Line yAxisId="signal" type="stepAfter" dataKey="signal" stroke="#60a5fa" dot={false} strokeWidth={2.2} name="Signal" isAnimationActive={false} />
-                        <Line yAxisId="btc" type="monotone" dataKey="btcScaled" name="BTC (scaled)" stroke="#f59e0b" dot={false} strokeWidth={1.4} isAnimationActive={false} />
+                        <Line yAxisId="btc" type="monotone" dataKey="btcScaled" name="BTC" stroke="#f59e0b" dot={false} strokeWidth={1.4} isAnimationActive={false} />
                         <Brush
                           dataKey="Date"
                           height={28}

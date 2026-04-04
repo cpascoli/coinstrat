@@ -53,11 +53,18 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, pb: 1.5, borderBottom: '1px solid', borderColor: 'divider' }}>
-        <Layers className="h-8 w-8 text-blue-400" />
-        <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: -0.5 }}>
-          Factor Deep-Dive
-        </Typography>
+      <Box sx={{ pb: 1.5, borderBottom: '1px solid', borderColor: 'divider' }}>
+        <Stack spacing={0.75}>
+          <Stack direction="row" alignItems="center" spacing={1.5}>
+            <Layers className="h-8 w-8 shrink-0 text-blue-400" />
+            <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: -0.5 }}>
+              Factor Deep-Dive
+            </Typography>
+          </Stack>
+          <Typography variant="body2" color="text.secondary" sx={{ pl: { xs: 0, sm: '44px' } }}>
+            What feeds  bitcoin valuation, liquidity, business cycle and dollar strength scores. The inputs, rules, and tiers behind each factor.
+          </Typography>
+        </Stack>
       </Box>
 
       <Grid container spacing={2.5}>

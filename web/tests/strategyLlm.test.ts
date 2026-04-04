@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { validateStrategySpec, type StrategySpec } from '../src/lib/strategyBuilder';
+import { SYSTEM_STRATEGY_TEMPLATES } from '../src/lib/systemStrategies';
 import {
   autoFixMetrics,
   buildHeuristicSpec,
@@ -215,6 +216,14 @@ function isMonthEnd(date: string) {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+describe('Signal Builder system templates', () => {
+  it('exports only specs that pass validateStrategySpec', () => {
+    for (const template of SYSTEM_STRATEGY_TEMPLATES) {
+      expect(validateStrategySpec(template.spec)).toEqual({ ok: true, errors: [] });
+    }
+  });
+});
 
 describe('strategyLlm — uptrend prompt regression', () => {
   describe('reproducing the original failure', () => {
