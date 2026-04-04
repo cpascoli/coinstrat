@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { SignalData } from '../App';
 import { Layers, Wind, Landmark, Gauge } from 'lucide-react';
 import {
@@ -10,14 +10,26 @@ import {
   Divider,
   Grid,
   Stack,
+  Tab,
+  Tabs,
   Typography,
 } from '@mui/material';
+
+const SCORE_TAB_LABELS = [
+  'BTC Valuation',
+  'BTC Regime',
+  'US Liquidity',
+  'Business Cycle',
+  'USD Regime',
+] as const;
 
 interface Props {
   current: SignalData;
 }
 
 const ScoreBreakdown: React.FC<Props> = ({ current }) => {
+  const [scoreTab, setScoreTab] = useState(0);
+
   const liqScore = current.LIQ_SCORE;
   const cycleScore = current.CYCLE_SCORE;
   const dxyScore = current.DXY_SCORE;
@@ -67,9 +79,31 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
         </Stack>
       </Box>
 
-      <Grid container spacing={2.5}>
-        {/* Valuation (1st) */}
-        <Grid item xs={12} md={6}>
+      <Tabs
+        value={scoreTab}
+        onChange={(_, next: number) => setScoreTab(next)}
+        variant="scrollable"
+        scrollButtons="auto"
+        allowScrollButtonsMobile
+        aria-label="Factor score categories"
+        sx={{
+          borderBottom: 1,
+          borderColor: 'divider',
+          '& .MuiTab-root': { fontWeight: 700, textTransform: 'none', minHeight: 44 },
+        }}
+      >
+        {SCORE_TAB_LABELS.map((label, i) => (
+          <Tab key={label} id={`score-tab-${i}`} aria-controls={`score-panel-${i}`} label={label} />
+        ))}
+      </Tabs>
+
+      <Box
+        role="tabpanel"
+        id={`score-panel-${scoreTab}`}
+        aria-labelledby={`score-tab-${scoreTab}`}
+        sx={{ pt: 2.5 }}
+      >
+        {scoreTab === 0 && (
           <FactorCard
             icon={<Landmark className="h-6 w-6 text-violet-300" />}
             title="BTC Valuation (VAL_SCORE)"
@@ -115,10 +149,9 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
               </Grid>
             </Grid>
           </FactorCard>
-        </Grid>
+        )}
 
-        {/* BTC Regime (2nd) */}
-        <Grid item xs={12} md={6}>
+        {scoreTab === 1 && (
           <FactorCard
             icon={<Landmark className="h-6 w-6 text-amber-300" />}
             title="BTC Regime (PRICE_REGIME)"
@@ -161,10 +194,9 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
               </Grid>
             </Grid>
           </FactorCard>
-        </Grid>
+        )}
 
-        {/* US Liquidity (3rd) */}
-        <Grid item xs={12} md={6}>
+        {scoreTab === 2 && (
           <FactorCard
             icon={<Wind className="h-6 w-6 text-blue-300" />}
             title="US Liquidity (LIQ_SCORE)"
@@ -213,10 +245,9 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
               </Grid>
             </Grid>
           </FactorCard>
-        </Grid>
+        )}
 
-        {/* Business Cycle (4th) */}
-        <Grid item xs={12} md={6}>
+        {scoreTab === 3 && (
           <FactorCard
             icon={<Landmark className="h-6 w-6 text-emerald-300" />}
             title="Business Cycle (BIZ_CYCLE_SCORE)"
@@ -276,10 +307,9 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
               </Grid>
             </Grid>
           </FactorCard>
-        </Grid>
+        )}
 
-        {/* USD Regime (5th) */}
-        <Grid item xs={12} md={6}>
+        {scoreTab === 4 && (
           <FactorCard
             icon={<Gauge className="h-6 w-6 text-amber-300" />}
             title="USD Regime (DXY_SCORE)"
@@ -349,9 +379,8 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
               </Grid>
             </Grid>
           </FactorCard>
-        </Grid>
-
-      </Grid>
+        )}
+      </Box>
     </Box>
   );
 };
