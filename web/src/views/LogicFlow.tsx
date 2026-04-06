@@ -55,7 +55,7 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
             <CardHeader
               avatar={<ToggleRight className="h-7 w-7 text-blue-300" />}
               title={<Typography sx={{ fontWeight: 900 }}>Final Permission (ACCUM)</Typography>}
-              subheader="Final permission to deploy capital. ACCUM = CORE. MACRO only modifies DCA intensity (3×) when CORE is already ON."
+              subheader="Final permission to deploy capital. MACRO only modifies DCA intensity (3×) when CORE is already ON."
               action={
                 <Chip
                   label={accumStatus ? 'ON' : 'OFF'}

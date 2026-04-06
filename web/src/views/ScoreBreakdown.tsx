@@ -15,12 +15,29 @@ import {
   Typography,
 } from '@mui/material';
 
-const SCORE_TAB_LABELS = [
-  'BTC Valuation',
-  'BTC Regime',
-  'US Liquidity',
-  'Business Cycle',
-  'USD Regime',
+const SCORE_TABS = [
+  {
+    label: 'BTC Valuation',
+    oneLiner:
+      'Assess BTC value with on-chain metrics MVRV (average cost basis) and LTH SOPR (realized profit), from deep value to euphoria.',
+  },
+  {
+    label: 'BTC Regime',
+    oneLiner: 'Spot BTC versus its 40-week average — a simple bull vs bear trend filter for timing.',
+  },
+  {
+    label: 'US Liquidity',
+    oneLiner:
+      'Net USD liquidity from the Fed balance sheet, Treasury cash, and reverse repo — impulse and direction.',
+  },
+  {
+    label: 'Business Cycle',
+    oneLiner: 'Expansion vs recession risk from the Sahm rule, yield curve, and manufacturing new orders.',
+  },
+  {
+    label: 'USD Regime',
+    oneLiner: 'Broad dollar strength or weakness as a tailwind or headwind for risk assets.',
+  },
 ] as const;
 
 interface Props {
@@ -92,8 +109,8 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
           '& .MuiTab-root': { fontWeight: 700, textTransform: 'none', minHeight: 44 },
         }}
       >
-        {SCORE_TAB_LABELS.map((label, i) => (
-          <Tab key={label} id={`score-tab-${i}`} aria-controls={`score-panel-${i}`} label={label} />
+        {SCORE_TABS.map((t, i) => (
+          <Tab key={t.label} id={`score-tab-${i}`} aria-controls={`score-panel-${i}`} label={t.label} />
         ))}
       </Tabs>
 
@@ -103,6 +120,9 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
         aria-labelledby={`score-tab-${scoreTab}`}
         sx={{ pt: 2.5 }}
       >
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5, maxWidth: 720, lineHeight: 1.55 }}>
+          {SCORE_TABS[scoreTab].oneLiner}
+        </Typography>
         {scoreTab === 0 && (
           <FactorCard
             icon={<Landmark className="h-6 w-6 text-violet-300" />}
