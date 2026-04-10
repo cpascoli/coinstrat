@@ -15,6 +15,7 @@ import {
   Key,
   Workflow,
   Menu as MenuIcon,
+  Newspaper,
 } from 'lucide-react';
 import MemberDashboard from './views/MemberDashboard';
 import ChartsView from './views/ChartsView';
@@ -30,6 +31,8 @@ import DocsSignals from './views/DocsSignals';
 import DocsScores from './views/DocsScores';
 import DocsSignalBuilder from './views/DocsSignalBuilder';
 import NewsletterConfirm from './views/NewsletterConfirm';
+import News from './views/News';
+import NewsArticle from './views/NewsArticle';
 import Terms from './views/Terms';
 import Privacy from './views/Privacy';
 import Unsubscribe from './views/Unsubscribe';
@@ -138,7 +141,7 @@ const App: React.FC = () => {
     // Treat any /charts/* route as the Charts tab
     if (p.startsWith('/charts')) return 'charts';
     // Home/docs/reference pages shouldn't highlight a bottom-nav item
-    if (p === '/' || p.startsWith('/docs') || p === '/api-docs' || p === '/strategy-builder') return false;
+    if (p === '/' || p.startsWith('/docs') || p.startsWith('/news') || p === '/api-docs' || p === '/strategy-builder') return false;
     return 'dashboard';
   }, [location.pathname, tabs]);
 
@@ -205,6 +208,7 @@ const App: React.FC = () => {
           ]
         : []),
       { key: 'docs', path: '/docs', label: 'Docs', active: docsActive },
+      { key: 'news', path: '/news', label: 'News', active: location.pathname.startsWith('/news') },
       { key: 'charts', path: '/charts/system', label: 'Charts', active: location.pathname.startsWith('/charts') },
       { key: 'backtest', path: '/backtest', label: 'Backtest', active: location.pathname === '/backtest' },
     ];
@@ -340,12 +344,13 @@ const App: React.FC = () => {
 
   const isHome = location.pathname === '/';
   const isDocsRoute = location.pathname.startsWith('/docs');
+  const isNewsRoute = location.pathname.startsWith('/news');
 
   return (
     <Box
       sx={{
         minHeight: '100vh',
-        bgcolor: isHome || isDocsRoute ? '#0c1322' : 'background.default',
+        bgcolor: isHome || isDocsRoute || isNewsRoute ? '#0c1322' : 'background.default',
         pb: { xs: 8, md: 0 },
       }}
     >
@@ -427,6 +432,19 @@ const App: React.FC = () => {
                       sx: { minWidth: 200, bgcolor: '#191f2f', border: '1px solid rgba(67, 70, 85, 0.35)' },
                     }}
                   >
+
+                    <MenuItem
+                      component={Link}
+                      to="/news"
+                      onClick={() => setMobilePublicNavEl(null)}
+                      sx={{ color: '#dce2f7', py: 1.25 }}
+                    >
+                      <ListItemIcon sx={{ color: 'inherit', minWidth: 36 }}>
+                        <Newspaper size={18} />
+                      </ListItemIcon>
+                      <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>News</ListItemText>
+                    </MenuItem>
+                    
                     <MenuItem
                       component={Link}
                       to="/docs"
@@ -438,6 +456,7 @@ const App: React.FC = () => {
                       </ListItemIcon>
                       <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Docs</ListItemText>
                     </MenuItem>
+ 
                     <MenuItem
                       component={Link}
                       to="/charts/system"
@@ -546,7 +565,7 @@ const App: React.FC = () => {
           maxWidth: isHome ? undefined : `${SITE_CONTENT_MAX_WIDTH_PX}px`,
           mx: isHome ? undefined : 'auto',
           px: isHome ? 0 : { xs: 2, sm: 3 },
-          py: isHome || isDocsRoute ? 0 : { xs: 2.5, md: 4 },
+          py: isHome || isDocsRoute || isNewsRoute ? 0 : { xs: 2.5, md: 4 },
           width: '100%',
         }}
       >
@@ -573,6 +592,8 @@ const App: React.FC = () => {
           <Route path="/docs/scores" element={<DocsScores />} />
           <Route path="/docs/signals" element={<DocsSignals />} />
           <Route path="/docs/signal-builder" element={<DocsSignalBuilder />} />
+          <Route path="/news" element={<News />} />
+          <Route path="/news/:slug" element={<NewsArticle />} />
           <Route path="/signals" element={<Navigate to="/dashboard/signals" replace />} />
           <Route path="/scores" element={<Navigate to="/dashboard/scores" replace />} />
           <Route

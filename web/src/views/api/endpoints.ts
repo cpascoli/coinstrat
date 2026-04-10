@@ -152,6 +152,15 @@ export const endpointGroups: EndpointGroup[] = [
         auth: 'admin_jwt',
       },
       {
+        id: 'news-publish',
+        method: 'POST',
+        path: '/api/v1/news',
+        summary: 'Publish or update a news article',
+        description:
+          'Creates or updates a public news article in Supabase. JSON body: headline, summary, article (full text), labels (string array of topics), optional slug, optional published_at (ISO-8601). OpenClaw and other automation should send Authorization: Bearer <CRON_SECRET>. Admins may use a session JWT from the browser. Duplicate slug updates the existing article.',
+        auth: 'admin_jwt',
+      },
+      {
         id: 'weekly-digest',
         method: 'POST',
         path: '/api/email/digest',

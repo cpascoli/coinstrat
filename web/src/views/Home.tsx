@@ -25,6 +25,7 @@ import {
   LogIn,
   LogOut,
   Menu as MenuIcon,
+  Newspaper,
   Shield,
   User,
 } from 'lucide-react';
@@ -176,6 +177,8 @@ const Home: React.FC<HomeProps> = ({
         return pathname === '/strategy-builder';
       case 'docs':
         return pathname.startsWith('/docs') || pathname === '/developer';
+      case 'news':
+        return pathname.startsWith('/news');
       case 'charts':
         return pathname.startsWith('/charts');
       case 'backtest':
@@ -224,6 +227,9 @@ const Home: React.FC<HomeProps> = ({
                   </NavLink>
                 </>
               ) : null}
+              <NavLink to="/news" navKey="news">
+                News
+              </NavLink>
               <NavLink to="/docs" navKey="docs">
                 Docs
               </NavLink>
@@ -257,6 +263,18 @@ const Home: React.FC<HomeProps> = ({
                 >
                   <MenuItem
                     component={Link}
+                    to="/news"
+                    onClick={() => setMobilePublicNavEl(null)}
+                    sx={{ color: '#dce2f7', py: 1.25 }}
+                  >
+                    <ListItemIcon sx={{ color: 'inherit', minWidth: 36 }}>
+                      <Newspaper size={18} />
+                    </ListItemIcon>
+                    <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>News</ListItemText>
+                  </MenuItem>
+                  
+                  <MenuItem
+                    component={Link}
                     to="/docs"
                     onClick={() => setMobilePublicNavEl(null)}
                     sx={{ color: '#dce2f7', py: 1.25 }}
@@ -266,6 +284,7 @@ const Home: React.FC<HomeProps> = ({
                     </ListItemIcon>
                     <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Docs</ListItemText>
                   </MenuItem>
+
                   <MenuItem
                     component={Link}
                     to="/charts/system"
@@ -321,6 +340,19 @@ const Home: React.FC<HomeProps> = ({
                   transformOrigin={{ vertical: 'top', horizontal: 'right' }}
                   PaperProps={{ sx: { minWidth: 200, bgcolor: '#191f2f', border: '1px solid rgba(67, 70, 85, 0.35)' } }}
                 >
+
+                  <MenuItem
+                    component={Link}
+                    to="/news"
+                    onClick={() => setNavMenuEl(null)}
+                    sx={{ display: { xs: 'flex', md: 'none' }, color: '#dce2f7', py: 1.25 }}
+                  >
+                    <ListItemIcon sx={{ color: 'inherit', minWidth: 36 }}>
+                      <Newspaper size={18} />
+                    </ListItemIcon>
+                    <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>News</ListItemText>
+                  </MenuItem>
+
                   <MenuItem
                     component={Link}
                     to="/docs"
@@ -332,6 +364,7 @@ const Home: React.FC<HomeProps> = ({
                     </ListItemIcon>
                     <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Docs</ListItemText>
                   </MenuItem>
+
                   <MenuItem
                     component={Link}
                     to="/charts/system"

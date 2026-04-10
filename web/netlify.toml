@@ -44,6 +44,16 @@
   to = "/.netlify/functions/signal-refresh"
   status = 200
 
+[[redirects]]
+  from = "/api/v1/news"
+  to = "/.netlify/functions/news-publish"
+  status = 200
+
+[[redirects]]
+  from = "/sitemap.xml"
+  to = "/.netlify/functions/sitemap"
+  status = 200
+
 # --- Stripe ---
 
 [[redirects]]
