@@ -472,7 +472,7 @@ const Home: React.FC<HomeProps> = ({
               </h1>
 
               <p className="mb-12 max-w-xl text-xl font-medium leading-relaxed text-on-surface-variant">
-                CoinStrat synthesizes on-chain activity, macro conditions, and business cycle into a singular, high-precision execution framework
+                CoinStrat synthesizes on-chain activity, macro conditions, and business cycle into high-precision execution signals
                 that helps you optimize your Bitcoin accumulation.
               </p>
 
@@ -515,6 +515,8 @@ const Home: React.FC<HomeProps> = ({
         </section>
 
         <HomeEmailSignup />
+
+        <HomeWhatIs />
 
         <section className="mx-auto mb-32 max-w-7xl px-4">
           <div className="mb-16 text-center">
@@ -758,6 +760,73 @@ const HomeEmailSignup: React.FC = () => {
   );
 };
 
+const WHAT_IS_PILLARS = [
+  {
+    icon: 'monitoring',
+    color: 'text-primary',
+    bg: 'bg-primary/10 group-hover:bg-primary/20',
+    title: 'A Signal Engine',
+    body: 'CoinStrat reads on-chain metrics, macro-economic indicators, and business-cycle data — and distills them into one clear signal: accumulate, accelerate, or pause.',
+  },
+  {
+    icon: 'straighten',
+    color: 'text-secondary',
+    bg: 'bg-secondary/10 group-hover:bg-secondary/20',
+    title: 'A Decision Framework',
+    body: "It gives you a repeatable, rules-based process for Bitcoin accumulation — so you don't rely on gut feel, hype, or market noise to time your buys.",
+  },
+  {
+    icon: 'visibility',
+    color: 'text-tertiary',
+    bg: 'bg-tertiary/10 group-hover:bg-tertiary/20',
+    title: 'Transparent & Auditable',
+    body: 'Every data source, score, and rule is documented and visible. No black boxes — you can see exactly why the signal says what it says.',
+  },
+] as const;
+
+const HomeWhatIs: React.FC = () => (
+  <section className="mx-auto mb-32 max-w-7xl px-6">
+    <div className="mb-14 text-center">
+      <h2 className="mb-4 text-xs font-bold uppercase tracking-[0.3em] text-secondary">
+        The Short Version
+      </h2>
+      <h3 className="font-headline text-4xl font-black tracking-tight md:text-5xl">
+        What is CoinStrat?
+      </h3>
+      <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-on-surface-variant">
+        CoinStrat watches the data that matters — on-chain, macro, market cycle —
+        and tells you <strong className="text-on-surface">when to buy Bitcoin, when to buy more, and when to wait</strong>.
+      </p>
+    </div>
+
+    <div className="relative grid gap-6 md:grid-cols-3">
+      <div className="pointer-events-none absolute left-0 right-0 top-1/2 hidden h-px bg-gradient-to-r from-transparent via-outline-variant/25 to-transparent md:block" />
+
+      {WHAT_IS_PILLARS.map((p) => (
+        <div
+          key={p.title}
+          className="group relative flex flex-col items-center rounded-3xl border border-outline-variant/10 bg-surface-container/50 px-8 pb-10 pt-12 text-center backdrop-blur-sm transition-all duration-500 hover:border-outline-variant/25 hover:bg-surface-container"
+        >
+          <div
+            className={clsx(
+              'mb-6 flex h-16 w-16 items-center justify-center rounded-2xl transition-all duration-300',
+              p.bg,
+            )}
+          >
+            <span className={clsx('material-symbols-outlined text-3xl', p.color)}>{p.icon}</span>
+          </div>
+          <h4 className="font-headline mb-3 text-xl font-bold">{p.title}</h4>
+          <p className="text-sm leading-relaxed text-on-surface-variant">{p.body}</p>
+        </div>
+      ))}
+    </div>
+
+    <p className="mx-auto mt-10 max-w-xl text-center text-sm text-on-surface-variant/70">
+      Think of it as an autopilot for <em>when</em> and <em>how hard</em> to stack sats
+    </p>
+  </section>
+);
+
 function GlassBullet({ tone, text }: { tone: 'primary' | 'secondary' | 'tertiary'; text: string }) {
   const color = tone === 'primary' ? 'text-primary' : tone === 'secondary' ? 'text-secondary' : 'text-tertiary';
   return (
@@ -863,6 +932,7 @@ const HomeFaq: React.FC = () => (
       {HOME_FAQ_ITEMS.map((item) => (
         <Accordion
           key={item.q}
+          defaultExpanded
           disableGutters
           elevation={0}
           sx={{

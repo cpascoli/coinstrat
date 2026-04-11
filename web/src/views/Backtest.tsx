@@ -288,10 +288,15 @@ const Backtest: React.FC<Props> = ({ data }) => {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       {/* Header */}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, pb: 1.5, borderBottom: '1px solid', borderColor: 'divider' }}>
-        <FlaskConical className="h-8 w-8 text-blue-400" />
-        <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: -0.5 }}>
-          Backtest
+      <Box sx={{ pb: 1.5, borderBottom: '1px solid', borderColor: 'divider' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5 }}>
+          <FlaskConical className="h-8 w-8 text-blue-400" />
+          <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: -0.5 }}>
+            Backtest
+          </Typography>
+        </Box>
+        <Typography variant="body2" color="text.secondary">
+          Compare how different DCA strategies would have performed using CoinStrat signals over historical data.
         </Typography>
       </Box>
 

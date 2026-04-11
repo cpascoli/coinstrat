@@ -31,6 +31,26 @@ function normalizeLabels(raw: unknown): string[] {
   return out;
 }
 
+function normalizeLinks(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const x of raw) {
+    if (typeof x !== 'string') continue;
+    const t = x.trim();
+    if (!t) continue;
+    try {
+      new URL(t);
+    } catch {
+      continue;
+    }
+    if (seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+  }
+  return out;
+}
+
 function isValidSlug(s: string): boolean {
   return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(s) && s.length <= 128;
 }
@@ -43,6 +63,7 @@ function isValidSlug(s: string): boolean {
  *   summary (string, required)
  *   article (string, required) — full body, stored as plain text
  *   labels (string[], optional) — topic tags for filtering
+ *   source_links (string[], optional) — URLs of source material (e.g. tweets)
  *   slug (string, optional) — URL slug; generated from headline if omitted
  *   published_at (string, optional) — ISO-8601 timestamp
  *
@@ -73,6 +94,7 @@ export const handler: Handler = async (event) => {
   const summary = typeof body.summary === 'string' ? body.summary.trim() : '';
   const article = typeof body.article === 'string' ? body.article : '';
   const labels = normalizeLabels(body.labels);
+  const sourceLinks = normalizeLinks(body.source_links);
 
   if (!headline || !summary || !article.trim()) {
     return {
@@ -130,6 +152,7 @@ export const handler: Handler = async (event) => {
     summary,
     body: article,
     labels,
+    source_links: sourceLinks,
     ...(publishedAt ? { published_at: publishedAt } : {}),
     updated_at: now,
   };
