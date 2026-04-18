@@ -1,10 +1,11 @@
 import { fetchFredSeries, FredObservation } from './fred';
 import {
   fetchBTCPrice,
+  fetchISM_PMI,
+  fetchLTH_NUPL,
   fetchLTH_SOPR,
   fetchLTHRealizedPrice,
   fetchMVRV,
-  fetchNUPL,
   fetchSTHRealizedPrice,
   fetchSupplyInProfit,
   PricePoint,
@@ -65,7 +66,8 @@ export async function computeAllSignals(): Promise<SignalData[]> {
   const [
     walcl, tga, rrp, dxyRaw, sahm, yc, newOrders, btcPrice, mvrv,
     ecbAssets, bojAssets, eurUsd, jpyUsd,
-    lthSopr, nupl, supplyInProfit, sthRealizedPrice, lthRealizedPrice
+    lthSopr, lthNupl, supplyInProfit, sthRealizedPrice, lthRealizedPrice,
+    ismPmi,
   ] = await Promise.all([
     fetchFredSeries("WALCL"),
     fetchFredSeries("WTREGEN"),
@@ -83,10 +85,12 @@ export async function computeAllSignals(): Promise<SignalData[]> {
     fetchFredSeries("DEXJPUS"),     // JPY per USD, daily
     // On-chain valuation metrics from BGeometrics
     fetchLTH_SOPR(),                // Long-Term Holder SOPR, daily
-    fetchNUPL(),                    // Net Unrealized Profit/Loss, daily
+    fetchLTH_NUPL(),                // Long-Term Holder NUPL, daily (display-only)
     fetchSupplyInProfit(),          // Supply in Profit %, daily (Euphoria Exhaustion exit)
     fetchSTHRealizedPrice(),        // Short-Term Holders Realized Price, daily
     fetchLTHRealizedPrice(),        // Long-Term Holders Realized Price, daily
+    // ISM Manufacturing PMI (Investing.com free endpoint)
+    fetchISM_PMI(),
   ]);
 
   // Unit normalization:
@@ -137,14 +141,17 @@ export async function computeAllSignals(): Promise<SignalData[]> {
   fillSeries(newOrders, "NO");
   fillSeries(mvrv, "MVRV");
 
-  // On-chain valuation series (LTH_SOPR used in VAL_SCORE; NUPL display-only)
+  // On-chain valuation series (LTH_SOPR used in VAL_SCORE)
   fillSeries(lthSopr, "LTH_SOPR");
-  fillSeries(nupl, "NUPL");
+  fillSeries(lthNupl, "LTH_NUPL");
   fillSeries(sthRealizedPrice, "STH_REALIZED_PRICE");
   fillSeries(lthRealizedPrice, "LTH_REALIZED_PRICE");
 
   // Supply in Profit (%) — used in Euphoria Exhaustion exit logic
   fillSeries(supplyInProfit, "SIP");
+
+  // ISM Manufacturing PMI (display-only, not used in scoring)
+  fillSeries(ismPmi, "ISM_PMI");
 
   // G3 Global Liquidity raw series
   fillSeries(ecbAssets, "ECB_RAW");   // millions EUR
@@ -207,38 +214,40 @@ export async function computeAllSignals(): Promise<SignalData[]> {
   };
 
   // -- Valuation Score (4-tier: 0–3) --
-  // Combines MVRV (stock metric) with LTH SOPR (flow metric).
+  // Combines NUPL (derived from MVRV) with LTH SOPR (flow metric).
+  // NUPL = 1 − 1/MVRV, a monotonic transform that behaves as a bounded oscillator
+  // (roughly −1 to +1). Unlike raw MVRV, whose peaks decay across cycles, NUPL
+  // thresholds remain structurally stable, making them more predictive for future cycles.
+  //
   // Score 3 = extreme conviction (deep value + capitulation); enters CORE unconditionally.
   // Score 2 = strong (deep value OR capitulation); enters CORE with price regime confirmation.
-  // Score 1 = fair/neutral; MVRV between entry zone and euphoria. Not sufficient for CORE
-  //           entry, but CORE stays ON through hysteresis during normal bull markets.
-  // Score 0 = euphoria/overheated (MVRV ≥ 3.5); triggers CORE exit when paired with DXY headwind.
-  //
-  // The overheated threshold is set at 3.5 rather than 1.8 because MVRV historically
-  // crosses 1.8 early in bull markets and stays above it for months/years. Cycle peaks
-  // have clustered around 3.5–5+ (2013: ~6, 2017: ~4.5, 2021: ~3.8).
+  // Score 1 = fair/neutral; not cheap, not euphoric — normal bull market range.
+  // Score 0 = euphoria/overheated (NUPL ≥ 0.618); triggers CORE exit when trend breaks.
   let lastValScore = 0;
   dailyData.forEach(d => {
     const mvrv = d.MVRV;
-    if (typeof mvrv !== 'number' || isNaN(mvrv)) {
+    if (typeof mvrv !== 'number' || isNaN(mvrv) || mvrv === 0) {
       warnNaN('MVRV (VAL_SCORE)', d.Date);
       d.VAL_SCORE = lastValScore;
       return;
     }
+
+    const nupl = 1 - 1 / mvrv;
+    d.NUPL = nupl;
 
     const sopr = d.LTH_SOPR;
     const soprOk = typeof sopr === 'number' && !isNaN(sopr);
     const capitulating = soprOk && sopr < 1.0;
 
     let score: number;
-    if (mvrv < 1.0 && capitulating) {
-      score = 3; // extreme deep value: both MVRV and LTH SOPR confirm bottom
-    } else if (mvrv < 1.0 || (mvrv < 1.8 && capitulating)) {
-      score = 2; // strong: deep MVRV alone, or fair MVRV + capitulation
-    } else if (mvrv < 3.5) {
+    if (nupl < 0 && capitulating) {
+      score = 3; // extreme deep value: both NUPL and LTH SOPR confirm bottom
+    } else if (nupl < 0 || (nupl < 0.381924 && capitulating)) {
+      score = 2; // strong: negative NUPL alone, or fair NUPL + capitulation
+    } else if (nupl < 0.618) {
       score = 1; // fair/neutral: not cheap, not euphoric — normal bull market range
     } else {
-      score = 0; // euphoria/overheated: MVRV ≥ 3.5 — near cycle peaks
+      score = 0; // euphoria/overheated: NUPL ≥ 0.618 — near cycle peaks
     }
 
     d.VAL_SCORE = score;
@@ -430,7 +439,7 @@ export async function computeAllSignals(): Promise<SignalData[]> {
   //
   //   A) PRICE_REGIME_ON = 0  AND  VAL_SCORE <= 1
   //      Structural trend-break gated by valuation. VAL <= 1 means valuation
-  //      is fair-to-overheated (MVRV ≥ 1.0). This blocks exits when VAL = 2
+  //      is fair-to-overheated (NUPL ≥ 0). This blocks exits when VAL = 2
   //      or 3 (deep value / capitulation) so CORE stays ON at bear bottoms.
   //
   //   B) Euphoria Exhaustion:
@@ -505,7 +514,7 @@ export async function computeAllSignals(): Promise<SignalData[]> {
     if (coreState === 0) {
       // Entry: extreme conviction (VAL=3) enters unconditionally;
       //        VAL >= 1 with uptrend confirmation enters — this allows re-entry
-      //        during bull market pullbacks (score 1 = MVRV < 3.5).
+      //        during bull market pullbacks (score 1 = NUPL < 0.618).
       //        DXY is NOT gated here — it is used only in the MACRO accelerator.
       const entryOk = (val >= 3) || (val >= 1 && pr === 1);
       if (entryOk) {
@@ -520,7 +529,7 @@ export async function computeAllSignals(): Promise<SignalData[]> {
       // Exit: EITHER condition is sufficient:
       //   A) Trend break + overheated valuation:
       //      PRICE_REGIME_ON = 0 AND VAL_SCORE <= 1.
-      //      VAL 0 = euphoria (MVRV ≥ 3.5), VAL 1 = fair (MVRV 1.8–3.5).
+      //      VAL 0 = euphoria (NUPL ≥ 0.618), VAL 1 = fair (NUPL 0.382–0.618).
       //      This prevents exiting at bear-market bottoms where VAL = 2 or 3
       //      (deep value) — CORE stays ON for accumulation during capitulation.
       //   B) Euphoria Exhaustion — SIP was armed (>95% for 14+ days) then failed to

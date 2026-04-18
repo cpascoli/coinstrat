@@ -19,7 +19,8 @@ const PIPELINE: Stage[] = [
     details: [
       'Macro/liquidity inputs include `WALCL`, `WTREGEN`, `RRPONTSYD`, `DTWEXBGS`, `SAHMREALTIME`, and `T10Y3M`.',
       'Market and on-chain inputs include `BTCUSD`, `MVRV`, `LTH_SOPR`, and `SIP`.',
-      'Additional context series like `ECB_RAW`, `BOJ_RAW`, `EURUSD`, `JPYUSD`, and `NUPL` are also cached for transparency and future expansion.',
+      '`NUPL` (Net Unrealized Profit/Loss) is derived from MVRV as `1 − 1/MVRV` and used directly in `VAL_SCORE`.',
+      'Additional context series like `ECB_RAW`, `BOJ_RAW`, `EURUSD`, and `JPYUSD` are also cached for transparency and future expansion.',
       'All series are aligned onto a common daily timeline with forward-filling where appropriate so the model can evaluate a full state each day.',
     ],
   },
@@ -42,7 +43,7 @@ const PIPELINE: Stage[] = [
     summary:
       'The engineered metrics are then discretized into interpretable scores so the model can reason in a stable, rule-based way.',
     details: [
-      '`VAL_SCORE` summarizes whether Bitcoin is in deep value, fair value, or euphoria by combining `MVRV` and `LTH_SOPR`.',
+      '`VAL_SCORE` summarizes whether Bitcoin is in deep value, fair value, or euphoria by combining `NUPL` (derived from `MVRV`) and `LTH_SOPR`.',
       '`LIQ_SCORE` translates net-liquidity expansion or contraction into a 0-2 score.',
       '`CYCLE_SCORE` uses Sahm Rule, the yield curve, and manufacturing new orders to estimate whether the macro backdrop is expansionary, mixed, or recession-risk.',
       '`DXY_SCORE` measures whether the dollar is a headwind, neutral, or supportive, with a persistence filter to avoid false positives.',

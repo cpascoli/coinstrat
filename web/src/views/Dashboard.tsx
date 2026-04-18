@@ -173,6 +173,7 @@ const Dashboard: React.FC<Props> = ({ current, history }) => {
                 <SnapshotRow label="Liquidity YoY" value={fmtPct(current.US_LIQ_YOY)} score={current.LIQ_SCORE} />
                 <SnapshotRow label="Sahm Rule" value={fmtNum(current.SAHM, 2)} score={current.CYCLE_SCORE} />
                 <SnapshotRow label="Yield Curve (10Y-3M)" value={fmtNum(current.YC_M, 2)} score={current.CYCLE_SCORE} />
+                <SnapshotRow label="NUPL" value={fmtNum((current as any).NUPL, 3)} score={current.VAL_SCORE} />
                 <SnapshotRow label="MVRV" value={fmtNum(current.MVRV, 2)} score={current.VAL_SCORE} />
                 <SnapshotRow label="LTH SOPR" value={fmtNum((current as any).LTH_SOPR, 3)} score={typeof (current as any).LTH_SOPR === 'number' && (current as any).LTH_SOPR < 1.0 ? 2 : (typeof (current as any).LTH_SOPR === 'number' && (current as any).LTH_SOPR < 1.5 ? 1 : 0)} />
                 <SnapshotRow label="Supply in Profit" value={typeof current.SIP === 'number' ? fmtPct(current.SIP) : 'n/a'} score={(current.SIP_EXHAUSTED ?? 0) === 1 ? 0 : (current.SIP_EUPHORIA_FLAG ?? 0) === 1 ? 1 : 2} />

@@ -95,6 +95,18 @@ const DATA_FEEDS: DataFeed[] = [
     category: 'business',
   },
   {
+    title: 'ISM Manufacturing PMI',
+    id: 'ISM_PMI',
+    href: 'https://www.ismworld.org/supply-management-news-and-reports/reports/ism-report-on-business/pmi/pmi-history/',
+    meaning: 'Monthly diffusion index (0–100) from the Institute for Supply Management. Readings above 50 signal manufacturing expansion; below 50 signal contraction.',
+    usage: [
+      'Available as a display-only business-cycle input in the Charts and Signal Builder.',
+      'More timely than AMTMNO — released on the first business day of each month with no revision lag.',
+      'The 50-level threshold provides a natural expansion/contraction boundary for custom strategy rules.',
+    ],
+    category: 'business',
+  },
+  {
     title: 'Market Value to Realized Value',
     id: 'MVRV',
     href: 'https://www.blockchain.com/explorer/charts/mvrv',

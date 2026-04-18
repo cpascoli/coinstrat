@@ -457,3 +457,20 @@ March 14 felt like three product layers maturing at once: acquisition (`Free` ac
 - **BTC price source iterations**: 4 (CoinGecko → Blockchain.info → Stooq → Hybrid)
 - **CORE exit logic iterations**: 4
 - **Bugs found in production**: 10+ major across data, auth, newsletter, and admin flows
+
+---
+
+## Session — Apr 2026: MVRV → NUPL Migration in VAL_SCORE
+
+### Work done
+
+- **Replaced raw MVRV thresholds with NUPL** in the VAL_SCORE computation. NUPL is now computed inline from MVRV as `1 − 1/MVRV` rather than fetched as a separate BGeometrics series.
+- **New thresholds**: NUPL < 0 (deep value), NUPL < 0.381924 (fair + capitulation), NUPL < 0.618 (euphoria). These are Fibonacci-derived levels chosen for structural stability across cycles.
+- **Removed `lth_nupl` fetch** from both `engine.ts` and `compute.ts`. The `NUPL` field on each daily row is now populated during VAL_SCORE computation from MVRV, ensuring it's the aggregate (not LTH-specific) variant.
+- **Updated all documentation and UI**: README, JOURNAL, DocsScores, ScoreBreakdown, ChartsView, and engine comments now reference NUPL thresholds. MVRV chart reference lines show NUPL equivalents.
+
+### Rationale
+
+- MVRV peaks have been structurally declining across cycles (2013: ~6, 2017: ~4.5, 2021: ~3.8, 2024: ~2.66). The 3.5 euphoria threshold that caught 2021 may never be reached again.
+- NUPL is a bounded oscillator (roughly −1 to +1) whose euphoria peaks have been stable across cycles (~0.70–0.75). This makes NUPL thresholds more predictive for future cycles.
+- Since NUPL = 1 − 1/MVRV is a monotonic transform, the migration is lossless: identical historical scoring, better forward-looking threshold stability.

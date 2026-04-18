@@ -16,7 +16,7 @@ The web dashboard fetches live data from FRED, Binance, Blockchain.info, and BGe
 
 | Factor | Source | Range | What it measures |
 |--------|--------|-------|------------------|
-| **VAL_SCORE** | MVRV (Blockchain.info) + LTH SOPR (BGeometrics) | 0 / 1 / 2 / 3 | 4-tier on-chain valuation — 3 = extreme (MVRV < 1.0 AND LTH SOPR < 1.0), 2 = strong (MVRV < 1.0 alone, or MVRV < 1.8 + capitulation), 1 = fair/neutral (MVRV < 3.5, not cheap), 0 = euphoria (MVRV ≥ 3.5, near cycle peaks) |
+| **VAL_SCORE** | NUPL (derived from MVRV: 1 − 1/MVRV) + LTH SOPR (BGeometrics) | 0 / 1 / 2 / 3 | 4-tier on-chain valuation — 3 = extreme (NUPL < 0 AND LTH SOPR < 1.0), 2 = strong (NUPL < 0 alone, or NUPL < 0.382 + capitulation), 1 = fair/neutral (NUPL < 0.618), 0 = euphoria (NUPL ≥ 0.618, near cycle peaks) |
 | **LIQ_SCORE** | US Net Liquidity (FRED: WALCL − WTREGEN − RRPONTSYD) | 0 / 1 / 2 | Macro liquidity regime — YoY and 13-week momentum of Fed net liquidity |
 | **DXY_SCORE** | USD Index (FRED: DTWEXBGS) | 0 / 1 / 2 | Currency headwind/tailwind — 200-day rate of change of the broad trade-weighted dollar. Includes a **20/30-day persistence filter** to prevent whipsaw entries |
 | **CYCLE_SCORE** | Sahm Rule, Yield Curve, New Orders (FRED) | 0 / 1 / 2 | Business cycle positioning — recession risk vs expansion |
@@ -43,9 +43,9 @@ ACCUM_ON = CORE_ON
 These are charted for context but do not directly produce their own score:
 
 - **G3 Global Liquidity** — Fed + ECB + BOJ total assets converted to USD
-- **NUPL** — Net Unrealised Profit/Loss (BGeometrics) — mathematically related to MVRV, kept for visual confirmation
+- **NUPL** — Net Unrealised Profit/Loss — now computed from MVRV (= 1 − 1/MVRV) and used directly in VAL_SCORE
 
-Note: **LTH SOPR** is now used in scoring — it amplifies VAL_SCORE in the MVRV fair-value zone (see above).
+Note: **LTH SOPR** is used in scoring — it amplifies VAL_SCORE in the NUPL fair-value zone (see above).
 
 ---
 
@@ -86,7 +86,7 @@ Output metrics: Total Return, Final Portfolio Value, Total Invested, Total Withd
 | **FRED** (Federal Reserve) | WALCL, WTREGEN, RRPONTSYD, DTWEXBGS, SAHMREALTIME, T10Y3M, AMTMNO, ECBASSETSW, JPNASSETS, DEXUSEU, DEXJPUS | Netlify Function (`/api/fred/`) |
 | **Binance** | BTCUSDT klines (daily) | Direct client-side |
 | **Blockchain.info** | MVRV ratio | Direct client-side |
-| **BGeometrics** | LTH SOPR (`lth_sopr`), NUPL (`lth_nupl`) | Netlify Function (`/api/bgeometrics/`) |
+| **BGeometrics** | LTH SOPR (`lth_sopr`), Supply in Profit (`profit_loss`), STH/LTH Realized Prices | Netlify Function (`/api/bgeometrics/`) |
 | **Local** | `public/data/btc_daily.json` — historical BTC prices pre-2018 for backtest coverage | Bundled |
 
 ---

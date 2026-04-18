@@ -190,7 +190,7 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
                     <MetricChip title="Valuation" label="VAL_SCORE" value={current.VAL_SCORE} />
                   </Grid>
                   <Grid item xs={4}>
-                    <MetricChip title="MVRV" label="MVRV" value={typeof current.MVRV === 'number' ? current.MVRV.toFixed(2) : '–'} />
+                    <MetricChip title="NUPL" label="NUPL" value={typeof (current as any).NUPL === 'number' ? ((current as any).NUPL as number).toFixed(3) : '–'} />
                   </Grid>
                   <Grid item xs={4}>
                     <MetricChip title="LTH SOPR" label="LTH_SOPR" value={typeof (current as any).LTH_SOPR === 'number' ? ((current as any).LTH_SOPR as number).toFixed(2) : '–'} />

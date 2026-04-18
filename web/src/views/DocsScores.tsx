@@ -18,19 +18,19 @@ const SCORES: ScoreDoc[] = [
     title: 'Valuation Score',
     badge: 'VAL_SCORE',
     meaning:
-      'Measures how attractive Bitcoin looks from a long-term valuation perspective by combining a stock metric (MVRV) with a flow metric (LTH SOPR).',
+      'Measures how attractive Bitcoin looks from a long-term valuation perspective by combining NUPL (derived from MVRV as 1 − 1/MVRV) with LTH SOPR (flow metric).',
     formula:
-      'If MVRV < 1.0 and LTH_SOPR < 1.0 => 3; else if MVRV < 1.0 or (MVRV < 1.8 and LTH_SOPR < 1.0) => 2; else if MVRV < 3.5 => 1; else => 0.',
+      'NUPL = 1 − 1/MVRV. If NUPL < 0 and LTH_SOPR < 1.0 => 3; else if NUPL < 0 or (NUPL < 0.382 and LTH_SOPR < 1.0) => 2; else if NUPL < 0.618 => 1; else => 0.',
     rationale:
-      'MVRV tells us whether the market is trading below or above realized value. LTH SOPR adds a behavioral layer by checking whether long-term holders are capitulating. Together they distinguish deep-value washouts from normal bull-market conditions and late-cycle euphoria.',
+      'NUPL is a bounded oscillator derived from MVRV that tells us whether the market is trading below or above realized value. Unlike raw MVRV, whose peaks decay across cycles, NUPL thresholds remain structurally stable. LTH SOPR adds a behavioral layer by checking whether long-term holders are capitulating. Together they distinguish deep-value washouts from normal bull-market conditions and late-cycle euphoria.',
     thresholds: [
-      '3 = extreme deep value. Both MVRV and LTH SOPR point to capitulation.',
-      '2 = strong value. Either MVRV is deeply cheap, or valuation is fair but long-term holders are still capitulating.',
-      '1 = fair / neutral. Not especially cheap, but not euphoric either.',
-      '0 = overheated. MVRV >= 3.5, which historically clusters near late-cycle tops.',
+      '3 = extreme deep value. Both NUPL and LTH SOPR point to capitulation (NUPL < 0 and SOPR < 1).',
+      '2 = strong value. Either NUPL is negative (deep value), or NUPL is below 0.382 with long-term holders still capitulating.',
+      '1 = fair / neutral. NUPL between 0.382 and 0.618 — not especially cheap, but not euphoric either.',
+      '0 = overheated. NUPL >= 0.618, which historically clusters near late-cycle tops.',
     ],
     notes: [
-      'The 3.5 ceiling is intentionally higher than the entry zone because Bitcoin often trades above 1.8 for long stretches during bull markets.',
+      'NUPL thresholds are more forward-looking than raw MVRV because MVRV peaks have been trending down each cycle (6 → 4.5 → 3.8 → 2.7), while NUPL euphoria peaks remain stable around 0.70–0.75.',
       'This score is the backbone of the Core Engine.',
     ],
   },

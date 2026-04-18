@@ -76,7 +76,7 @@ Build the **intelligence layer for Bitcoin accumulation** — a vertically integ
 
 ## Competitive Advantages
 
-1. **Unique signal set.** CoinStrat combines macro economics (Fed net liquidity, DXY, yield curve, Sahm Rule) with on-chain valuation (MVRV, LTH SOPR) into a stateful, hysteresis-protected signal engine. No competitor offers this specific combination for accumulation timing.
+1. **Unique signal set.** CoinStrat combines macro economics (Fed net liquidity, DXY, yield curve, Sahm Rule) with on-chain valuation (NUPL derived from MVRV, LTH SOPR) into a stateful, hysteresis-protected signal engine. No competitor offers this specific combination for accumulation timing.
 
 2. **Full vertical integration.** Intelligence (CoinStrat) + Execution (Power Wallet) + Distribution (OpenClaw skill + web). Most competitors are point solutions — a dashboard here, a bot there, a DCA tool somewhere else.
 

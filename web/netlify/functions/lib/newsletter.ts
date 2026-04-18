@@ -1049,7 +1049,7 @@ export async function buildWeeklyContext(weekOf: string): Promise<WeeklyContext>
   const highlights = [
     `BTC closed the week at ${formatCurrency(current.BTCUSD)} (${formatDelta(numericDelta(current.BTCUSD, previousRow?.BTCUSD), 0)} vs. last week).`,
     `Liquidity score is ${current.LIQ_SCORE ?? 'n/a'} (${scoreLabel(current.LIQ_SCORE)}).`,
-    `Valuation score is ${current.VAL_SCORE ?? 'n/a'} with MVRV at ${formatNumber(current.MVRV)}.`,
+    `Valuation score is ${current.VAL_SCORE ?? 'n/a'} with NUPL at ${formatNumber((current as any).NUPL, 3)} (MVRV: ${formatNumber(current.MVRV)}).`,
     `Dollar regime score is ${current.DXY_SCORE ?? 'n/a'} and cycle score is ${current.CYCLE_SCORE ?? 'n/a'}.`,
   ];
 

@@ -74,6 +74,7 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
   const dxyPersist = (current as any).DXY_PERSIST as number | undefined;
 
   const mvrv = current.MVRV;
+  const nupl = (current as any).NUPL as number | undefined;
   const lthSopr = (current as any).LTH_SOPR as number | undefined;
   const btcMa40w = (current as any).BTC_MA40W as number | undefined;
   const priceRegime = (current as any).PRICE_REGIME as number | undefined;
@@ -128,43 +129,46 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
             icon={<Landmark className="h-6 w-6 text-violet-300" />}
             title="BTC Valuation (VAL_SCORE)"
             score={valScore}
-            description="4-tier valuation combining MVRV (stock metric) with LTH SOPR (flow metric). Score 3 = extreme bottom conviction."
-            formula="MVRV + LTH SOPR capitulation thresholds"
+            description="4-tier valuation combining NUPL (derived from MVRV) with LTH SOPR (flow metric). Score 3 = extreme bottom conviction."
+            formula="NUPL (= 1 − 1/MVRV) + LTH SOPR capitulation thresholds"
           >
             <Grid container spacing={1.25}>
               <Grid item xs={12}>
                 <RuleRow
-                  ok={typeof mvrv === 'number' && mvrv < 1.0 && typeof lthSopr === 'number' && lthSopr < 1.0}
-                  label="MVRV < 1.0 AND LTH SOPR < 1.0"
+                  ok={typeof nupl === 'number' && nupl < 0 && typeof lthSopr === 'number' && lthSopr < 1.0}
+                  label="NUPL < 0 AND LTH SOPR < 1.0"
                   result="Score 3 (Extreme Deep Value — unconditional CORE entry)"
                 />
               </Grid>
               <Grid item xs={12}>
                 <RuleRow
                   ok={valScore === 2}
-                  label="(MVRV < 1.0 AND SOPR ≥ 1) OR (MVRV < 1.8 AND SOPR < 1)"
+                  label="(NUPL < 0 AND SOPR ≥ 1) OR (NUPL < 0.382 AND SOPR < 1)"
                   result="Score 2 (Strong — CORE entry with PRICE_REGIME)"
                 />
               </Grid>
               <Grid item xs={12}>
                 <RuleRow
                   ok={valScore === 1}
-                  label="MVRV < 3.5 (and not score 2 or 3)"
+                  label="NUPL < 0.618 (and not score 2 or 3)"
                   result="Score 1 (Fair / Neutral — CORE entry with PRICE_REGIME)"
                 />
               </Grid>
               <Grid item xs={12}>
-                <RuleRow ok={typeof mvrv === 'number' && mvrv >= 3.5} label="MVRV ≥ 3.5" result="Score 0 (Euphoria — triggers CORE exit)" tone="danger" />
+                <RuleRow ok={typeof nupl === 'number' && nupl >= 0.618} label="NUPL ≥ 0.618" result="Score 0 (Euphoria — triggers CORE exit)" tone="danger" />
               </Grid>
             </Grid>
 
             <Divider sx={{ my: 2 }} />
 
             <Grid container spacing={1.25}>
-              <Grid item xs={6}>
+              <Grid item xs={4}>
+                <MetricRow label="NUPL" value={fmtNum(nupl, 3)} />
+              </Grid>
+              <Grid item xs={4}>
                 <MetricRow label="MVRV" value={fmtNum(mvrv, 2)} />
               </Grid>
-              <Grid item xs={6}>
+              <Grid item xs={4}>
                 <MetricRow label="LTH SOPR" value={fmtNum(lthSopr, 3)} />
               </Grid>
             </Grid>

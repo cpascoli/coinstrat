@@ -148,9 +148,10 @@ export async function fetchLTH_SOPR(): Promise<PricePoint[]> {
 }
 
 /**
- * Fetch Net Unrealized Profit/Loss (NUPL) from BGeometrics.
+ * Fetch Long-Term Holder NUPL from BGeometrics (LTH-only variant).
+ * Aggregate NUPL is computed inline from MVRV as 1 − 1/MVRV.
  */
-export async function fetchNUPL(): Promise<PricePoint[]> {
+export async function fetchLTH_NUPL(): Promise<PricePoint[]> {
   return fetchBGeometrics('lth_nupl');
 }
 
@@ -174,6 +175,46 @@ export async function fetchSTHRealizedPrice(): Promise<PricePoint[]> {
  */
 export async function fetchLTHRealizedPrice(): Promise<PricePoint[]> {
   return fetchBGeometrics('lth_realized_price');
+}
+
+/**
+ * Fetch ISM Manufacturing PMI from Investing.com's public calendar endpoint.
+ * Returns monthly readings (one per month) going back to 1970.
+ * The API paginates via next_page_cursor; we follow all pages.
+ */
+export async function fetchISM_PMI(): Promise<PricePoint[]> {
+  const baseUrl =
+    'https://endpoints.investing.com/pd-instruments/v1/calendars/economic/events/173/occurrences?domain_id=1&limit=1000';
+
+  const all: PricePoint[] = [];
+  let url = baseUrl;
+
+  try {
+    while (url) {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`ISM PMI fetch error: ${response.statusText}`);
+      const json = await response.json();
+      const occurrences: any[] = json.occurrences ?? [];
+
+      for (const o of occurrences) {
+        if (o.actual == null) continue;
+        const date = o.occurrence_time?.split('T')[0];
+        if (!date) continue;
+        all.push({ date, value: Number(o.actual) });
+      }
+
+      if (json.next_page_cursor) {
+        url = `${baseUrl}&cursor=${encodeURIComponent(json.next_page_cursor)}`;
+      } else {
+        break;
+      }
+    }
+
+    return all.sort((a, b) => a.date.localeCompare(b.date));
+  } catch (error) {
+    console.error('Error fetching ISM PMI:', error);
+    return [];
+  }
 }
 
 /**

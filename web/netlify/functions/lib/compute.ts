@@ -168,6 +168,36 @@ export async function fetchBGeometrics(file: string): Promise<DataPoint[]> {
     }));
 }
 
+async function fetchISM_PMI(): Promise<DataPoint[]> {
+  const baseUrl =
+    'https://endpoints.investing.com/pd-instruments/v1/calendars/economic/events/173/occurrences?domain_id=1&limit=1000';
+
+  const all: DataPoint[] = [];
+  let url = baseUrl;
+
+  while (url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`ISM PMI: HTTP ${res.status}`);
+    const json = (await res.json()) as any;
+    const occurrences: any[] = json.occurrences ?? [];
+
+    for (const o of occurrences) {
+      if (o.actual == null) continue;
+      const date = o.occurrence_time?.split('T')[0];
+      if (!date) continue;
+      all.push({ date, value: Number(o.actual) });
+    }
+
+    if (json.next_page_cursor) {
+      url = `${baseUrl}&cursor=${encodeURIComponent(json.next_page_cursor)}`;
+    } else {
+      break;
+    }
+  }
+
+  return all.sort((a, b) => a.date.localeCompare(b.date));
+}
+
 // ── Merge helper ────────────────────────────────────────────────────────
 
 /**
@@ -225,7 +255,8 @@ export async function refreshSignals(
     walcl, tga, rrp, dxyRaw, sahm, yc, newOrders,
     btcPrices, mvrv,
     ecbAssets, bojAssets, eurUsd, jpyUsd,
-    lthSopr, nupl, supplyInProfit, sthRealizedPrice, lthRealizedPrice,
+    lthSopr, lthNupl, supplyInProfit, sthRealizedPrice, lthRealizedPrice,
+    ismPmi,
   ] = await Promise.all([
     fetchFredSeries('WALCL', fullHistory),
     fetchFredSeries('WTREGEN', fullHistory),
@@ -245,6 +276,7 @@ export async function refreshSignals(
     fetchBGeometrics('profit_loss'),
     fetchBGeometrics('sth_realized_price'),
     fetchBGeometrics('lth_realized_price'),
+    fetchISM_PMI(),
   ]);
 
   const rrpM = rrp.map((o) => ({ ...o, value: o.value * 1000 }));
@@ -271,9 +303,9 @@ export async function refreshSignals(
 
   const cachedByDate = new Map(cachedSignals.map((s) => [s.Date, s]));
   const seedKeys = [
-    'BTCUSD', 'DXY', 'SAHM', 'YC_M', 'NO', 'MVRV', 'US_LIQ', 'SIP', 'LTH_SOPR',
-    'NUPL', 'STH_REALIZED_PRICE', 'LTH_REALIZED_PRICE', 'ECB_RAW', 'BOJ_RAW', 'EURUSD', 'JPYUSD', 'WALCL', 'WTREGEN', 'RRPONTSYD',
-    'G3_ASSETS',
+    'BTCUSD', 'DXY', 'SAHM', 'YC_M', 'NO', 'MVRV', 'US_LIQ', 'SIP', 'LTH_SOPR', 'LTH_NUPL',
+    'STH_REALIZED_PRICE', 'LTH_REALIZED_PRICE', 'ECB_RAW', 'BOJ_RAW', 'EURUSD', 'JPYUSD', 'WALCL', 'WTREGEN', 'RRPONTSYD',
+    'G3_ASSETS', 'ISM_PMI',
   ];
 
   for (let i = 0; i < allDates.length; i++) {
@@ -294,10 +326,11 @@ export async function refreshSignals(
   overlaySeries(newOrders, daily, allDates, 'NO');
   overlaySeries(mvrv, daily, allDates, 'MVRV');
   overlaySeries(lthSopr, daily, allDates, 'LTH_SOPR');
-  overlaySeries(nupl, daily, allDates, 'NUPL');
+  overlaySeries(lthNupl, daily, allDates, 'LTH_NUPL');
   overlaySeries(sthRealizedPrice, daily, allDates, 'STH_REALIZED_PRICE');
   overlaySeries(lthRealizedPrice, daily, allDates, 'LTH_REALIZED_PRICE');
   overlaySeries(supplyInProfit, daily, allDates, 'SIP');
+  overlaySeries(ismPmi, daily, allDates, 'ISM_PMI');
   overlaySeries(ecbAssets, daily, allDates, 'ECB_RAW');
   overlaySeries(bojAssets, daily, allDates, 'BOJ_RAW');
   overlaySeries(eurUsd, daily, allDates, 'EURUSD');
@@ -342,19 +375,21 @@ export async function refreshSignals(
 
   // 6. Scores ─────────────────────────────────────────────────────────
 
-  // -- Valuation Score (0-3) --
+  // -- Valuation Score (0-3) via NUPL = 1 − 1/MVRV --
   let lastVal = 0;
   for (const d of daily) {
     const mv = d.MVRV;
-    if (typeof mv !== 'number' || isNaN(mv)) { d.VAL_SCORE = lastVal; continue; }
+    if (typeof mv !== 'number' || isNaN(mv) || mv === 0) { d.VAL_SCORE = lastVal; continue; }
+    const nupl = 1 - 1 / mv;
+    d.NUPL = nupl;
     const sopr = d.LTH_SOPR;
     const soprOk = typeof sopr === 'number' && !isNaN(sopr);
     const cap = soprOk && sopr < 1.0;
 
     let sc: number;
-    if (mv < 1.0 && cap) sc = 3;
-    else if (mv < 1.0 || (mv < 1.8 && cap)) sc = 2;
-    else if (mv < 3.5) sc = 1;
+    if (nupl < 0 && cap) sc = 3;
+    else if (nupl < 0 || (nupl < 0.381924 && cap)) sc = 2;
+    else if (nupl < 0.618) sc = 1;
     else sc = 0;
     d.VAL_SCORE = sc; lastVal = sc;
   }
