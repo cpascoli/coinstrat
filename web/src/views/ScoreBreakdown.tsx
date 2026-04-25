@@ -155,7 +155,7 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
                 />
               </Grid>
               <Grid item xs={12}>
-                <RuleRow ok={typeof nupl === 'number' && nupl >= 0.618} label="NUPL ≥ 0.618" result="Score 0 (Euphoria — triggers CORE exit)" tone="danger" />
+                <RuleRow ok={typeof nupl === 'number' && nupl >= 0.618} label="NUPL ≥ 0.618" result="Score 0 (Euphoria — can trigger CORE exit)" tone="danger" />
               </Grid>
             </Grid>
 

@@ -171,15 +171,15 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
                   tone='default'
                 />
                 <LogicRule
-                  title="Condition B — Euphoria Exhaustion (SIP armed then failed to reclaim)"
-                  formula="SIP_EUPHORIA_FLAG = 1 → SIP_EXHAUSTED = 1"
-                  active={(current.SIP_EXHAUSTED ?? 0) === 1}
+                  title="Condition B — Euphoria Exhaustion + euphoric valuation"
+                  formula="SIP_EXHAUSTED = 1  AND  VAL_SCORE = 0"
+                  active={(current.SIP_EXHAUSTED ?? 0) === 1 && current.VAL_SCORE === 0}
                   tone='default'
                 />
                 <LogicRule
                   title="EXIT triggers when EITHER A OR B is TRUE"
-                  formula="(PRICE_REGIME = 0 AND VAL_SCORE ≤ 1)  OR  SIP_EXHAUSTED = 1"
-                  active={(current.PRICE_REGIME_ON === 0 && current.VAL_SCORE <= 1) || (current.SIP_EXHAUSTED ?? 0) === 1}
+                  formula="(PRICE_REGIME = 0 AND VAL_SCORE ≤ 1)  OR  (SIP_EXHAUSTED = 1 AND VAL_SCORE = 0)"
+                  active={(current.PRICE_REGIME_ON === 0 && current.VAL_SCORE <= 1) || ((current.SIP_EXHAUSTED ?? 0) === 1 && current.VAL_SCORE === 0)}
                   tone="danger"
                 />
 

@@ -518,11 +518,12 @@ export async function refreshSignals(
 
   const SIP_EUPHORIA_THRESHOLD = 95;
   const SIP_EUPHORIA_MIN_DAYS = 14;
+  const SIP_EUPHORIA_WINDOW_DAYS = 21;
   const SIP_DROP_THRESHOLD = 90;
   const SIP_RECLAIM_WINDOW = 45;
 
   let coreState = 0;
-  let euphoriaStreak = 0;
+  let euphoriaWindow: number[] = [];
   let euphoriaFlag = false;
   let observationStart = -1;
   let sipExhausted = false;
@@ -534,10 +535,10 @@ export async function refreshSignals(
     const sip = d.SIP;
     const sipOk = typeof sip === 'number' && !isNaN(sip);
 
-    if (sipOk && sip > SIP_EUPHORIA_THRESHOLD) {
-      euphoriaStreak++;
-      if (euphoriaStreak >= SIP_EUPHORIA_MIN_DAYS && !euphoriaFlag) euphoriaFlag = true;
-    } else { euphoriaStreak = 0; }
+    euphoriaWindow.push(sipOk && sip > SIP_EUPHORIA_THRESHOLD ? 1 : 0);
+    if (euphoriaWindow.length > SIP_EUPHORIA_WINDOW_DAYS) euphoriaWindow.shift();
+    const euphoriaDays = euphoriaWindow.reduce((sum, v) => sum + v, 0);
+    if (euphoriaDays >= SIP_EUPHORIA_MIN_DAYS && !euphoriaFlag) euphoriaFlag = true;
 
     if (euphoriaFlag && sipOk) {
       if (observationStart === -1 && sip < SIP_DROP_THRESHOLD) {
@@ -545,7 +546,7 @@ export async function refreshSignals(
       }
       if (observationStart >= 0) {
         if (sip > SIP_EUPHORIA_THRESHOLD) {
-          observationStart = -1; sipExhausted = false; euphoriaStreak = 1;
+          observationStart = -1; sipExhausted = false;
         } else if (i - observationStart >= SIP_RECLAIM_WINDOW) {
           sipExhausted = true;
         }
@@ -557,11 +558,11 @@ export async function refreshSignals(
     if (coreState === 0) {
       if (val >= 3 || (val >= 1 && pr === 1)) {
         coreState = 1;
-        euphoriaFlag = false; euphoriaStreak = 0;
+        euphoriaFlag = false; euphoriaWindow = [];
         observationStart = -1; sipExhausted = false;
       }
     } else {
-      if ((pr === 0 && val <= 1) || sipExhausted) coreState = 0;
+      if ((pr === 0 && val <= 1) || (sipExhausted && val === 0)) coreState = 0;
     }
     d.CORE_ON = coreState;
 

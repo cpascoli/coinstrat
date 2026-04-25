@@ -454,23 +454,24 @@ export async function computeAllSignals(): Promise<SignalData[]> {
   //      or 3 (deep value / capitulation) so CORE stays ON at bear bottoms.
   //
   //   B) Euphoria Exhaustion:
-  //      Phase 1 — ARM: Supply in Profit > 95% for 14+ consecutive days.
+  //      Phase 1 — ARM: Supply in Profit > 95% for at least 14 of the last 21 days.
   //      Phase 2 — EXHAUST: SIP drops below 90% and fails to reclaim 95%
-  //                within 45 days. This can fire even while price is still
-  //                above the 40W SMA, giving an earlier exit signal.
+  //                within 45 days. This can fire before the 40W trend breaks,
+  //                but only when valuation is truly euphoric (VAL_SCORE = 0).
   //
   // Re-entry requires either deep value (VAL >= 3) or an uptrend
   // (VAL >= 1 AND PRICE_REGIME = 1) with supportive DXY.
 
   const SIP_EUPHORIA_THRESHOLD = 95;
   const SIP_EUPHORIA_MIN_DAYS = 14;
+  const SIP_EUPHORIA_WINDOW_DAYS = 21;
   const SIP_DROP_THRESHOLD = 90;
   const SIP_RECLAIM_WINDOW = 45;
 
   let coreState = 0;
 
   // Euphoria Exhaustion state
-  let euphoriaStreak = 0;        // consecutive days with SIP > 95%
+  let euphoriaWindow: number[] = []; // rolling 21-day window: 1 when SIP > 95
   let euphoriaFlag = false;      // latching: has euphoria been detected this cycle?
   let observationStart = -1;     // index when SIP first dropped below 90% after arming
   let sipExhausted = false;      // Signal A: SIP failed to reclaim within window
@@ -484,14 +485,14 @@ export async function computeAllSignals(): Promise<SignalData[]> {
 
     // --- Euphoria Exhaustion state machine ---
 
-    // Phase 1: Track euphoria streaks
-    if (sipOk && sip > SIP_EUPHORIA_THRESHOLD) {
-      euphoriaStreak++;
-      if (euphoriaStreak >= SIP_EUPHORIA_MIN_DAYS && !euphoriaFlag) {
-        euphoriaFlag = true;
-      }
-    } else {
-      euphoriaStreak = 0;
+    // Phase 1: Track persistent euphoria without requiring a perfect streak.
+    euphoriaWindow.push(sipOk && sip > SIP_EUPHORIA_THRESHOLD ? 1 : 0);
+    if (euphoriaWindow.length > SIP_EUPHORIA_WINDOW_DAYS) {
+      euphoriaWindow.shift();
+    }
+    const euphoriaDays = euphoriaWindow.reduce((sum, v) => sum + v, 0);
+    if (euphoriaDays >= SIP_EUPHORIA_MIN_DAYS && !euphoriaFlag) {
+      euphoriaFlag = true;
     }
 
     // Phase 2: Observation window (only when euphoria has been armed)
@@ -507,7 +508,6 @@ export async function computeAllSignals(): Promise<SignalData[]> {
         if (sip > SIP_EUPHORIA_THRESHOLD) {
           observationStart = -1;
           sipExhausted = false;
-          euphoriaStreak = 1; // re-start counting
         }
         // Check if 45 days elapsed without reclaiming
         else if ((i - observationStart) >= SIP_RECLAIM_WINDOW) {
@@ -532,7 +532,7 @@ export async function computeAllSignals(): Promise<SignalData[]> {
         coreState = 1;
         // Reset euphoria state for the new cycle
         euphoriaFlag = false;
-        euphoriaStreak = 0;
+        euphoriaWindow = [];
         observationStart = -1;
         sipExhausted = false;
       }
@@ -543,9 +543,12 @@ export async function computeAllSignals(): Promise<SignalData[]> {
       //      VAL 0 = euphoria (NUPL ≥ 0.618), VAL 1 = fair (NUPL 0.382–0.618).
       //      This prevents exiting at bear-market bottoms where VAL = 2 or 3
       //      (deep value) — CORE stays ON for accumulation during capitulation.
-      //   B) Euphoria Exhaustion — SIP was armed (>95% for 14+ days) then failed to
-      //      reclaim 95% within 45 days after dropping below 90%.
-      const exitOk = (pr === 0 && val <= 1) || sipExhausted;
+      //   B) Euphoria Exhaustion + true euphoria:
+      //      SIP was armed (>95% for at least 14 of the last 21 days), failed to reclaim 95% within
+      //      45 days after dropping below 90%, and valuation is still euphoric.
+      //      Requiring VAL = 0 avoids one-day CORE_OFF blips when SIP exhausts
+      //      during otherwise fair, still-uptrending markets.
+      const exitOk = (pr === 0 && val <= 1) || (sipExhausted && val === 0);
       if (exitOk) {
         coreState = 0;
         // Do NOT reset euphoria tracking on exit. The tracking reflects

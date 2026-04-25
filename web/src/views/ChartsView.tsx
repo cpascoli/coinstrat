@@ -437,27 +437,33 @@ const ChartsView: React.FC<Props> = ({ data }) => {
     });
   }, [chartData]);
 
-  // SIP chart only: background shading (not raw engine flags). 0 = no fill (pre‑first‑arm), 1 = green, 2 = red.
-  // Red latches when SIP_EXHAUSTED first fires and stays until the next SIP_EUPHORIA_FLAG rising edge (new arm).
-  // After the first arm, we never use state 0 — only green or red so the plot is never “plain” again.
+  // SIP chart only: background shading. 0 = no fill (pre-first-arm), 1 = green, 2 = red.
+  // Derive the visual "armed" state from raw SIP instead of SIP_EUPHORIA_FLAG.
+  // SIP_EUPHORIA_FLAG is an engine diagnostic and may stay latched across CORE
+  // states; the chart should still turn green again after a fresh 14-of-21-day
+  // reclaim above 95%.
   const sipChartBackgroundSpans = useMemo(() => {
     const spans: { x1: number; x2: number; value: 0 | 1 | 2 }[] = [];
     if (!chartData.length) return spans;
 
     let holdRedUntilNextArm = false;
     let everArmed = false;
+    let sipEuphoriaWindow: number[] = [];
     const visual: (0 | 1 | 2)[] = [];
 
     for (let i = 0; i < chartData.length; i++) {
       const d = chartData[i] as any;
-      const armed = Number(d.SIP_EUPHORIA_FLAG) === 1;
+      const sip = Number(d.SIP);
+      const sipOk = Number.isFinite(sip);
+      sipEuphoriaWindow.push(sipOk && sip > 95 ? 1 : 0);
+      if (sipEuphoriaWindow.length > 21) sipEuphoriaWindow.shift();
+      const armed = sipEuphoriaWindow.reduce((sum, v) => sum + v, 0) >= 14;
       const exhausted = Number(d.SIP_EXHAUSTED) === 1;
       const prev = i > 0 ? (chartData[i - 1] as any) : null;
-      const prevArmed = prev ? Number(prev.SIP_EUPHORIA_FLAG) === 1 : false;
       const prevExhausted = prev ? Number(prev.SIP_EXHAUSTED) === 1 : false;
 
       if (exhausted && !prevExhausted) holdRedUntilNextArm = true;
-      if (armed && !prevArmed) holdRedUntilNextArm = false;
+      if (armed) holdRedUntilNextArm = false;
 
       let v: 0 | 1 | 2;
       if (!everArmed) v = armed ? 1 : 0;
@@ -1043,10 +1049,10 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
             Percentage of total BTC supply currently in profit (current price above the price at which coins last moved on-chain).
             <br />
-            Used in the Euphoria Exhaustion exit logic: when SIP stays above 95% for 14+ days the exit is armed;
-            if SIP then drops below 90% and fails to reclaim 95% within 45 days, exhaustion is confirmed.
+            Used in the Euphoria Exhaustion logic: when SIP is above 95% for at least 14 of the last 21 days the setup is armed;
+            if SIP then drops below 90% and fails to reclaim 95% within 45 days, exhaustion is confirmed and can contribute to a CORE exit while valuation is euphoric.
             <br />
-            Chart shading only: red stays on from the first exhaustion day until the next euphoria‑arm day (rising edge of SIP_EUPHORIA_FLAG); after the first arm, the background is only green or red (never unshaded).
+            Chart shading only: red stays on from the first exhaustion day until SIP completes a fresh 14-of-21-day reclaim above 95%; after the first arm, the background is only green or red (never unshaded).
           </Typography>
         </Box>
 

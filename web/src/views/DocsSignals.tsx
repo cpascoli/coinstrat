@@ -35,14 +35,14 @@ const SIGNALS: SignalDoc[] = [
     meaning:
       'The main accumulation permission. It decides whether CoinStrat should be in base accumulation mode or stay sidelined.',
     formula:
-      'Entry when VAL_SCORE >= 3 or (VAL_SCORE >= 1 and PRICE_REGIME_ON = 1). Exit when (PRICE_REGIME_ON = 0 and VAL_SCORE <= 1) or SIP_EXHAUSTED = 1.',
+      'Entry when VAL_SCORE >= 3 or (VAL_SCORE >= 1 and PRICE_REGIME_ON = 1). Exit when (PRICE_REGIME_ON = 0 and VAL_SCORE <= 1) or (SIP_EXHAUSTED = 1 and VAL_SCORE = 0).',
     rationale:
       'The Core Engine is designed to buy deep value aggressively, stay invested through normal bull-market noise, and exit when trend damage and valuation no longer justify accumulation. It is intentionally stateful so it can hold through noisy intermediate conditions instead of flipping every day.',
     rules: [
       'Entry rule 1: extreme value alone is enough. If VAL_SCORE = 3, no trend confirmation is required.',
       'Entry rule 2: if valuation is at least fair and trend is constructive, Core can turn on.',
       'Exit rule A: if the trend breaks and valuation is no longer deep value, Core turns off.',
-      'Exit rule B: if the market enters a euphoria exhaustion pattern, Core turns off even if price is still elevated.',
+      'Exit rule B: if the market enters a euphoria exhaustion pattern while valuation is truly euphoric, Core can turn off before the trend filter fully breaks.',
     ],
     notes: [
       'DXY is not used for Core entry. The dollar filter only affects the Macro Accelerator.',
@@ -55,17 +55,17 @@ const SIGNALS: SignalDoc[] = [
     meaning:
       'A two-phase exit mechanism based on Supply in Profit that tries to detect when a mature bull market has started to roll over.',
     formula:
-      'Arm when SIP > 95 for 14+ consecutive days. Then open an observation window once SIP drops below 90. If SIP does not reclaim 95 within 45 days, set SIP_EXHAUSTED = 1.',
+      'Arm when SIP > 95 for at least 14 of the last 21 days. Then open an observation window once SIP drops below 90. If SIP does not reclaim 95 within 45 days, set SIP_EXHAUSTED = 1.',
     rationale:
       'Late-cycle tops often do not fail in one clean step. This sequence captures an overheated market, a loss of momentum, and a failed recovery. It gives the model a way to exit before the longer-term trend filter fully breaks down.',
     rules: [
-      'Phase 1: arm the setup after at least 14 straight days above 95 percent Supply in Profit.',
+      'Phase 1: arm the setup after at least 14 of the last 21 days above 95 percent Supply in Profit.',
       'Phase 2: once armed, a drop below 90 percent starts the observation clock.',
       'If SIP reclaims 95 percent within 45 days, the setup resets and no exhaustion is confirmed.',
-      'If SIP fails to reclaim within 45 days, SIP_EXHAUSTED becomes true and can force a Core exit.',
+      'If SIP fails to reclaim within 45 days, SIP_EXHAUSTED becomes true and can force a Core exit only while VAL_SCORE = 0.',
     ],
     notes: [
-      'This logic is meant to catch bull-market deterioration that may appear before price loses the 40-week trend filter.',
+      'This logic is meant to catch bull-market deterioration that may appear before price loses the 40-week trend filter, while avoiding fair-valuation whipsaws.',
     ],
   },
   {
