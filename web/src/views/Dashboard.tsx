@@ -40,7 +40,7 @@ const Dashboard: React.FC<Props> = ({ current, history }) => {
   const statCards = useMemo(
     () => [
       { title: 'Liquidity', value: current.LIQ_SCORE, max: 2, icon: <Activity className="text-blue-300" /> },
-      { title: 'Business Cycle', value: current.CYCLE_SCORE, max: 2, icon: <TrendingUp className="text-emerald-300" /> },
+      { title: 'Business Cycle', value: current.BIZ_CYCLE_SCORE, max: 2, icon: <TrendingUp className="text-emerald-300" /> },
       { title: 'USD', value: current.DXY_SCORE, max: 2, icon: <Activity className="text-amber-300" /> },
       { title: 'Valuation', value: current.VAL_SCORE, max: 3, icon: <Info className="text-violet-300" /> },
     ],
@@ -171,8 +171,8 @@ const Dashboard: React.FC<Props> = ({ current, history }) => {
               <TableBody>
                 <SnapshotRow label="US Net Liquidity" value={fmtTrillions(current.US_LIQ)} score={current.LIQ_SCORE} />
                 <SnapshotRow label="Liquidity YoY" value={fmtPct(current.US_LIQ_YOY)} score={current.LIQ_SCORE} />
-                <SnapshotRow label="Sahm Rule" value={fmtNum(current.SAHM, 2)} score={current.CYCLE_SCORE} />
-                <SnapshotRow label="Yield Curve (10Y-3M)" value={fmtNum(current.YC_M, 2)} score={current.CYCLE_SCORE} />
+                <SnapshotRow label="Sahm Rule" value={fmtNum(current.SAHM, 2)} score={current.BIZ_CYCLE_SCORE} />
+                <SnapshotRow label="Yield Curve (10Y-3M)" value={fmtNum(current.YC_M, 2)} score={current.BIZ_CYCLE_SCORE} />
                 <SnapshotRow label="NUPL" value={fmtNum((current as any).NUPL, 3)} score={current.VAL_SCORE} />
                 <SnapshotRow label="MVRV" value={fmtNum(current.MVRV, 2)} score={current.VAL_SCORE} />
                 <SnapshotRow label="LTH SOPR" value={fmtNum((current as any).LTH_SOPR, 3)} score={typeof (current as any).LTH_SOPR === 'number' && (current as any).LTH_SOPR < 1.0 ? 2 : (typeof (current as any).LTH_SOPR === 'number' && (current as any).LTH_SOPR < 1.5 ? 1 : 0)} />

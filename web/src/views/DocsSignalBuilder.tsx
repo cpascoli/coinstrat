@@ -291,7 +291,7 @@ function formatSeriesValue(value: number | null, key: string): string {
   if (['CORE_ON', 'MACRO_ON', 'ACCUM_ON', 'PRICE_REGIME_ON', 'SIP_EXHAUSTED'].includes(key)) {
     return value === 1 ? 'ON' : 'OFF';
   }
-  if (['VAL_SCORE', 'LIQ_SCORE', 'DXY_SCORE', 'CYCLE_SCORE'].includes(key)) return String(value);
+  if (['VAL_SCORE', 'LIQ_SCORE', 'DXY_SCORE', 'BIZ_CYCLE_SCORE'].includes(key)) return String(value);
   if (['SIP', 'US_LIQ_YOY', 'G3_YOY'].includes(key)) return `${value.toFixed(2)}%`;
   if (['WALCL', 'WTREGEN', 'RRPONTSYD', 'US_LIQ', 'US_LIQ_13W_DELTA', 'ECB_RAW', 'BOJ_RAW', 'G3_ASSETS'].includes(key)) {
     const abs = Math.abs(value);

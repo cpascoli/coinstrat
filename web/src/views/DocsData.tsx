@@ -97,7 +97,7 @@ const DATA_FEEDS: DataFeed[] = [
   {
     title: 'ISM Manufacturing PMI',
     id: 'ISM_PMI',
-    href: 'https://www.ismworld.org/supply-management-news-and-reports/reports/ism-report-on-business/pmi/pmi-history/',
+    href: 'https://www.investing.com/economic-calendar/ism-manufacturing-pmi-173',
     meaning: 'Monthly diffusion index (0–100) from the Institute for Supply Management. Readings above 50 signal manufacturing expansion; below 50 signal contraction.',
     usage: [
       'Available as a display-only business-cycle input in the Charts and Signal Builder.',

@@ -446,29 +446,43 @@ export async function refreshSignals(
   });
 
   // -- Cycle Score --
+  // NO_YOY / NO_MOM3 kept for display; scoring uses ISM PMI persistence.
   const noVals = daily.map((d) => typeof d.NO === 'number' ? d.NO : NaN);
   const noYoY = pctChange(noVals, 365);
   const noMom3 = diffArr(noVals, 90);
 
+  let ismAbove50Days = 0;
+  let ismBelow45Days = 0;
+
   let lastCyc = 1;
   daily.forEach((d, i) => {
-    const sv = d.SAHM; const yv = d.YC_M;
     const nY = noYoY[i]; const nM = noMom3[i];
     d.NO_YOY = isNaN(nY) ? undefined : nY * 100;
     d.NO_MOM3 = isNaN(nM) ? undefined : nM;
 
+    const pmi = d.ISM_PMI;
+    const pmiOk = typeof pmi === 'number' && !isNaN(pmi);
+    if (pmiOk) {
+      ismAbove50Days = pmi >= 50 ? ismAbove50Days + 1 : 0;
+      ismBelow45Days = pmi < 45 ? ismBelow45Days + 1 : 0;
+    }
+    d.ISM_PMI_ABOVE50_DAYS = ismAbove50Days;
+    d.ISM_PMI_BELOW45_DAYS = ismBelow45Days;
+
+    const sv = d.SAHM; const yv = d.YC_M;
     const sOk = typeof sv === 'number' && !isNaN(sv);
     const yOk = typeof yv === 'number' && !isNaN(yv);
-    const nYOk = typeof nY === 'number' && !isNaN(nY);
-    const nMOk = typeof nM === 'number' && !isNaN(nM);
-    if (!sOk && !yOk && !nYOk) { d.CYCLE_SCORE = lastCyc; return; }
+    if (!sOk && !yOk && !pmiOk) { d.BIZ_CYCLE_SCORE = lastCyc; return; }
 
-    const recession =
-      (sOk && sv >= 0.5) || (yOk && yv < 0) || (nYOk && nMOk && nY < 0 && nM <= 0);
+    let recessionFlags = 0;
+    if (sOk && sv >= 0.5) recessionFlags++;
+    if (yOk && yv < 0) recessionFlags++;
+    if (pmiOk && ismBelow45Days >= 60) recessionFlags++;
+    const recession = recessionFlags >= 2;
     const expansion =
-      (sOk ? sv < 0.35 : true) && (yOk ? yv >= 0.75 : true) && (nYOk ? nY >= 0 : true);
-    d.CYCLE_SCORE = recession ? 0 : expansion ? 2 : 1;
-    lastCyc = d.CYCLE_SCORE;
+      (sOk ? sv < 0.35 : true) && (yOk ? yv >= 0.75 : true) && (pmiOk ? ismAbove50Days >= 90 : true);
+    d.BIZ_CYCLE_SCORE = recession ? 0 : expansion ? 2 : 1;
+    lastCyc = d.BIZ_CYCLE_SCORE;
   });
 
   // -- BTC MA200 --
@@ -555,7 +569,7 @@ export async function refreshSignals(
     d.SIP_EXHAUSTED = sipExhausted || sipExhaustedBeforeCore ? 1 : 0;
     d.SIP_OBS_DAYS = observationStart >= 0 ? i - observationStart : 0;
 
-    const ab = d.LIQ_SCORE + d.CYCLE_SCORE;
+    const ab = d.LIQ_SCORE + d.BIZ_CYCLE_SCORE;
     d.AB_SCORE = ab;
     d.ABCD_SCORE = ab + d.DXY_SCORE + d.VAL_SCORE;
     d.MACRO_ON = ab >= 3 && dxy >= 1 ? 1 : 0;

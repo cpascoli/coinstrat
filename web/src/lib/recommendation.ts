@@ -14,7 +14,7 @@ export type RecommendationInput = {
   PRICE_REGIME_ON: number;
   DXY_SCORE: number;
   LIQ_SCORE: number;
-  CYCLE_SCORE: number;
+  BIZ_CYCLE_SCORE: number;
   VAL_SCORE: number;
 };
 
@@ -24,7 +24,7 @@ export function getRecommendation(current: RecommendationInput): RecommendationR
   const pr = current.PRICE_REGIME_ON;
   const dxy = current.DXY_SCORE;
   const liq = current.LIQ_SCORE;
-  const cyc = current.CYCLE_SCORE;
+  const cyc = current.BIZ_CYCLE_SCORE;
   const val = current.VAL_SCORE;
 
   let action: RecommendationAction = 'PAUSE';

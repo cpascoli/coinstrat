@@ -40,7 +40,7 @@ Build the **intelligence layer for Bitcoin accumulation** — a vertically integ
 │                                                          │
 │  CoinStrat Signal API                                    │
 │  ├── CORE_ON / MACRO_ON / ACCUM_ON (composite signals)  │
-│  ├── VAL_SCORE, LIQ_SCORE, DXY_SCORE, CYCLE_SCORE      │
+│  ├── VAL_SCORE, LIQ_SCORE, DXY_SCORE, BIZ_CYCLE_SCORE      │
 │  ├── Real-time + historical time series                  │
 │  └── Webhooks for signal-flip events                     │
 │                                                          │

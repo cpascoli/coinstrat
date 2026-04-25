@@ -26,7 +26,7 @@ export const STRATEGY_SERIES_CATALOG = [
   { key: 'VAL_SCORE', label: 'Valuation Score', kind: 'signal', group: 'scores', description: 'CoinStrat valuation score.' },
   { key: 'LIQ_SCORE', label: 'Liquidity Score', kind: 'signal', group: 'scores', description: 'CoinStrat liquidity score.' },
   { key: 'DXY_SCORE', label: 'Dollar Score', kind: 'signal', group: 'scores', description: 'CoinStrat DXY score.' },
-  { key: 'CYCLE_SCORE', label: 'Business Cycle Score', kind: 'signal', group: 'scores', description: 'CoinStrat business cycle score.' },
+  { key: 'BIZ_CYCLE_SCORE', label: 'Business Cycle Score', kind: 'signal', group: 'scores', description: 'CoinStrat business cycle score.' },
   { key: 'CORE_ON', label: 'CORE_ON', kind: 'signal', group: 'signals', description: 'Core accumulation signal.' },
   { key: 'MACRO_ON', label: 'MACRO_ON', kind: 'signal', group: 'signals', description: 'Macro acceleration signal.' },
   { key: 'ACCUM_ON', label: 'ACCUM_ON', kind: 'signal', group: 'signals', description: 'Composite accumulation signal.' },

@@ -32,7 +32,7 @@ const SCORE_TABS = [
   },
   {
     label: 'Business Cycle',
-    oneLiner: 'Expansion vs recession risk from the Sahm rule, yield curve, and manufacturing new orders.',
+    oneLiner: 'Expansion vs recession risk from the Sahm rule, yield curve, and ISM Manufacturing PMI.',
   },
   {
     label: 'USD Regime',
@@ -48,7 +48,7 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
   const [scoreTab, setScoreTab] = useState(0);
 
   const liqScore = current.LIQ_SCORE;
-  const cycleScore = current.CYCLE_SCORE;
+  const cycleScore = current.BIZ_CYCLE_SCORE;
   const dxyScore = current.DXY_SCORE;
   const valScore = current.VAL_SCORE;
 
@@ -62,9 +62,9 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
 
   const sahm = current.SAHM;
   const yc = current.YC_M;
-  const no = current.NO as number | undefined;
-  const noYoy = current.NO_YOY;
-  const noMom3 = (current as any).NO_MOM3 as number | undefined;
+  const ismPmi = (current as any).ISM_PMI as number | undefined;
+  const ismPmiAbove50 = (current as any).ISM_PMI_ABOVE50_DAYS as number | undefined;
+  const ismPmiBelow45 = (current as any).ISM_PMI_BELOW45_DAYS as number | undefined;
 
   const dxy = (current as any).DXY as number | undefined;
   const dxyMA50 = (current as any).DXY_MA50 as number | undefined;
@@ -274,10 +274,10 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
         {scoreTab === 3 && (
           <FactorCard
             icon={<Landmark className="h-6 w-6 text-emerald-300" />}
-            title="Business Cycle (BIZ_CYCLE_SCORE)"
+            title="Business Cycle (BIZ_BIZ_CYCLE_SCORE)"
             score={cycleScore}
-            description="Business cycle nowcast: Sahm + Yield Curve + New Orders."
-            formula="Recession risk if (SAHM≥0.50) OR (YC<0) OR (NO_YOY<0 AND NO_MOM3≤0)"
+            description="Business cycle nowcast: Sahm Rule + Yield Curve + ISM Manufacturing PMI (with persistence filters). Recession requires 2-of-3 confirmation."
+            formula="Recession risk when ≥ 2 of: SAHM≥0.50, YC<0, ISM_PMI<45 for 60+ days"
           >
             <Grid container spacing={1.25}>
               <Grid item xs={12}>
@@ -285,23 +285,24 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
                   ok={
                     typeof sahm === 'number' &&
                     typeof yc === 'number' &&
-                    typeof noYoy === 'number' &&
                     sahm < 0.35 &&
                     yc >= 0.75 &&
-                    noYoy >= 0
+                    typeof ismPmiAbove50 === 'number' && ismPmiAbove50 >= 90
                   }
-                  label="SAHM < 0.35 AND YC ≥ 0.75 AND NO_YOY ≥ 0"
+                  label="SAHM < 0.35 AND YC ≥ 0.75 AND ISM_PMI ≥ 50 for 90+ days"
                   result="Score 2 (Expansion)"
                 />
               </Grid>
               <Grid item xs={12}>
                 <RuleRow
-                  ok={
-                    (typeof sahm === 'number' && sahm >= 0.5) ||
-                    (typeof yc === 'number' && yc < 0) ||
-                    (typeof noYoy === 'number' && typeof noMom3 === 'number' && noYoy < 0 && noMom3 <= 0)
-                  }
-                  label="SAHM ≥ 0.50 OR YC < 0 OR (NO_YOY<0 AND NO_MOM3≤0)"
+                  ok={(() => {
+                    let flags = 0;
+                    if (typeof sahm === 'number' && sahm >= 0.5) flags++;
+                    if (typeof yc === 'number' && yc < 0) flags++;
+                    if (typeof ismPmiBelow45 === 'number' && ismPmiBelow45 >= 60) flags++;
+                    return flags >= 2;
+                  })()}
+                  label="≥ 2 of 3: SAHM ≥ 0.50, YC < 0, ISM_PMI < 45 for 60+ days"
                   result="Score 0 (Recession Risk)"
                   tone="danger"
                 />
@@ -321,13 +322,13 @@ const ScoreBreakdown: React.FC<Props> = ({ current }) => {
                 <MetricRow label="YC (10Y-3M)" value={fmtNum(yc, 2)} />
               </Grid>
               <Grid item xs={6}>
-                <MetricRow label="New Orders (NO)" value={fmtNum(no, 1)} />
+                <MetricRow label="ISM PMI" value={fmtNum(ismPmi, 1)} />
               </Grid>
               <Grid item xs={6}>
-                <MetricRow label="NO_YOY" value={fmtPct(noYoy)} />
+                <MetricRow label="PMI ≥ 50 streak" value={`${fmtInt(ismPmiAbove50)}d`} />
               </Grid>
-              <Grid item xs={12}>
-                <MetricRow label="NO_MOM3 (approx)" value={fmtNum(noMom3, 2)} />
+              <Grid item xs={6}>
+                <MetricRow label="PMI < 45 streak" value={`${fmtInt(ismPmiBelow45)}d`} />
               </Grid>
             </Grid>
           </FactorCard>

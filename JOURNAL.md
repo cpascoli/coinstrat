@@ -9,7 +9,7 @@ A chronological log of the development of the CoinStrat Pre-Accumulation Model �
 ### Work done
 
 - **Reviewed the original Python scripts** (`signals.py`, `dashboard_2026.py`) that formed the foundation of the model: a multi-factor regime-switching system for Bitcoin accumulation timing.
-- **Architecture assessment**: Documented the data ingestion layer (FRED, Blockchain.info, Stooq), signal generation (VAL_SCORE, LIQ_SCORE, DXY_SCORE, CYCLE_SCORE), aggregator logic (CORE_ON, MACRO_ON, ACCUM_ON), and presentation layer.
+- **Architecture assessment**: Documented the data ingestion layer (FRED, Blockchain.info, Stooq), signal generation (VAL_SCORE, LIQ_SCORE, DXY_SCORE, BIZ_CYCLE_SCORE), aggregator logic (CORE_ON, MACRO_ON, ACCUM_ON), and presentation layer.
 - **Identified strengths and weaknesses**: Praised the macro-fundamental alignment and hysteresis design; flagged the lack of backtesting, single-metric valuation (MVRV-only), no persistence filters, and fragile data dependencies.
 - **Built the React/TypeScript web application** from scratch: Vite + React + Tailwind CSS + Recharts. Created the full directory structure with proper separation of concerns (`services/`, `views/`).
 - **Translated the Python engine into TypeScript** (`engine.ts`): Replicated rolling means, pct change, diff, scoring logic, and the CORE/MACRO state machines entirely in the browser.
@@ -429,7 +429,7 @@ March 14 felt like three product layers maturing at once: acquisition (`Free` ac
 | Python prototype (`signals.py`, `dashboard_2026.py`) | Complete, unchanged |
 | React/TypeScript web app | Complete, deployed on Netlify |
 | Client-side signal engine (`engine.ts`) | Complete, all scoring + signals |
-| Data sources | FRED (macro), Blockchain.info (MVRV), BGeometrics (SOPR, NUPL, SIP), Hybrid local+Binance (BTC price) |
+| Data sources | FRED (macro), Blockchain.info (MVRV), BGeometrics (SOPR, SIP), Investing.com (ISM PMI), Hybrid local+Binance (BTC price) |
 | Backtesting engine | Complete with 4 strategies, multiple timeframes |
 | CORE exit logic | Iterating — current: OR(trend break + valuation gate, euphoria exhaustion) |
 | Netlify deployment | Complete with FRED + BGeometrics proxy functions |
@@ -453,7 +453,7 @@ March 14 felt like three product layers maturing at once: acquisition (`Free` ac
 - **Files created**: ~75 TypeScript/config/SQL files
 - **Lines of engine logic**: ~540 (engine.ts) + ~380 (backtest.ts)
 - **Netlify Functions**: 16 endpoint/proxy functions + shared libraries for auth, compute, newsletter, alerts, and cache access
-- **Data sources integrated**: 6 (FRED, Blockchain.info, BGeometrics ×3, Binance)
+- **Data sources integrated**: 7 (FRED, Blockchain.info, BGeometrics ×2, Investing.com, Binance)
 - **BTC price source iterations**: 4 (CoinGecko → Blockchain.info → Stooq → Hybrid)
 - **CORE exit logic iterations**: 4
 - **Bugs found in production**: 10+ major across data, auth, newsletter, and admin flows
@@ -474,3 +474,62 @@ March 14 felt like three product layers maturing at once: acquisition (`Free` ac
 - MVRV peaks have been structurally declining across cycles (2013: ~6, 2017: ~4.5, 2021: ~3.8, 2024: ~2.66). The 3.5 euphoria threshold that caught 2021 may never be reached again.
 - NUPL is a bounded oscillator (roughly −1 to +1) whose euphoria peaks have been stable across cycles (~0.70–0.75). This makes NUPL thresholds more predictive for future cycles.
 - Since NUPL = 1 − 1/MVRV is a monotonic transform, the migration is lossless: identical historical scoring, better forward-looking threshold stability.
+
+---
+
+## Session — Apr 2026: ISM PMI Integration & BIZ_CYCLE_SCORE Overhaul
+
+### Work done
+
+- **Integrated ISM Manufacturing PMI** as a new data feed. Added `fetchISM_PMI()` to `crypto.ts` (client) and `compute.ts` (server) to pull historical data from the free Investing.com endpoint (`/pd-instruments/v1/calendars/economic/events/173/occurrences`). The function handles pagination and returns sorted `PricePoint[]` going back to 1970.
+- **Added ISM PMI to the Signal Builder** catalog (`strategyBuilder.ts`, macro group) and to the documentation (`DocsData.tsx`, Business Cycle section).
+- **Added a dedicated ISM PMI chart** in `ChartsView.tsx` under the Business Cycle tab — dual axis (PMI left, BTCUSD right) with a reference line at 50 (expansion/contraction threshold).
+- **Replaced AMTMNO (Manufacturers New Orders) with ISM PMI** as the primary manufacturing indicator in `BIZ_CYCLE_SCORE`. Rationale: ISM PMI is released earlier in the month, has a natural 50 threshold (expansion vs. contraction), and is a diffusion index that captures breadth of activity rather than dollar volume. AMTMNO (`NO_YOY`, `NO_MOM3`) is retained for display but no longer drives the score.
+- **Designed persistence filters for ISM PMI** in the cycle score:
+  - **Expansion (Score 2)**: `ISM_PMI ≥ 50` for 90+ consecutive days (~3 months). Captures sustained manufacturing expansion, not just a one-month bounce.
+  - **Recession Risk (Score 0)**: `ISM_PMI < 45` for 60+ consecutive days (~2 months). The 45 threshold is well below the neutral 50 line and historically associated with GDP contraction.
+- **Changed recession risk logic from pure OR to 2-of-3 confirmation**: The previous `BIZ_CYCLE_SCORE = 0` triggered if any single indicator (SAHM ≥ 0.5, YC_M < 0, or manufacturing stress) was active. This was too permissive — notably, the yield curve remained inverted for most of 2023–2024 without a recession. The new rule counts three independent recession flags and requires at least two to confirm:
+  1. `SAHM ≥ 0.5` (labour market stress)
+  2. `YC_M < 0` (inverted yield curve)
+  3. `ISM_PMI < 45` for 60+ consecutive days (manufacturing contraction)
+- **Updated expansion condition** to also require ISM PMI persistence: `SAHM < 0.35 AND YC_M ≥ 0.75 AND ISM_PMI ≥ 50 for 90+ days` (each condition gated by data availability).
+- **Exposed ISM PMI diagnostics** on each daily row: `ISM_PMI_ABOVE50_DAYS` and `ISM_PMI_BELOW45_DAYS` counters.
+- **Mirrored all engine changes** in `compute.ts` (server-side) to maintain client/server consistency.
+- **Updated all UI and documentation**:
+  - `LogicFlow.tsx`: Added ISM PMI metric chip in the Macro Accelerator card.
+  - `ScoreBreakdown.tsx`: Updated the Business Cycle tab — new description, formula, rule rows (2-of-3 recession, ISM persistence for expansion), and metric rows (ISM PMI, ≥50 streak, <45 streak).
+  - `DocsScores.tsx`: Rewrote the Business Cycle Score documentation — formula, rationale (including why 2-of-3 is preferred), thresholds, and notes.
+  - `DocsArchitecture.tsx`: Updated all three pipeline layers (raw inputs, engineered metrics, factor scores) to reflect ISM PMI.
+  - `ChartsView.tsx`: Updated descriptions for Business Cycle Regime and Business Cycle Inputs charts.
+
+### Renamed `CYCLE_SCORE` → `BIZ_CYCLE_SCORE` globally
+
+- **Full rename across the entire codebase** to make the score name self-documenting — clearly referring to the business cycle, not a BTC market cycle or halving cycle.
+- **Scope**: 22 files updated (58 total occurrences), including:
+  - Engine/type layer: `App.tsx` (SignalData interface), `engine.ts`, `compute.ts`
+  - Views: `Dashboard.tsx`, `ChartsView.tsx`, `LogicFlow.tsx`, `ScoreBreakdown.tsx`, `StrategyBuilder.tsx`
+  - Docs: `DocsScores.tsx`, `DocsSignals.tsx`, `DocsArchitecture.tsx`, `DocsSignalBuilder.tsx`
+  - Logic: `strategyBuilder.ts`, `proFeatures.ts`, `recommendation.ts`
+  - Server: `newsletter.ts` (13 occurrences), `signalAlerts.ts`, `strategyLlm.ts`
+  - Tests: `strategyLlm.test.ts`
+  - Markdown: `README.md`, `STRATEGY.md`, `JOURNAL.md`, `coinstrat-skill.md`
+- **Intentionally left unchanged**: `web/supabase/migrations/005_add_pro_alerts_and_harden_profiles.sql` — historical migration files must not be modified.
+- TypeScript compiles clean after rename.
+
+### Challenges
+
+1. **ISM PMI vs. AMTMNO trade-off**: AMTMNO provides dollar-volume precision and YoY/MoM momentum, but it is released with a ~6-week lag and lacks a natural expansion/contraction threshold. ISM PMI is released on the first business day of the month (one of the most timely macro indicators), has the universally recognised 50 threshold, and as a diffusion index captures breadth of manufacturing activity. The trade-off is that PMI is sentiment-based (survey), not hard data. We judged timeliness and threshold clarity to be more valuable for a cycle detection score.
+2. **Recession rule strictness**: The pure OR rule was empirically too loose — the yield curve was inverted continuously from late 2022 through 2024, and SAHM briefly spiked in mid-2024, yet no recession materialised. The 2-of-3 rule demands corroboration from independent domains (labour, rates, manufacturing), significantly reducing false alarms while maintaining sensitivity when conditions genuinely deteriorate.
+3. **Persistence calibration**: The 90-day (expansion) and 60-day (recession) thresholds for ISM PMI were chosen to align with the monthly release cadence — roughly 3 consecutive monthly prints above 50 for expansion, and 2 consecutive prints below 45 for recession. This is a forward-fill effect: the daily counter increments every day between releases, so 90 days ≈ 3 reports.
+4. **Rename scope**: Renaming a field that appears in the type system, scoring engine, newsletter rendering, LLM prompt context, alert detection, and 4 markdown files required careful global search and verification that no stale references survived (only the SQL migration, correctly, retains the old name).
+
+### Learnings
+
+- Diffusion indices like ISM PMI are underappreciated in crypto models. Most crypto analytics focus on on-chain or price-derived metrics. Adding a macro diffusion index that the entire institutional world watches brings orthogonal information.
+- Persistence filters turn noisy monthly data into usable daily signals. Without them, a single ISM print above/below a threshold would whipsaw the score. With them, you require sustained trends — which is what a "business cycle" actually is.
+- Naming matters in quantitative models. `CYCLE_SCORE` was ambiguous in a crypto context where "cycle" usually means the 4-year halving cycle. `BIZ_CYCLE_SCORE` immediately communicates scope.
+- The 2-of-3 pattern is a robust confirmation framework. It's more resilient than OR (too sensitive) and more responsive than AND (too strict), and it naturally handles the case where one indicator is structurally lagging or stuck.
+
+### Reflections
+
+The ISM PMI integration was one of those changes that felt bigger than the diff. Swapping one manufacturing indicator for another sounds minor, but it rewired how the model detects macroeconomic regime changes. The 2-of-3 recession rule, in particular, is a meaningful philosophical shift: from "any warning sign triggers caution" to "we need corroboration before downgrading." This is more aligned with how institutional macro analysts think — no single indicator is gospel — and it should produce fewer false alarms without sacrificing responsiveness when conditions genuinely deteriorate.

@@ -19,7 +19,7 @@ The web dashboard fetches live data from FRED, Binance, Blockchain.info, and BGe
 | **VAL_SCORE** | NUPL (derived from MVRV: 1 − 1/MVRV) + LTH SOPR (BGeometrics) | 0 / 1 / 2 / 3 | 4-tier on-chain valuation — 3 = extreme (NUPL < 0 AND LTH SOPR < 1.0), 2 = strong (NUPL < 0 alone, or NUPL < 0.382 + capitulation), 1 = fair/neutral (NUPL < 0.618), 0 = euphoria (NUPL ≥ 0.618, near cycle peaks) |
 | **LIQ_SCORE** | US Net Liquidity (FRED: WALCL − WTREGEN − RRPONTSYD) | 0 / 1 / 2 | Macro liquidity regime — YoY and 13-week momentum of Fed net liquidity |
 | **DXY_SCORE** | USD Index (FRED: DTWEXBGS) | 0 / 1 / 2 | Currency headwind/tailwind — 200-day rate of change of the broad trade-weighted dollar. Includes a **20/30-day persistence filter** to prevent whipsaw entries |
-| **CYCLE_SCORE** | Sahm Rule, Yield Curve, New Orders (FRED) | 0 / 1 / 2 | Business cycle positioning — recession risk vs expansion |
+| **BIZ_CYCLE_SCORE** | Sahm Rule, Yield Curve, New Orders (FRED) | 0 / 1 / 2 | Business cycle positioning — recession risk vs expansion |
 | **PRICE_REGIME_ON** | BTC 40-week MA | 0 / 1 | Trend confirmation — requires BTC above its 40W MA for ≥ 20 of the last 30 days |
 
 ### Signal Aggregation
@@ -31,7 +31,7 @@ CORE_ON (stateful, with hysteresis)
   Exit:   (PRICE_REGIME = 0 AND VAL_SCORE ≤ 2) OR (VAL_SCORE = 0 AND DXY_SCORE = 0)
 
 MACRO_ON (stateless)
-  (LIQ_SCORE + CYCLE_SCORE ≥ 3) AND (DXY_SCORE ≥ 1)
+  (LIQ_SCORE + BIZ_CYCLE_SCORE ≥ 3) AND (DXY_SCORE ≥ 1)
 
 ACCUM_ON = CORE_ON
   CORE is the sole gatekeeper for accumulation permission.

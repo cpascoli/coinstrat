@@ -177,7 +177,7 @@ interface SignalRow {
   VAL_SCORE?: number;
   LIQ_SCORE?: number;
   DXY_SCORE?: number;
-  CYCLE_SCORE?: number;
+  BIZ_CYCLE_SCORE?: number;
   MVRV?: number;
   LTH_SOPR?: number;
   US_LIQ_YOY?: number;
@@ -1050,7 +1050,7 @@ export async function buildWeeklyContext(weekOf: string): Promise<WeeklyContext>
     `BTC closed the week at ${formatCurrency(current.BTCUSD)} (${formatDelta(numericDelta(current.BTCUSD, previousRow?.BTCUSD), 0)} vs. last week).`,
     `Liquidity score is ${current.LIQ_SCORE ?? 'n/a'} (${scoreLabel(current.LIQ_SCORE)}).`,
     `Valuation score is ${current.VAL_SCORE ?? 'n/a'} with NUPL at ${formatNumber((current as any).NUPL, 3)} (MVRV: ${formatNumber(current.MVRV)}).`,
-    `Dollar regime score is ${current.DXY_SCORE ?? 'n/a'} and cycle score is ${current.CYCLE_SCORE ?? 'n/a'}.`,
+    `Dollar regime score is ${current.DXY_SCORE ?? 'n/a'} and cycle score is ${current.BIZ_CYCLE_SCORE ?? 'n/a'}.`,
   ];
 
   return {
@@ -1068,7 +1068,7 @@ export async function buildWeeklyContext(weekOf: string): Promise<WeeklyContext>
       VAL_SCORE: current.VAL_SCORE ?? null,
       LIQ_SCORE: current.LIQ_SCORE ?? null,
       DXY_SCORE: current.DXY_SCORE ?? null,
-      CYCLE_SCORE: current.CYCLE_SCORE ?? null,
+      BIZ_CYCLE_SCORE: current.BIZ_CYCLE_SCORE ?? null,
       MVRV: current.MVRV ?? null,
       LTH_SOPR: currentLthSopr,
       DXY: current.DXY ?? null,
@@ -1092,7 +1092,7 @@ export async function buildWeeklyContext(weekOf: string): Promise<WeeklyContext>
       VAL_SCORE: previousRow?.VAL_SCORE ?? null,
       LIQ_SCORE: previousRow?.LIQ_SCORE ?? null,
       DXY_SCORE: previousRow?.DXY_SCORE ?? null,
-      CYCLE_SCORE: previousRow?.CYCLE_SCORE ?? null,
+      BIZ_CYCLE_SCORE: previousRow?.BIZ_CYCLE_SCORE ?? null,
       MVRV: previousRow?.MVRV ?? null,
       LTH_SOPR: previousLthSopr,
       SIP: previousRow?.SIP ?? null,
@@ -1105,7 +1105,7 @@ export async function buildWeeklyContext(weekOf: string): Promise<WeeklyContext>
       VAL_SCORE: numericDelta(current.VAL_SCORE, previousRow?.VAL_SCORE),
       LIQ_SCORE: numericDelta(current.LIQ_SCORE, previousRow?.LIQ_SCORE),
       DXY_SCORE: numericDelta(current.DXY_SCORE, previousRow?.DXY_SCORE),
-      CYCLE_SCORE: numericDelta(current.CYCLE_SCORE, previousRow?.CYCLE_SCORE),
+      BIZ_CYCLE_SCORE: numericDelta(current.BIZ_CYCLE_SCORE, previousRow?.BIZ_CYCLE_SCORE),
       MVRV: numericDelta(current.MVRV, previousRow?.MVRV),
       LTH_SOPR: numericDelta(currentLthSopr ?? undefined, previousLthSopr ?? undefined),
       SIP: numericDelta(current.SIP, previousRow?.SIP),
@@ -1140,7 +1140,7 @@ function fallbackDraft(
     dynamicValuationSentence(current.VAL_SCORE),
     dynamicLiquiditySentence(current.LIQ_SCORE),
     dynamicDollarSentence(current.DXY_SCORE),
-    dynamicCycleSentence(current.CYCLE_SCORE),
+    dynamicCycleSentence(current.BIZ_CYCLE_SCORE),
   ];
   const headlinesNarrative = fallbackHeadlinesNarrative(curatedLinks, context.referenceDate);
 
@@ -1148,7 +1148,7 @@ function fallbackDraft(
     subject: `CoinStrat Weekly — CORE ${coreStatus} | BTC ${formatCurrency(current.BTCUSD as number | null)}`,
     previewText: `Weekly signal snapshot for ${context.referenceDate}: CORE ${coreStatus}, MACRO ${macroStatus}, BTC ${formatCurrency(current.BTCUSD as number | null)}.`,
     headline: `Weekly signal check-in: CORE ${coreStatus}, MACRO ${macroStatus}`,
-    summary: `CoinStrat closes the week with BTC at ${formatCurrency(current.BTCUSD as number | null)}. The model is reading valuation as ${scoreLabel(current.VAL_SCORE as number | undefined)}, liquidity as ${scoreLabel(current.LIQ_SCORE as number | undefined)}, and the macro backdrop as ${scoreLabel(current.CYCLE_SCORE as number | undefined)}.`,
+    summary: `CoinStrat closes the week with BTC at ${formatCurrency(current.BTCUSD as number | null)}. The model is reading valuation as ${scoreLabel(current.VAL_SCORE as number | undefined)}, liquidity as ${scoreLabel(current.LIQ_SCORE as number | undefined)}, and the macro backdrop as ${scoreLabel(current.BIZ_CYCLE_SCORE as number | undefined)}.`,
     signalSections: [
       {
         title: 'What changed this week',
@@ -1272,7 +1272,7 @@ async function generateNewsletterDraft(
             BTCUSD: context.current.BTCUSD,
             VAL_SCORE: context.current.VAL_SCORE,
             LIQ_SCORE: context.current.LIQ_SCORE,
-            CYCLE_SCORE: context.current.CYCLE_SCORE,
+            BIZ_CYCLE_SCORE: context.current.BIZ_CYCLE_SCORE,
             DXY_SCORE: context.current.DXY_SCORE,
             CORE_ON: context.current.CORE_ON,
             MACRO_ON: context.current.MACRO_ON,

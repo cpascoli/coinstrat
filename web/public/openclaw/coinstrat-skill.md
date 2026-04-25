@@ -24,7 +24,7 @@ Key fields:
 - `VAL_SCORE`
 - `LIQ_SCORE`
 - `DXY_SCORE`
-- `CYCLE_SCORE`
+- `BIZ_CYCLE_SCORE`
 
 ### Paid history endpoint
 
@@ -62,7 +62,7 @@ This returns the full daily signal history and is the preferred endpoint for com
    - `VAL_SCORE`
    - `LIQ_SCORE`
    - `DXY_SCORE`
-   - `CYCLE_SCORE`
+   - `BIZ_CYCLE_SCORE`
 
 ### 3. Detect recent signal changes
 
@@ -82,7 +82,7 @@ This returns the full daily signal history and is the preferred endpoint for com
   - `VAL_SCORE` -> `Valuation Score`
   - `LIQ_SCORE` -> `Liquidity Score`
   - `DXY_SCORE` -> `Dollar Regime Score`
-  - `CYCLE_SCORE` -> `Business Cycle Score`
+  - `BIZ_CYCLE_SCORE` -> `Business Cycle Score`
 - Treat `1` as `ON` and `0` as `OFF` for binary signals.
 
 ## Example curl commands

@@ -25,7 +25,7 @@ export const PRO_ALERT_OPTIONS = [
     description: 'Email me when liquidity conditions improve or deteriorate.',
   },
   {
-    key: 'CYCLE_SCORE',
+    key: 'BIZ_CYCLE_SCORE',
     label: 'Business Cycle Score',
     description: 'Email me when cycle conditions move between supportive and risky states.',
   },

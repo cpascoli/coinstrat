@@ -1,22 +1,22 @@
 ───────────────────────────────────────────────────────────────────────────────
 Language                 Files     Lines   Blanks  Comments     Code Complexity
 ───────────────────────────────────────────────────────────────────────────────
-TypeScript                  85     21809     1947       425    19437       4647
-SQL                          7       521       71        13      437          3
-Markdown                     6      1552      429         0     1123          0
+TypeScript                  91     25770     2206       550    23014       5554
+SQL                         10       559       78        19      462          3
+Markdown                     6      1628      447         0     1181          0
 JSON                         4     21706        2         0    21704          0
 Shell                        4        51       12         3       36          7
-CSS                          1         4        1         0        3          0
-HTML                         1        25        4         1       20          0
-JavaScript                   1        12        1         1       10          0
-Plain Text                   1         0        0         0        0          0
-TOML                         1       144       31         9      104          1
+Plain Text                   3        37        1         0       36          0
+JavaScript                   2        56        0         3       53          0
+CSS                          1       104       14         2       88          0
+HTML                         1        35        4         1       30          0
+TOML                         1       158       34        10      114          1
 ───────────────────────────────────────────────────────────────────────────────
-Total                      111     45824     2498       452    42874       4658
+Total                      123     50104     2798       588    46718       5565
 ───────────────────────────────────────────────────────────────────────────────
-Estimated Cost to Develop (organic) $1,397,651
-Estimated Schedule Effort (organic) 15.62 months
-Estimated People Required (organic) 7.95
+Estimated Cost to Develop (organic) $1,529,515
+Estimated Schedule Effort (organic) 16.16 months
+Estimated People Required (organic) 8.41
 ───────────────────────────────────────────────────────────────────────────────
-Processed 1305486 bytes, 1.305 megabytes (SI)
+Processed 1490380 bytes, 1.490 megabytes (SI)
 ───────────────────────────────────────────────────────────────────────────────

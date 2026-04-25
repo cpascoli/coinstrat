@@ -74,7 +74,7 @@ const SIGNALS: SignalDoc[] = [
     meaning:
       'An intensity modifier that increases the accumulation rate when the macro backdrop is especially supportive.',
     formula:
-      'MACRO_ON = 1 when (LIQ_SCORE + CYCLE_SCORE) >= 3 and DXY_SCORE >= 1.',
+      'MACRO_ON = 1 when (LIQ_SCORE + BIZ_CYCLE_SCORE) >= 3 and DXY_SCORE >= 1.',
     rationale:
       'CoinStrat separates the question "Should we accumulate?" from "How aggressively should we accumulate?" Liquidity and business-cycle conditions answer the second question. When they align and the dollar is not a headwind, the model can lean harder into the trend.',
     rules: [

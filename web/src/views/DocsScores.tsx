@@ -54,20 +54,23 @@ const SCORES: ScoreDoc[] = [
   },
   {
     title: 'Business Cycle Score',
-    badge: 'CYCLE_SCORE',
+    badge: 'BIZ_CYCLE_SCORE',
     meaning:
-      'Nowcasts the macro backdrop using recession-risk and expansion signals from labor, rates, and manufacturing.',
+      'Nowcasts the macro backdrop using recession-risk and expansion signals from labor, rates, and manufacturing (ISM PMI).',
     formula:
-      'Score 0 if SAHM >= 0.50 or YC_M < 0 or (NO_YOY < 0 and NO_MOM3 <= 0). Score 2 if SAHM < 0.35 and YC_M >= 0.75 and NO_YOY >= 0. Otherwise score 1.',
+      'Three recession flags: [A] SAHM >= 0.50, [B] YC_M < 0, [C] ISM_PMI < 45 for 60+ consecutive days. Score 0 when at least 2 of 3 flags are active. Score 2 if SAHM < 0.35 and YC_M >= 0.75 and ISM_PMI >= 50 for 90+ consecutive days (3 monthly prints). Otherwise score 1.',
     rationale:
-      'No single macro indicator is reliable enough on its own. The Sahm Rule captures labor weakness, the yield curve captures recession expectations, and New Orders captures real-economy demand. Combining them reduces false positives and gives a cleaner view of whether the model should lean defensive or constructive.',
+      'No single macro indicator is reliable enough on its own. The Sahm Rule captures labor weakness, the yield curve captures recession expectations, and ISM Manufacturing PMI captures real-economy manufacturing breadth. Requiring 2-of-3 confirmation for recession risk avoids extended false alarms — for example, the yield curve was inverted from Oct 2022 through Oct 2024 while BTC rallied from $16k to $70k. Under a pure-OR rule, BIZ_CYCLE_SCORE would have been stuck at 0 for most of that period. The 2-of-3 rule ensures a single noisy indicator cannot block the MACRO accelerator alone.',
     thresholds: [
-      '2 = expansion. Labor is healthy, the curve is positive enough, and manufacturing demand is not deteriorating.',
+      '2 = expansion. Labor is healthy, the curve is positive enough, and ISM PMI has been above 50 for at least 3 consecutive months.',
       '1 = stabilizing / mixed. The economy is not clearly in expansion or recession-risk.',
-      '0 = recession-risk. Any one of the defensive triggers is enough to block a bullish interpretation.',
+      '0 = recession-risk. At least two of the three defensive triggers are firing simultaneously.',
     ],
     notes: [
-      'This score is conservative by design: one strong recession signal is enough to move it to 0.',
+      'Recession risk requires 2-of-3 confirmation to avoid single-indicator false alarms (e.g. prolonged yield curve inversions without actual recession).',
+      'ISM PMI < 45 for 2 months is the manufacturing recession trigger — a single sub-45 print alone does not fire. The 45 threshold aligns with historical NBER recessions.',
+      'ISM PMI expansion persistence (3 months above 50) uses a strict reset: any single print below 50 resets the counter to zero.',
+      'True recessions historically trigger all three indicators; the 2-of-3 rule loses almost nothing in real recession detection.',
     ],
   },
   {

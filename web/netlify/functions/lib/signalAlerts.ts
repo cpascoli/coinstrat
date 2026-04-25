@@ -8,7 +8,7 @@ export const ALERT_KEYS = [
   'PRICE_REGIME_ON',
   'VAL_SCORE',
   'LIQ_SCORE',
-  'CYCLE_SCORE',
+  'BIZ_CYCLE_SCORE',
   'DXY_SCORE',
 ] as const;
 
@@ -84,7 +84,7 @@ const ALERT_CONFIG: Record<AlertKey, AlertKeyConfig> = {
     explanation: 'The liquidity score that tracks whether macro liquidity is a headwind or tailwind.',
     kind: 'score',
   },
-  CYCLE_SCORE: {
+  BIZ_CYCLE_SCORE: {
     label: 'Business Cycle Score',
     shortLabel: 'Cycle',
     explanation: 'The business-cycle score that tracks recession and growth stress conditions.',

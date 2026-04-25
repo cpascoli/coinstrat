@@ -17,7 +17,7 @@ const PIPELINE: Stage[] = [
     summary:
       'CoinStrat starts from external time series covering liquidity, macro conditions, BTC price, and on-chain valuation.',
     details: [
-      'Macro/liquidity inputs include `WALCL`, `WTREGEN`, `RRPONTSYD`, `DTWEXBGS`, `SAHMREALTIME`, and `T10Y3M`.',
+      'Macro/liquidity inputs include `WALCL`, `WTREGEN`, `RRPONTSYD`, `DTWEXBGS`, `SAHMREALTIME`, `T10Y3M`, and `ISM_PMI` (ISM Manufacturing PMI).',
       'Market and on-chain inputs include `BTCUSD`, `MVRV`, `LTH_SOPR`, and `SIP`.',
       '`NUPL` (Net Unrealized Profit/Loss) is derived from MVRV as `1 − 1/MVRV` and used directly in `VAL_SCORE`.',
       'Additional context series like `ECB_RAW`, `BOJ_RAW`, `EURUSD`, and `JPYUSD` are also cached for transparency and future expansion.',
@@ -32,7 +32,7 @@ const PIPELINE: Stage[] = [
     details: [
       '`US_LIQ = WALCL - WTREGEN - RRPONTSYD`, plus `US_LIQ_YOY` and `US_LIQ_13W_DELTA`, convert three balance-sheet series into one liquidity signal.',
       '`DXY_MA50`, `DXY_MA200`, and `DXY_ROC20` turn the broad dollar index into a regime feature set.',
-      '`NO_YOY` and `NO_MOM3` compress New Orders into cycle-sensitive growth features.',
+      '`ISM_PMI_ABOVE50_DAYS` and `ISM_PMI_BELOW45_DAYS` track ISM PMI persistence streaks for the business cycle score. `NO_YOY` and `NO_MOM3` are still computed from AMTMNO for display.',
       '`BTC_MA40W`, `PRICE_REGIME`, and `PRICE_REGIME_ON` convert BTC price into a trend filter with persistence.',
       '`SIP_EUPHORIA_FLAG`, `SIP_EXHAUSTED`, and `SIP_OBS_DAYS` create a stateful late-cycle exhaustion detector.',
     ],
@@ -45,7 +45,7 @@ const PIPELINE: Stage[] = [
     details: [
       '`VAL_SCORE` summarizes whether Bitcoin is in deep value, fair value, or euphoria by combining `NUPL` (derived from `MVRV`) and `LTH_SOPR`.',
       '`LIQ_SCORE` translates net-liquidity expansion or contraction into a 0-2 score.',
-      '`CYCLE_SCORE` uses Sahm Rule, the yield curve, and manufacturing new orders to estimate whether the macro backdrop is expansionary, mixed, or recession-risk.',
+      '`BIZ_CYCLE_SCORE` uses Sahm Rule, the yield curve, and ISM Manufacturing PMI (with persistence filters) to estimate whether the macro backdrop is expansionary, mixed, or recession-risk. Recession requires 2-of-3 confirmation.',
       '`DXY_SCORE` measures whether the dollar is a headwind, neutral, or supportive, with a persistence filter to avoid false positives.',
     ],
   },

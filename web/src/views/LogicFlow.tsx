@@ -22,7 +22,7 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
   const macroStatus = current.MACRO_ON === 1;
   const accumStatus = current.ACCUM_ON === 1;
 
-  const macroScoreSum = useMemo(() => current.LIQ_SCORE + current.CYCLE_SCORE, [current.LIQ_SCORE, current.CYCLE_SCORE]);
+  const macroScoreSum = useMemo(() => current.LIQ_SCORE + current.BIZ_CYCLE_SCORE, [current.LIQ_SCORE, current.BIZ_CYCLE_SCORE]);
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -178,7 +178,7 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
                 />
                 <LogicRule
                   title="EXIT triggers when EITHER A OR B is TRUE"
-                  formula="(PRICE_REGIME = 0 AND VAL ≤ 1)  OR  SIP_EXHAUSTED = 1"
+                  formula="(PRICE_REGIME = 0 AND VAL_SCORE ≤ 1)  OR  SIP_EXHAUSTED = 1"
                   active={(current.PRICE_REGIME_ON === 0 && current.VAL_SCORE <= 1) || (current.SIP_EXHAUSTED ?? 0) === 1}
                   tone="danger"
                 />
@@ -244,7 +244,7 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
               <Stack spacing={1.25}>
                 <LogicRule
                   title="Liquidity + Business Cycle momentum"
-                  formula="LIQ_SCORE + CYCLE_SCORE ≥ 3"
+                  formula="LIQ_SCORE + BIZ_CYCLE_SCORE ≥ 3"
                   active={macroScoreSum >= 3}
                 />
                 <LogicRule
@@ -258,13 +258,16 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
                     <MetricChip title="Liquidity" label="LIQ_SCORE" value={current.LIQ_SCORE} />
                   </Grid>
                   <Grid item xs={6}>
-                    <MetricChip title="Business Cycle" label="BIZ_CYCLE_SCORE" value={current.CYCLE_SCORE} />
+                    <MetricChip title="Business Cycle" label="BIZ_BIZ_CYCLE_SCORE" value={current.BIZ_CYCLE_SCORE} />
                   </Grid>
                   <Grid item xs={6}>
-                    <MetricChip title="Liquidity + Business Cycle" label="LIQ_SCORE+BIZ_CYCLE_SCORE" value={macroScoreSum} />
+                    <MetricChip title="ISM PMI" label="ISM_PMI" value={typeof (current as any).ISM_PMI === 'number' ? ((current as any).ISM_PMI as number).toFixed(1) : '–'} />
                   </Grid>
                   <Grid item xs={6}>
                     <MetricChip title="USD Regime" label="DXY_SCORE" value={current.DXY_SCORE} />
+                  </Grid>
+                  <Grid item xs={6}>
+                    <MetricChip title="Liquidity + Business Cycle" label="LIQ_SCORE+BIZ_BIZ_CYCLE_SCORE" value={macroScoreSum} />
                   </Grid>
                 </Grid>
               </Stack>

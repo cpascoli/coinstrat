@@ -47,7 +47,7 @@ function heuristicSeries(prompt: string): StrategySeriesKey[] {
     { seriesKey: 'VAL_SCORE', keywords: ['valuation score', 'val score'] },
     { seriesKey: 'LIQ_SCORE', keywords: ['liquidity score', 'liq score'] },
     { seriesKey: 'DXY_SCORE', keywords: ['dxy score', 'dollar score'] },
-    { seriesKey: 'CYCLE_SCORE', keywords: ['cycle score'] },
+    { seriesKey: 'BIZ_CYCLE_SCORE', keywords: ['cycle score'] },
     { seriesKey: 'CORE_ON', keywords: ['core_on', 'core signal'] },
     { seriesKey: 'MACRO_ON', keywords: ['macro_on', 'macro signal'] },
     { seriesKey: 'PRICE_REGIME_ON', keywords: ['price regime'] },

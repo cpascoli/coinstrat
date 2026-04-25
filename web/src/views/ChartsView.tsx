@@ -16,7 +16,7 @@ interface Props {
 type RangeKey = 'all' | '10y' | '5y' | '2y' | '1y';
 type ChartsSection = 'system' | 'valuation' | 'liquidity' | 'business' | 'global' | 'usd';
 
-type RegimeKey = 'LIQ_SCORE' | 'CYCLE_SCORE';
+type RegimeKey = 'LIQ_SCORE' | 'BIZ_CYCLE_SCORE';
 type RegimeSpan = { x1: number; x2: number; value: 0 | 1 | 2 };
 type BinarySpan = { x1: number; x2: number; value: 0 | 1 };
 type SystemSpan = { x1: number; x2: number; value: 0 | 1 | 2 | 3 };
@@ -486,7 +486,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
   }, [chartData]);
 
   const liqSpans = useMemo(() => buildRegimeSpans(chartData as any, 'LIQ_SCORE'), [chartData]);
-  const cycleSpans = useMemo(() => buildRegimeSpans(chartData as any, 'CYCLE_SCORE'), [chartData]);
+  const cycleSpans = useMemo(() => buildRegimeSpans(chartData as any, 'BIZ_CYCLE_SCORE'), [chartData]);
   const priceRegimeSpans = useMemo(() => buildBinarySpans(chartData as any, 'PRICE_REGIME_ON'), [chartData]);
   const dxyPersistSpans = useMemo(() => buildBinarySpans(chartData as any, 'DXY_PERSIST'), [chartData]);
   const systemSpans = useMemo(() => buildSystemSpans(chartData as any), [chartData]);
@@ -566,7 +566,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
             CORE is driven by VAL_SCORE + PRICE_REGIME
             <br/>
-            MACRO is driven by (LIQ_SCORE + BIZ_CYCLE_SCORE) with persistence-filtered DXY_SCORE as a gate. 
+            MACRO is driven by (LIQ_SCORE + BIZ_BIZ_CYCLE_SCORE) with persistence-filtered DXY_SCORE as a gate. 
             <br />
             Both PRICE_REGIME and DXY_SCORE use a 20/30-day persistence filter. 
           </Typography>
@@ -1357,13 +1357,13 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             Business Cycle Regime
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            BTCUSD shaded by CYCLE_SCORE (Business Cycle). 
+            BTCUSD shaded by BIZ_CYCLE_SCORE (Business Cycle). 
             <br />
-            CYCLE_SCORE=0 on recession risk (SAHM ≥ 0.5 OR YC_M is negative OR New Orders YoY is negative with 3‑month momentum non‑positive); 
+            BIZ_CYCLE_SCORE=0 on recession risk when at least 2 of 3 triggers fire: SAHM ≥ 0.5, YC_M negative, or ISM PMI below 45 for 2+ consecutive months; 
             <br />
-            CYCLE_SCORE=2 in expansion (SAHM below 0.35 AND YC_M ≥ 0.75 AND New Orders YoY ≥ 0); otherwise CYCLE_SCORE=1. 
+            BIZ_CYCLE_SCORE=2 in expansion (SAHM below 0.35 AND YC_M ≥ 0.75 AND ISM PMI ≥ 50 for 3+ consecutive months); otherwise BIZ_CYCLE_SCORE=1. 
             <br />
-            This score contributes to MACRO_ON via (LIQ_SCORE + BIZ_CYCLE_SCORE).
+            This score contributes to MACRO_ON via (LIQ_SCORE + BIZ_BIZ_CYCLE_SCORE).
           </Typography>
         </Box>
 
@@ -1377,7 +1377,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           <ResponsiveContainer width="100%" height="100%">
             <LineChart key={`btc-cycle-${range}`} data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
                 {cycleSpans.map((s, i) => {
-                  const c = regimeColor('CYCLE_SCORE', s.value);
+                  const c = regimeColor('BIZ_CYCLE_SCORE', s.value);
                 return (
                   <ReferenceArea
                     key={`cyc-${i}-${s.x1}`}
@@ -1413,7 +1413,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             Business Cycle Inputs
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            Inputs that drive CYCLE_SCORE: SAHM Rule (labor stress), YC_M (10Y–3M yield curve slope), and New Orders (level + YoY). 
+            Inputs that drive BIZ_CYCLE_SCORE: SAHM Rule (labor stress), YC_M (10Y–3M yield curve slope), ISM Manufacturing PMI (with persistence filters), and New Orders (display‑only). 
             <br />
             The engine classifies recession risk vs expansion vs neutral using the thresholds described above.
           </Typography>

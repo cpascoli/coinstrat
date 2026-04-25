@@ -341,45 +341,56 @@ export async function computeAllSignals(): Promise<SignalData[]> {
   });
 
   // -- Cycle Score (V2) --
+  // NO_YOY / NO_MOM3 are still computed for display charts but no longer feed scoring.
   const noVals = dailyData.map(d => d.NO);
   const noYoY = pctChange(noVals, 365);
   const noMom3 = diff(noVals, 90);
 
+  // ISM PMI persistence counters (consecutive-day streaks on forward-filled monthly data)
+  let ismAbove50Days = 0;
+  let ismBelow45Days = 0;
+
   let lastCycleScore = 1;
   dailyData.forEach((d, i) => {
-    const sahmVal = d.SAHM;
-    const ycVal = d.YC_M;
     const noY = noYoY[i];
     const noM = noMom3[i];
-
     d.NO_YOY = isNaN(noY) ? NaN : noY * 100;
     d.NO_MOM3 = noM;
 
-    // Check if critical inputs are NaN
+    // ISM PMI persistence tracking
+    const pmi = d.ISM_PMI;
+    const pmiOk = typeof pmi === 'number' && !isNaN(pmi);
+    if (pmiOk) {
+      ismAbove50Days = pmi >= 50 ? ismAbove50Days + 1 : 0;
+      ismBelow45Days = pmi < 45 ? ismBelow45Days + 1 : 0;
+    }
+    d.ISM_PMI_ABOVE50_DAYS = ismAbove50Days;
+    d.ISM_PMI_BELOW45_DAYS = ismBelow45Days;
+
+    const sahmVal = d.SAHM;
+    const ycVal = d.YC_M;
+
     const sahmOk = typeof sahmVal === 'number' && !isNaN(sahmVal);
     const ycOk = typeof ycVal === 'number' && !isNaN(ycVal);
-    const noYoyOk = typeof noY === 'number' && !isNaN(noY);
-    const noMomOk = typeof noM === 'number' && !isNaN(noM);
 
-    if (!sahmOk && !ycOk && !noYoyOk) {
-      // All major cycle inputs are NaN — carry forward
-      warnNaN('SAHM/YC/NO (CYCLE_SCORE)', d.Date);
-      d.CYCLE_SCORE = lastCycleScore;
+    if (!sahmOk && !ycOk && !pmiOk) {
+      warnNaN('SAHM/YC/ISM_PMI (BIZ_CYCLE_SCORE)', d.Date);
+      d.BIZ_CYCLE_SCORE = lastCycleScore;
       return;
     }
 
-    // Evaluate with available data; treat missing sub-indicators as non-triggering
-    const isRecessionRisk =
-      (sahmOk && sahmVal >= 0.5) ||
-      (ycOk && ycVal < 0) ||
-      (noYoyOk && noMomOk && noY < 0 && noM <= 0);
+    let recessionFlags = 0;
+    if (sahmOk && sahmVal >= 0.5) recessionFlags++;
+    if (ycOk && ycVal < 0) recessionFlags++;
+    if (pmiOk && ismBelow45Days >= 60) recessionFlags++;
+    const isRecessionRisk = recessionFlags >= 2;
     const isExpansion =
       (sahmOk ? sahmVal < 0.35 : true) &&
       (ycOk ? ycVal >= 0.75 : true) &&
-      (noYoyOk ? noY >= 0 : true);
+      (pmiOk ? ismAbove50Days >= 90 : true);
     
-    d.CYCLE_SCORE = isRecessionRisk ? 0 : (isExpansion ? 2 : 1);
-    lastCycleScore = d.CYCLE_SCORE;
+    d.BIZ_CYCLE_SCORE = isRecessionRisk ? 0 : (isExpansion ? 2 : 1);
+    lastCycleScore = d.BIZ_CYCLE_SCORE;
   });
 
   // -- Price Regime (40W MA Persistence) --
@@ -551,7 +562,7 @@ export async function computeAllSignals(): Promise<SignalData[]> {
     d.SIP_EXHAUSTED = sipExhausted || sipExhaustedBeforeCore ? 1 : 0;
     d.SIP_OBS_DAYS = observationStart >= 0 ? (i - observationStart) : 0;
 
-    const abScore = d.LIQ_SCORE + d.CYCLE_SCORE;
+    const abScore = d.LIQ_SCORE + d.BIZ_CYCLE_SCORE;
     d.MACRO_ON = (abScore >= 3 && dxy >= 1) ? 1 : 0;
     d.ACCUM_ON = d.CORE_ON;
   });
