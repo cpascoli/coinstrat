@@ -14,7 +14,7 @@ interface Props {
 }
 
 type RangeKey = 'all' | '10y' | '5y' | '2y' | '1y';
-type ChartsSection = 'system' | 'valuation' | 'liquidity' | 'business' | 'global' | 'usd';
+type ChartsSection = 'system' | 'bottom' | 'valuation' | 'liquidity' | 'business' | 'global' | 'usd';
 
 type RegimeKey = 'LIQ_SCORE' | 'BIZ_CYCLE_SCORE';
 type RegimeSpan = { x1: number; x2: number; value: 0 | 1 | 2 };
@@ -236,7 +236,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
   const section: ChartsSection = useMemo(() => {
     const m = location.pathname.match(/^\/charts\/([^/]+)/);
     const seg = (m?.[1] ?? 'system').toLowerCase();
-    if (seg === 'system' || seg === 'valuation' || seg === 'liquidity' || seg === 'business' || seg === 'global' || seg === 'usd') return seg as ChartsSection;
+    if (seg === 'system' || seg === 'bottom' || seg === 'valuation' || seg === 'liquidity' || seg === 'business' || seg === 'global' || seg === 'usd') return seg as ChartsSection;
     return 'system';
   }, [location.pathname]);
 
@@ -248,7 +248,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
     }
     const m = location.pathname.match(/^\/charts\/([^/]+)/);
     const seg = (m?.[1] ?? '').toLowerCase();
-    if (seg && seg !== 'system' && seg !== 'valuation' && seg !== 'liquidity' && seg !== 'business' && seg !== 'global' && seg !== 'usd') {
+    if (seg && seg !== 'system' && seg !== 'bottom' && seg !== 'valuation' && seg !== 'liquidity' && seg !== 'business' && seg !== 'global' && seg !== 'usd') {
       navigate('/charts/system', { replace: true });
     }
   }, [location.pathname, navigate]);
@@ -320,6 +320,9 @@ const ChartsView: React.FC<Props> = ({ data }) => {
 
         // Percent series
         if (name.includes('YOY') || name.includes('ROC') || name.includes('%')) return `${v.toFixed(2)}%`;
+
+        // Score series
+        if (name.includes('Score')) return v.toFixed(0);
 
         // Yield curve (can be negative; keep 2dp)
         if (name.toLowerCase().includes('yield') || name.includes('YC')) return v.toFixed(2);
@@ -540,6 +543,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           sx={{ minHeight: 40 }}
         >
           <Tab value="system" label="System" sx={{ minHeight: 40 }} />
+          <Tab value="bottom" label="Bottom Score" sx={{ minHeight: 40 }} />
           <Tab value="valuation" label="Valuation" sx={{ minHeight: 40 }} />
           <Tab value="liquidity" label="Liquidity" sx={{ minHeight: 40 }} />
           <Tab value="global" label="Global Liq." sx={{ minHeight: 40 }} />
@@ -611,6 +615,57 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               <Tooltip content={<CustomTooltip />} />
               {renderChartBrush()}
               <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={2} dot={false} isAnimationActive={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Box>
+      </Paper>
+      )}
+
+      {/* Bottom Accumulation Score */}
+      {section === 'bottom' && (
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Box sx={{ mb: 2.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            Bottom Accumulation Score
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            A 0-100 staged-deployment gauge built from on-chain value, capitulation, liquidity turn,
+            macro risk, and price structure. It is independent from CORE: CORE says risk on/off,
+            while this score measures how attractive the current zone is for bottom accumulation.
+          </Typography>
+        </Box>
+
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="0-24 Avoid" sx={{ borderColor: '#64748b', color: '#cbd5e1' }} />
+          <Chip size="small" variant="outlined" label="25-49 Watch" sx={{ borderColor: '#f59e0b', color: '#fde68a' }} />
+          <Chip size="small" variant="outlined" label="50-69 Accumulate Slowly" sx={{ borderColor: '#60a5fa', color: '#bfdbfe' }} />
+          <Chip size="small" variant="outlined" label="70-84 Strong" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="85-100 Capitulation" sx={{ borderColor: '#15803d', color: '#bbf7d0' }} />
+        </Stack>
+
+        <Box sx={{ height: { xs: 360, sm: 460, md: 520 }, width: '100%', minWidth: 0 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart key={`bottom-${range}`} data={chartData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
+              <ReferenceArea yAxisId="score" y1={0} y2={25} fill="#64748b" fillOpacity={0.12} strokeOpacity={0} />
+              <ReferenceArea yAxisId="score" y1={25} y2={50} fill="#f59e0b" fillOpacity={0.14} strokeOpacity={0} />
+              <ReferenceArea yAxisId="score" y1={50} y2={70} fill="#60a5fa" fillOpacity={0.14} strokeOpacity={0} />
+              <ReferenceArea yAxisId="score" y1={70} y2={85} fill="#22c55e" fillOpacity={0.14} strokeOpacity={0} />
+              <ReferenceArea yAxisId="score" y1={85} y2={100} fill="#15803d" fillOpacity={0.18} strokeOpacity={0} />
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis yAxisId="score" domain={[0, 100]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis yAxisId="btc" orientation="right" scale="log" domain={[btcDomain.y1, btcDomain.y2]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
+              <ReferenceLine yAxisId="score" y={50} stroke="#60a5fa" strokeDasharray="4 4" strokeWidth={1} />
+              <ReferenceLine yAxisId="score" y={70} stroke="#22c55e" strokeDasharray="4 4" strokeWidth={1} />
+              <ReferenceLine yAxisId="score" y={85} stroke="#15803d" strokeDasharray="4 4" strokeWidth={1} />
+              <Tooltip content={<CustomTooltip />} />
+              {renderChartBrush()}
+              <Line yAxisId="score" type="monotone" dataKey="BOTTOM_ACCUM_SCORE" name="Bottom Score" stroke="#facc15" strokeWidth={3} dot={false} isAnimationActive={false} />
+              <Line yAxisId="score" type="monotone" dataKey="BOTTOM_ONCHAIN_SCORE" name="On-chain Score" stroke="#a78bfa" strokeWidth={1.4} dot={false} isAnimationActive={false} opacity={0.7} />
+              <Line yAxisId="score" type="monotone" dataKey="BOTTOM_CAPITULATION_SCORE" name="Capitulation Score" stroke="#fb7185" strokeWidth={1.4} dot={false} isAnimationActive={false} opacity={0.7} />
+              <Line yAxisId="score" type="monotone" dataKey="BOTTOM_LIQUIDITY_SCORE" name="Liquidity Score" stroke="#60a5fa" strokeWidth={1.4} dot={false} isAnimationActive={false} opacity={0.7} />
+              <Line yAxisId="score" type="monotone" dataKey="BOTTOM_STRUCTURE_SCORE" name="Structure Score" stroke="#22c55e" strokeWidth={1.4} dot={false} isAnimationActive={false} opacity={0.7} />
+              <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.5} dot={false} isAnimationActive={false} opacity={0.45} />
             </LineChart>
           </ResponsiveContainer>
         </Box>

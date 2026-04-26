@@ -141,6 +141,60 @@ const Dashboard: React.FC<Props> = ({ current, history }) => {
         </CardContent>
       </Card>
 
+      {/* Bottom Accumulation Score */}
+      <Card
+        sx={{
+          border: '1px solid',
+          borderColor: bottomScoreColor(current.BOTTOM_ACCUM_SCORE),
+          backgroundImage: 'radial-gradient(700px circle at 15% 0%, rgba(34,197,94,0.18), transparent 55%)',
+        }}
+      >
+        <CardHeader
+          title={<Typography sx={{ fontWeight: 900 }}>Bottom Accumulation Score</Typography>}
+          subheader="How attractive current conditions are for staged BTC deployment."
+          action={
+            <Chip
+              label={current.BOTTOM_ACCUM_BAND ?? bottomScoreBand(current.BOTTOM_ACCUM_SCORE)}
+              color={bottomScoreMuiColor(current.BOTTOM_ACCUM_SCORE) as any}
+              variant="outlined"
+            />
+          }
+        />
+        <Divider />
+        <CardContent>
+          <Grid container spacing={2.5} alignItems="stretch">
+            <Grid item xs={12} md={4}>
+              <Card variant="outlined" sx={{ height: '100%' }}>
+                <CardContent>
+                  <Typography variant="overline" color="text.secondary">
+                    Current Score
+                  </Typography>
+                  <Typography variant="h3" sx={{ fontWeight: 950, mt: 0.5 }}>
+                    {fmtScore(current.BOTTOM_ACCUM_SCORE)}
+                    <Typography component="span" variant="h6" color="text.secondary" sx={{ ml: 0.75 }}>
+                      / 100
+                    </Typography>
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                    Suggested deployment range: <strong>{current.BOTTOM_DEPLOYMENT_RANGE ?? bottomDeploymentRange(current.BOTTOM_ACCUM_SCORE)}</strong>
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+
+            <Grid item xs={12} md={8}>
+              <Grid container spacing={1.25}>
+                <BottomScoreChip label="On-chain value" value={current.BOTTOM_ONCHAIN_SCORE} />
+                <BottomScoreChip label="Capitulation" value={current.BOTTOM_CAPITULATION_SCORE} />
+                <BottomScoreChip label="Liquidity turn" value={current.BOTTOM_LIQUIDITY_SCORE} />
+                <BottomScoreChip label="Macro risk" value={current.BOTTOM_MACRO_SCORE} />
+                <BottomScoreChip label="Price structure" value={current.BOTTOM_STRUCTURE_SCORE} />
+              </Grid>
+            </Grid>
+          </Grid>
+        </CardContent>
+      </Card>
+
       {/* Quick Stats */}
       <Grid container spacing={2.5}>
         {statCards.map((s) => (
@@ -213,6 +267,29 @@ function ScoreMiniCard(props: { title: string; value: number; max: number; icon:
   );
 }
 
+function BottomScoreChip(props: { label: string; value?: number }) {
+  const value = Number(props.value);
+  const score = Number.isFinite(value) ? value : 0;
+  return (
+    <Grid item xs={12} sm={6} lg={4}>
+      <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, p: 1.5, height: '100%' }}>
+        <Typography variant="overline" color="text.secondary">
+          {props.label}
+        </Typography>
+        <Stack direction="row" justifyContent="space-between" alignItems="baseline" gap={1}>
+          <Typography variant="h6" sx={{ fontWeight: 900 }}>
+            {Number.isFinite(value) ? Math.round(value) : 'n/a'}
+            <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
+              / 20
+            </Typography>
+          </Typography>
+          <Chip size="small" label={score >= 14 ? 'strong' : score >= 8 ? 'partial' : 'weak'} color={(score >= 14 ? 'success' : score >= 8 ? 'primary' : 'default') as any} variant="outlined" />
+        </Stack>
+      </Box>
+    </Grid>
+  );
+}
+
 function SnapshotRow(props: { label: string; value: string; score: number }) {
   const { label, value, score } = props;
   const color = score === 0 ? 'error' : score === 1 ? 'primary' : 'success';
@@ -248,6 +325,47 @@ function fmtUsd(x: any): string {
   const v = Number(x);
   if (!Number.isFinite(v)) return 'n/a';
   return `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+}
+
+function fmtScore(x: any): string {
+  const v = Number(x);
+  return Number.isFinite(v) ? Math.round(v).toString() : 'n/a';
+}
+
+function bottomScoreBand(x: any): string {
+  const v = Number(x);
+  if (!Number.isFinite(v)) return 'Unavailable';
+  if (v >= 85) return 'Capitulation Opportunity';
+  if (v >= 70) return 'Strong Accumulation';
+  if (v >= 50) return 'Accumulate Slowly';
+  if (v >= 25) return 'Watch';
+  return 'Avoid';
+}
+
+function bottomDeploymentRange(x: any): string {
+  const v = Number(x);
+  if (!Number.isFinite(v)) return 'n/a';
+  if (v >= 85) return '75-100%';
+  if (v >= 70) return '50-75%';
+  if (v >= 50) return '25-40%';
+  if (v >= 25) return '0-10%';
+  return '0%';
+}
+
+function bottomScoreMuiColor(x: any): string {
+  const v = Number(x);
+  if (!Number.isFinite(v) || v < 25) return 'default';
+  if (v < 50) return 'warning';
+  if (v < 70) return 'primary';
+  return 'success';
+}
+
+function bottomScoreColor(x: any): string {
+  const v = Number(x);
+  if (!Number.isFinite(v) || v < 25) return 'divider';
+  if (v < 50) return 'warning.main';
+  if (v < 70) return 'primary.main';
+  return 'success.main';
 }
 
 export default Dashboard;

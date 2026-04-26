@@ -15,6 +15,29 @@ type ScoreDoc = {
 
 const SCORES: ScoreDoc[] = [
   {
+    title: 'Bottom Accumulation Score',
+    badge: 'BOTTOM_ACCUM_SCORE',
+    meaning:
+      'A 0-100 staged-deployment gauge that estimates how attractive the current BTC market is for bottom accumulation over the next weeks or months.',
+    formula:
+      'Sum five 0-20 components: on-chain value, capitulation, liquidity turn, macro risk, and price structure. The first version uses existing CoinStrat inputs only.',
+    rationale:
+      'CORE stays a clean risk-on/risk-off signal. The Bottom Accumulation Score answers a different question: if capital is sidelined, how much evidence do we have that this is an attractive zone to start deploying it?',
+    thresholds: [
+      '0-24 = Avoid. Not enough bottom evidence.',
+      '25-49 = Watch. Conditions are improving, but still incomplete.',
+      '50-69 = Accumulate Slowly. Start staged deployment if it fits the risk plan.',
+      '70-84 = Strong Accumulation. Multiple bottom conditions are aligned.',
+      '85-100 = Capitulation Opportunity. High-conviction bottom zone.',
+    ],
+    notes: [
+      'Suggested deployment bands are intentionally broad: 0%, 0-10%, 25-40%, 50-75%, and 75-100%.',
+      'Price structure avoids reusing the persistence-filtered PRICE_REGIME_ON signal. It scores STH realized price reclaim, 40-week moving-average proximity, 30-day and 90-day momentum, and drawdown/base formation.',
+      'The score does not override CORE. It is a sizing and context layer for investors who want staged accumulation.',
+      'Future versions can add funding rates, open interest flushes, ETF flows, stablecoin supply, oil shocks, real yields, and credit spreads.',
+    ],
+  },
+  {
     title: 'Valuation Score',
     badge: 'VAL_SCORE',
     meaning:

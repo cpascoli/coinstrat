@@ -88,6 +88,14 @@ export interface SignalData {
   MVRV?: number;
   STH_REALIZED_PRICE?: number;
   LTH_REALIZED_PRICE?: number;
+  BOTTOM_ACCUM_SCORE?: number;
+  BOTTOM_ONCHAIN_SCORE?: number;
+  BOTTOM_CAPITULATION_SCORE?: number;
+  BOTTOM_LIQUIDITY_SCORE?: number;
+  BOTTOM_MACRO_SCORE?: number;
+  BOTTOM_STRUCTURE_SCORE?: number;
+  BOTTOM_ACCUM_BAND?: string;
+  BOTTOM_DEPLOYMENT_RANGE?: string;
   // Euphoria Exhaustion diagnostics
   SIP?: number;                // Supply in Profit (%)
   SIP_EUPHORIA_FLAG?: number;  // 1 if euphoria detected this cycle

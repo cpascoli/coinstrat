@@ -57,6 +57,86 @@ const diff = (arr: number[], periods: number) => {
   return result;
 };
 
+const rollingMax = (arr: number[], window: number) => {
+  const result: number[] = [];
+  for (let i = 0; i < arr.length; i++) {
+    const start = Math.max(0, i - window + 1);
+    const vals = arr.slice(start, i + 1).filter(v => Number.isFinite(v));
+    result.push(vals.length ? Math.max(...vals) : NaN);
+  }
+  return result;
+};
+
+function scoreBottomAccumulation(d: any) {
+  const price = Number(d.BTCUSD);
+  const sthRp = Number(d.STH_REALIZED_PRICE);
+  const lthRp = Number(d.LTH_REALIZED_PRICE);
+  const ma40w = Number(d.BTC_MA40W);
+  const lthSopr = Number(d.LTH_SOPR);
+  const sip = Number(d.SIP);
+  const drawdown = Number(d.BTC_DRAWDOWN_365D);
+  const roc30 = Number(d.BTC_ROC30);
+  const roc90 = Number(d.BTC_ROC90);
+
+  const onchainValue = Math.min(20,
+    (d.VAL_SCORE >= 3 ? 12 : d.VAL_SCORE >= 2 ? 9 : d.VAL_SCORE >= 1 ? 4 : 0) +
+    (Number.isFinite(price) && Number.isFinite(sthRp) && sthRp > 0
+      ? price <= sthRp ? 4 : price <= sthRp * 1.1 ? 2 : 0
+      : 0) +
+    (Number.isFinite(price) && Number.isFinite(lthRp) && lthRp > 0
+      ? price <= lthRp ? 4 : price <= lthRp * 1.25 ? 2 : 0
+      : 0)
+  );
+
+  const capitulation = Math.min(20,
+    (Number.isFinite(lthSopr) ? lthSopr < 0.98 ? 9 : lthSopr < 1 ? 7 : lthSopr < 1.03 ? 3 : 0 : 0) +
+    (Number.isFinite(sip) ? sip < 65 ? 6 : sip < 75 ? 4 : sip < 85 ? 2 : 0 : 0) +
+    (Number.isFinite(drawdown) ? drawdown <= -0.55 ? 5 : drawdown <= -0.4 ? 3 : drawdown <= -0.25 ? 1 : 0 : 0)
+  );
+
+  const liquidityTurn = Math.min(20,
+    (d.LIQ_SCORE >= 2 ? 9 : d.LIQ_SCORE >= 1 ? 5 : 0) +
+    (Number.isFinite(d.US_LIQ_13W_DELTA) && d.US_LIQ_13W_DELTA > 0 ? 4 : 0) +
+    (Number.isFinite(d.G3_YOY) ? d.G3_YOY > 0 ? 4 : d.G3_YOY > -2 ? 2 : 0 : 0) +
+    (d.DXY_SCORE >= 2 ? 3 : d.DXY_SCORE >= 1 ? 2 : 0)
+  );
+
+  const macroRisk = Math.min(20,
+    (d.BIZ_CYCLE_SCORE >= 2 ? 10 : d.BIZ_CYCLE_SCORE >= 1 ? 7 : 2) +
+    (Number.isFinite(d.SAHM) && d.SAHM < 0.5 ? 4 : 0) +
+    (Number.isFinite(d.YC_M) ? d.YC_M >= 0 ? 3 : d.YC_M > -0.75 ? 1 : 0 : 0) +
+    (Number.isFinite(d.ISM_PMI) ? d.ISM_PMI >= 50 ? 3 : d.ISM_PMI >= 45 ? 1 : 0 : 0)
+  );
+
+  const priceStructure = Math.min(20,
+    (Number.isFinite(price) && Number.isFinite(ma40w) && ma40w > 0
+      ? price >= ma40w ? 5 : price >= ma40w * 0.9 ? 3 : price >= ma40w * 0.8 ? 1 : 0
+      : 0) +
+    (Number.isFinite(price) && Number.isFinite(sthRp) && sthRp > 0
+      ? price >= sthRp ? 5 : price >= sthRp * 0.95 ? 3 : price >= sthRp * 0.9 ? 1 : 0
+      : 0) +
+    (Number.isFinite(roc30) && roc30 > 0 ? 3 : 0) +
+    (Number.isFinite(roc90) && roc90 > 0 ? 3 : 0) +
+    (Number.isFinite(drawdown) ? drawdown <= -0.55 ? 4 : drawdown <= -0.4 ? 3 : drawdown <= -0.25 ? 2 : drawdown <= -0.15 ? 1 : 0 : 0)
+  );
+
+  const total = onchainValue + capitulation + liquidityTurn + macroRisk + priceStructure;
+  const band =
+    total >= 85 ? 'Capitulation Opportunity' :
+    total >= 70 ? 'Strong Accumulation' :
+    total >= 50 ? 'Accumulate Slowly' :
+    total >= 25 ? 'Watch' :
+    'Avoid';
+  const deployment =
+    total >= 85 ? '75-100%' :
+    total >= 70 ? '50-75%' :
+    total >= 50 ? '25-40%' :
+    total >= 25 ? '0-10%' :
+    '0%';
+
+  return { onchainValue, capitulation, liquidityTurn, macroRisk, priceStructure, total, band, deployment };
+}
+
 // --- Logic Implementations ---
 
 export async function computeAllSignals(): Promise<SignalData[]> {
@@ -395,6 +475,18 @@ export async function computeAllSignals(): Promise<SignalData[]> {
 
   // -- Price Regime (40W MA Persistence) --
   const btcVals = dailyData.map(d => d.BTCUSD);
+  const btcHigh365 = rollingMax(btcVals, 365);
+  const btcRoc30 = pctChange(btcVals, 30);
+  const btcRoc90 = pctChange(btcVals, 90);
+
+  dailyData.forEach((d, i) => {
+    d.BTC_365D_HIGH = btcHigh365[i];
+    d.BTC_DRAWDOWN_365D = Number.isFinite(btcHigh365[i]) && btcHigh365[i] > 0
+      ? (d.BTCUSD / btcHigh365[i]) - 1
+      : NaN;
+    d.BTC_ROC30 = btcRoc30[i];
+    d.BTC_ROC90 = btcRoc90[i];
+  });
 
   // Build a 40-week moving average based on weekly closes, then forward-fill to daily
   // (matches dashboard_2026.py: btc_w = resample("W").last(); ma40 = rolling(40).mean(); ffill to daily)
@@ -568,6 +660,16 @@ export async function computeAllSignals(): Promise<SignalData[]> {
     const abScore = d.LIQ_SCORE + d.BIZ_CYCLE_SCORE;
     d.MACRO_ON = (abScore >= 3 && dxy >= 1) ? 1 : 0;
     d.ACCUM_ON = d.CORE_ON;
+
+    const bottom = scoreBottomAccumulation(d);
+    d.BOTTOM_ONCHAIN_SCORE = bottom.onchainValue;
+    d.BOTTOM_CAPITULATION_SCORE = bottom.capitulation;
+    d.BOTTOM_LIQUIDITY_SCORE = bottom.liquidityTurn;
+    d.BOTTOM_MACRO_SCORE = bottom.macroRisk;
+    d.BOTTOM_STRUCTURE_SCORE = bottom.priceStructure;
+    d.BOTTOM_ACCUM_SCORE = bottom.total;
+    d.BOTTOM_ACCUM_BAND = bottom.band;
+    d.BOTTOM_DEPLOYMENT_RANGE = bottom.deployment;
   });
 
   if (nanWarnings > 0) {
