@@ -85,7 +85,7 @@ function scoreBottomAccumulation(d: any) {
   const ma40w = Number(d.BTC_MA40W);
   const lthSopr = Number(d.LTH_SOPR);
   const sip = Number(d.SIP);
-  const drawdown = Number(d.BTC_DRAWDOWN_365D);
+  const drawdown = Number(d.BTC_DRAWDOWN_FROM_365D_HIGH);
   const low60 = Number(d.BTC_60D_LOW);
   const low30 = Number(d.BTC_30D_LOW);
   const priorLow30 = Number(d.BTC_PRIOR_30D_LOW);
@@ -623,7 +623,7 @@ export async function refreshSignals(
     }
 
     d.BTC_365D_HIGH = btcHigh365[i];
-    d.BTC_DRAWDOWN_365D = Number.isFinite(btcHigh365[i]) && btcHigh365[i] > 0
+    d.BTC_DRAWDOWN_FROM_365D_HIGH = Number.isFinite(btcHigh365[i]) && btcHigh365[i] > 0
       ? (d.BTCUSD / btcHigh365[i]) - 1
       : NaN;
     d.BTC_30D_LOW = btcLow30[i];
