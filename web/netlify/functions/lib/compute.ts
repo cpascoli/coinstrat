@@ -68,6 +68,16 @@ function rollingMax(arr: number[], window: number): number[] {
   return result;
 }
 
+function rollingMin(arr: number[], window: number): number[] {
+  const result: number[] = [];
+  for (let i = 0; i < arr.length; i++) {
+    const start = Math.max(0, i - window + 1);
+    const vals = arr.slice(start, i + 1).filter((v) => Number.isFinite(v));
+    result.push(vals.length ? Math.min(...vals) : NaN);
+  }
+  return result;
+}
+
 function scoreBottomAccumulation(d: any) {
   const price = Number(d.BTCUSD);
   const sthRp = Number(d.STH_REALIZED_PRICE);
@@ -76,6 +86,10 @@ function scoreBottomAccumulation(d: any) {
   const lthSopr = Number(d.LTH_SOPR);
   const sip = Number(d.SIP);
   const drawdown = Number(d.BTC_DRAWDOWN_365D);
+  const low60 = Number(d.BTC_60D_LOW);
+  const low30 = Number(d.BTC_30D_LOW);
+  const priorLow30 = Number(d.BTC_PRIOR_30D_LOW);
+  const daysSinceLow60 = Number(d.BTC_DAYS_SINCE_60D_LOW);
   const roc30 = Number(d.BTC_ROC30);
   const roc90 = Number(d.BTC_ROC90);
 
@@ -109,6 +123,25 @@ function scoreBottomAccumulation(d: any) {
     (Number.isFinite(d.ISM_PMI) ? d.ISM_PMI >= 50 ? 3 : d.ISM_PMI >= 45 ? 1 : 0 : 0)
   );
 
+  const drawdownDepth = Number.isFinite(drawdown)
+    ? drawdown <= -0.55 ? 2 : drawdown <= -0.25 ? 1 : 0
+    : 0;
+  const heldAboveLocalLow =
+    Number.isFinite(price) &&
+    Number.isFinite(low60) &&
+    low60 > 0 &&
+    Number.isFinite(daysSinceLow60) &&
+    daysSinceLow60 >= 30 &&
+    price >= low60 * 1.08;
+  const lowsStoppedBreaking =
+    Number.isFinite(low30) &&
+    Number.isFinite(priorLow30) &&
+    priorLow30 > 0 &&
+    low30 >= priorLow30 * 0.98;
+  const baseStabilization = heldAboveLocalLow && lowsStoppedBreaking && Number.isFinite(roc30) && roc30 > 0
+    ? 2
+    : (heldAboveLocalLow || lowsStoppedBreaking ? 1 : 0);
+
   const priceStructure = Math.min(20,
     (Number.isFinite(price) && Number.isFinite(ma40w) && ma40w > 0
       ? price >= ma40w ? 5 : price >= ma40w * 0.9 ? 3 : price >= ma40w * 0.8 ? 1 : 0
@@ -118,7 +151,8 @@ function scoreBottomAccumulation(d: any) {
       : 0) +
     (Number.isFinite(roc30) && roc30 > 0 ? 3 : 0) +
     (Number.isFinite(roc90) && roc90 > 0 ? 3 : 0) +
-    (Number.isFinite(drawdown) ? drawdown <= -0.55 ? 4 : drawdown <= -0.4 ? 3 : drawdown <= -0.25 ? 2 : drawdown <= -0.15 ? 1 : 0 : 0)
+    drawdownDepth +
+    baseStabilization
   );
 
   const total = onchainValue + capitulation + liquidityTurn + macroRisk + priceStructure;
@@ -568,13 +602,34 @@ export async function refreshSignals(
   // -- BTC MA200 --
   const btcVals = daily.map((d) => typeof d.BTCUSD === 'number' ? d.BTCUSD : NaN);
   const btcHigh365 = rollingMax(btcVals, 365);
+  const btcLow30 = rollingMin(btcVals, 30);
+  const btcLow60 = rollingMin(btcVals, 60);
   const btcRoc30 = pctChange(btcVals, 30);
   const btcRoc90 = pctChange(btcVals, 90);
   daily.forEach((d, i) => {
+    const priorLowWindow = i >= 30
+      ? btcVals.slice(Math.max(0, i - 59), i - 29).filter((v) => Number.isFinite(v))
+      : [];
+    const low60 = btcLow60[i];
+    let daysSinceLow60 = NaN;
+    if (Number.isFinite(low60)) {
+      const start = Math.max(0, i - 59);
+      for (let j = i; j >= start; j--) {
+        if (btcVals[j] === low60) {
+          daysSinceLow60 = i - j;
+          break;
+        }
+      }
+    }
+
     d.BTC_365D_HIGH = btcHigh365[i];
     d.BTC_DRAWDOWN_365D = Number.isFinite(btcHigh365[i]) && btcHigh365[i] > 0
       ? (d.BTCUSD / btcHigh365[i]) - 1
       : NaN;
+    d.BTC_30D_LOW = btcLow30[i];
+    d.BTC_60D_LOW = btcLow60[i];
+    d.BTC_PRIOR_30D_LOW = priorLowWindow.length ? Math.min(...priorLowWindow) : NaN;
+    d.BTC_DAYS_SINCE_60D_LOW = daysSinceLow60;
     d.BTC_ROC30 = btcRoc30[i];
     d.BTC_ROC90 = btcRoc90[i];
   });
