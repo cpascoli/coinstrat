@@ -187,8 +187,9 @@ const Dashboard: React.FC<Props> = ({ current, history }) => {
                 <BottomScoreChip label="On-chain value" value={current.BOTTOM_ONCHAIN_SCORE} />
                 <BottomScoreChip label="Capitulation" value={current.BOTTOM_CAPITULATION_SCORE} />
                 <BottomScoreChip label="Liquidity turn" value={current.BOTTOM_LIQUIDITY_SCORE} />
-                <BottomScoreChip label="Macro risk" value={current.BOTTOM_MACRO_SCORE} />
-                <BottomScoreChip label="Price structure" value={current.BOTTOM_STRUCTURE_SCORE} />
+                <BottomScoreChip label="Macro support" value={current.BOTTOM_MACRO_SCORE} />
+                <BottomScoreChip label="Price setup" value={current.BOTTOM_PRICE_SETUP_SCORE} max={10} />
+                <BottomScoreChip label="Price repair" value={current.BOTTOM_PRICE_REPAIR_SCORE} max={10} />
               </Grid>
             </Grid>
           </Grid>
@@ -267,9 +268,12 @@ function ScoreMiniCard(props: { title: string; value: number; max: number; icon:
   );
 }
 
-function BottomScoreChip(props: { label: string; value?: number }) {
+function BottomScoreChip(props: { label: string; value?: number; max?: number }) {
   const value = Number(props.value);
+  const max = props.max ?? 20;
   const score = Number.isFinite(value) ? value : 0;
+  const strong = score >= max * 0.7;
+  const partial = score >= max * 0.4;
   return (
     <Grid item xs={12} sm={6} lg={4}>
       <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, p: 1.5, height: '100%' }}>
@@ -280,10 +284,10 @@ function BottomScoreChip(props: { label: string; value?: number }) {
           <Typography variant="h6" sx={{ fontWeight: 900 }}>
             {Number.isFinite(value) ? Math.round(value) : 'n/a'}
             <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
-              / 20
+              / {max}
             </Typography>
           </Typography>
-          <Chip size="small" label={score >= 14 ? 'strong' : score >= 8 ? 'partial' : 'weak'} color={(score >= 14 ? 'success' : score >= 8 ? 'primary' : 'default') as any} variant="outlined" />
+          <Chip size="small" label={strong ? 'strong' : partial ? 'partial' : 'weak'} color={(strong ? 'success' : partial ? 'primary' : 'default') as any} variant="outlined" />
         </Stack>
       </Box>
     </Grid>

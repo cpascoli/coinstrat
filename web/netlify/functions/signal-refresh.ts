@@ -6,7 +6,9 @@ import {
   patchBtcusdInCache,
   patchMVRVInCache,
   patchSthLthRealizedPriceInCache,
+  patchBottomScoresInCache,
 } from './lib/signalRefreshRunner';
+import { refreshDerivativesCache } from './lib/derivativesCache';
 
 /**
  * Refresh the signal cache.  Modes (determined by POST body):
@@ -28,6 +30,9 @@ import {
  *  3b. Body { "mode": "patch_sth_lth_rp" } → back-fill STH/LTH realized price
  *      from BGeometrics full JSON for every cached row where those fields are
  *      null (fixes historical gaps when the series was added after seeding).
+ *
+ *  3c. Body { "mode": "patch_bottom_scores" } → recompute the existing cache
+ *      range with current logic and back-fill BOTTOM_* score fields.
  *
  *  4. Body { "mode": "rebuild" } → full recompute.  Re-fetches all APIs
  *     with no date filter and rewrites the entire cache.  WARNING: this
@@ -86,6 +91,16 @@ export const handler: Handler = async (event) => {
 
     if (mode === 'patch_sth_lth_rp') {
       const result = await patchSthLthRealizedPriceInCache();
+      return { statusCode: 200, body: JSON.stringify(result) };
+    }
+
+    if (mode === 'patch_bottom_scores') {
+      const result = await patchBottomScoresInCache();
+      return { statusCode: 200, body: JSON.stringify(result) };
+    }
+
+    if (mode === 'refresh_derivatives') {
+      const result = await refreshDerivativesCache();
       return { statusCode: 200, body: JSON.stringify(result) };
     }
 

@@ -27,6 +27,11 @@
   to = "/.netlify/functions/bgeometrics/:splat"
   status = 200
 
+[[redirects]]
+  from = "/api/derivatives/open-interest"
+  to = "/.netlify/functions/derivatives-open-interest"
+  status = 200
+
 # --- Signal API v1 ---
 
 [[redirects]]

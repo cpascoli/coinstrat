@@ -18,3 +18,14 @@ export function signalsStore() {
 
   return getStore('signals');
 }
+
+export function derivativesStore() {
+  const siteID = process.env.SITE_ID;
+  const token = process.env.NETLIFY_BLOBS_TOKEN;
+
+  if (siteID && token) {
+    return getStore({ name: 'derivatives', siteID, token });
+  }
+
+  return getStore('derivatives');
+}

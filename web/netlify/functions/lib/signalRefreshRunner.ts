@@ -8,12 +8,15 @@ import {
 import { persistSignalAlertChanges, detectAlertChanges } from './signalAlerts';
 import { signalsStore } from './store';
 import { evaluateActiveStrategies } from './strategyAlerts';
+import { refreshDerivativesCache } from './derivativesCache';
 
 interface CachedSignalsPayload {
   timestamp: number;
   count: number;
   data: SignalRow[];
 }
+
+const INCREMENTAL_REPLACE_TAIL_DAYS = 14;
 
 export type SignalRefreshResult =
   | {
@@ -41,6 +44,14 @@ export type SignalRefreshResult =
     mode: 'patch_sth_lth_rp';
     patched: number;
     total: number;
+    cached_at: string;
+  }
+  | {
+    ok: true;
+    mode: 'patch_bottom_scores';
+    patched: number;
+    total: number;
+    latest_date: string | null;
     cached_at: string;
   }
   | {
@@ -294,10 +305,70 @@ export async function patchSthLthRealizedPriceInCache(): Promise<SignalRefreshRe
   };
 }
 
+/**
+ * Back-fill Bottom Accumulation Score fields across the existing cache range.
+ *
+ * This intentionally avoids `fullHistory: true`: historical raw values already
+ * live in the signal cache, and the refresh overlays recent API tails plus full
+ * on-chain/ISM series before recomputing derived BTC structure fields.
+ */
+export async function patchBottomScoresInCache(): Promise<SignalRefreshResult> {
+  const store = signalsStore();
+  const cached = await loadCachedSignals();
+  const cachedData = cached?.data ?? [];
+
+  if (cachedData.length === 0) {
+    throw new Error('Cache is empty — cannot patch Bottom Accumulation Score fields.');
+  }
+
+  const lastDate = cachedData[cachedData.length - 1]?.Date ?? null;
+  const derivativesRefresh = await refreshDerivativesCache();
+  if (!derivativesRefresh.ok) {
+    console.warn('[signal-refresh] Bottom score patch continuing with partial derivatives refresh:', derivativesRefresh);
+  }
+
+  const rebuilt = await refreshSignals(cachedData, {
+    returnFullDataset: true,
+    fullHistory: false,
+  });
+  const rows = lastDate
+    ? rebuilt.filter((row) => row.Date <= lastDate)
+    : rebuilt;
+
+  let patched = 0;
+  for (const row of rows) {
+    if (Number.isFinite(Number(row.BOTTOM_ACCUM_SCORE))) patched += 1;
+  }
+
+  const cachedAt = new Date().toISOString();
+  await store.setJSON('signals_latest', {
+    timestamp: Date.now(),
+    count: rows.length,
+    data: rows,
+  });
+
+  console.log(
+    `[signal-refresh] Bottom score patch complete — populated ${patched} of ${rows.length} rows through ${lastDate}.`,
+  );
+
+  return {
+    ok: true,
+    mode: 'patch_bottom_scores',
+    patched,
+    total: rows.length,
+    latest_date: rows[rows.length - 1]?.Date ?? null,
+    cached_at: cachedAt,
+  };
+}
+
 export async function runSignalRefresh(mode: 'incremental' | 'rebuild'): Promise<SignalRefreshResult> {
   const store = signalsStore();
   const cached = await loadCachedSignals();
   const cachedData = cached?.data ?? [];
+
+  await refreshDerivativesCache().catch((error) => {
+    console.warn('[signal-refresh] Derivatives cache refresh skipped:', error);
+  });
 
   if (cachedData.length === 0) {
     throw new Error(
@@ -341,9 +412,14 @@ export async function runSignalRefresh(mode: 'incremental' | 'rebuild'): Promise
     `[signal-refresh] Incremental refresh from ${lastDate} (${cachedData.length} cached rows)…`,
   );
 
-  const newRows = await refreshSignals(cachedData);
+  const refreshedRows = await refreshSignals(cachedData, {
+    returnFullDataset: true,
+    fullHistory: false,
+  });
+  const replaceFromDate = dateDaysBefore(lastDate, INCREMENTAL_REPLACE_TAIL_DAYS);
+  const newRows = refreshedRows.filter((row) => row.Date > lastDate);
 
-  if (newRows.length === 0) {
+  if (newRows.length === 0 && cachedData.some((row) => row.Date >= replaceFromDate) === false) {
     return {
       ok: true,
       mode: 'incremental',
@@ -357,7 +433,10 @@ export async function runSignalRefresh(mode: 'incremental' | 'rebuild'): Promise
     };
   }
 
-  const combined = [...cachedData, ...newRows];
+  const combined = [
+    ...cachedData.filter((row) => row.Date < replaceFromDate),
+    ...refreshedRows.filter((row) => row.Date >= replaceFromDate),
+  ];
   const cachedAt = new Date().toISOString();
 
   await store.setJSON('signals_latest', {
@@ -371,10 +450,13 @@ export async function runSignalRefresh(mode: 'incremental' | 'rebuild'): Promise
   const alertSummary = alertChanges.length > 0
     ? await persistSignalAlertChanges(alertChanges)
     : { events: 0, deliveries: 0 };
-  const strategySummary = await evaluateActiveStrategies(combined, newRows.map((row) => row.Date));
+  const changedDates = combined
+    .filter((row) => row.Date >= replaceFromDate)
+    .map((row) => row.Date);
+  const strategySummary = await evaluateActiveStrategies(combined, changedDates);
 
   console.log(
-    `[signal-refresh] Appended ${newRows.length} new rows (${combined.length} total).`,
+    `[signal-refresh] Replaced tail from ${replaceFromDate}, appended ${newRows.length} new rows (${combined.length} total).`,
   );
 
   return {
@@ -382,9 +464,15 @@ export async function runSignalRefresh(mode: 'incremental' | 'rebuild'): Promise
     mode: 'incremental',
     new_rows: newRows.length,
     total: combined.length,
-    latest_date: newRows[newRows.length - 1].Date,
+    latest_date: newRows[newRows.length - 1]?.Date ?? combined[combined.length - 1]?.Date ?? lastDate,
     cached_at: cachedAt,
     alerts: alertSummary,
     strategies: strategySummary,
   };
+}
+
+function dateDaysBefore(dateStr: string, days: number): string {
+  const date = new Date(`${dateStr}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() - days);
+  return date.toISOString().split('T')[0];
 }

@@ -289,7 +289,10 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           range === 'all' || range === '10y' || range === '5y'
             ? format(dateObj, 'yyyy')
             : format(dateObj, 'MMM yy'),
-        fullDate: format(dateObj, 'yyyy-MM-dd')
+        fullDate: format(dateObj, 'yyyy-MM-dd'),
+        BTC_FUNDING_RATE_PCT: typeof d.BTC_FUNDING_RATE === 'number' ? d.BTC_FUNDING_RATE * 100 : null,
+        BTC_FUNDING_7D_AVG_PCT: typeof d.BTC_FUNDING_7D_AVG === 'number' ? d.BTC_FUNDING_7D_AVG * 100 : null,
+        BTC_OI_DRAWDOWN_90D_PCT: typeof d.BTC_OI_DRAWDOWN_90D === 'number' ? d.BTC_OI_DRAWDOWN_90D * 100 : null,
       };
     });
   }, [data, range]);
@@ -310,6 +313,8 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       const fmt = (name: string, value: any) => {
         const v = Number(value);
         if (!Number.isFinite(v)) return String(value);
+
+        if (name.includes('Open Interest')) return `$${(v / 1e9).toFixed(2)}B`;
 
         // Prices
         if (name.includes('BTC') || name.includes('Realized Price')) return `$${v.toLocaleString()}`;
@@ -623,6 +628,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
 
       {/* Bottom Accumulation Score */}
       {section === 'bottom' && (
+      <>
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -630,7 +636,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
             A 0-100 staged-deployment gauge built from on-chain value, capitulation, liquidity turn,
-            macro risk, and price structure. It is independent from CORE: CORE says risk on/off,
+            macro support, price setup, and price repair. It is independent from CORE: CORE says risk on/off,
             while this score measures how attractive the current zone is for bottom accumulation.
           </Typography>
         </Box>
@@ -664,12 +670,80 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               <Line yAxisId="score" type="monotone" dataKey="BOTTOM_ONCHAIN_SCORE" name="On-chain Score" stroke="#a78bfa" strokeWidth={1.4} dot={false} isAnimationActive={false} opacity={0.7} />
               <Line yAxisId="score" type="monotone" dataKey="BOTTOM_CAPITULATION_SCORE" name="Capitulation Score" stroke="#fb7185" strokeWidth={1.4} dot={false} isAnimationActive={false} opacity={0.7} />
               <Line yAxisId="score" type="monotone" dataKey="BOTTOM_LIQUIDITY_SCORE" name="Liquidity Score" stroke="#60a5fa" strokeWidth={1.4} dot={false} isAnimationActive={false} opacity={0.7} />
-              <Line yAxisId="score" type="monotone" dataKey="BOTTOM_STRUCTURE_SCORE" name="Structure Score" stroke="#22c55e" strokeWidth={1.4} dot={false} isAnimationActive={false} opacity={0.7} />
+              <Line yAxisId="score" type="monotone" dataKey="BOTTOM_PRICE_SETUP_SCORE" name="Price Setup" stroke="#f97316" strokeWidth={1.2} dot={false} isAnimationActive={false} opacity={0.65} />
+              <Line yAxisId="score" type="monotone" dataKey="BOTTOM_PRICE_REPAIR_SCORE" name="Price Repair" stroke="#4ade80" strokeWidth={1.2} dot={false} isAnimationActive={false} opacity={0.65} />
               <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.5} dot={false} isAnimationActive={false} opacity={0.45} />
             </LineChart>
           </ResponsiveContainer>
         </Box>
       </Paper>
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Box sx={{ mb: 2.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            BTC Perpetual Funding
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            Binance BTCUSDT perpetual funding rates, aggregated to daily averages. Negative or near-zero funding after a drawdown can indicate leverage has reset.
+          </Typography>
+        </Box>
+
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="Daily funding (%)" sx={{ borderColor: '#facc15', color: '#fef08a' }} />
+          <Chip size="small" variant="outlined" label="7D average (%)" sx={{ borderColor: '#60a5fa', color: '#bfdbfe' }} />
+          <Chip size="small" variant="outlined" label="BTCUSD" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
+        </Stack>
+
+        <Box sx={{ height: { xs: 320, sm: 400 }, width: '100%', minWidth: 0 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart key={`funding-${range}`} data={chartData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis yAxisId="funding" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => (typeof v === 'number' ? `${v.toFixed(3)}%` : '')} />
+              <YAxis yAxisId="btc" orientation="right" scale="log" domain={[btcDomain.y1, btcDomain.y2]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
+              <ReferenceLine yAxisId="funding" y={0} stroke="#94a3b8" strokeDasharray="6 3" strokeWidth={1.2} />
+              <Tooltip content={<CustomTooltip />} />
+              {renderChartBrush()}
+              <Line yAxisId="funding" type="monotone" dataKey="BTC_FUNDING_RATE_PCT" name="Funding Rate %" stroke="#facc15" strokeWidth={1.2} dot={false} isAnimationActive={false} opacity={0.65} />
+              <Line yAxisId="funding" type="monotone" dataKey="BTC_FUNDING_7D_AVG_PCT" name="Funding 7D Avg %" stroke="#60a5fa" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+              <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.4} dot={false} isAnimationActive={false} opacity={0.45} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Box>
+      </Paper>
+
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Box sx={{ mb: 2.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            BTC Open Interest Flush
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            Binance BTCUSDT perpetual open interest and its drawdown from the 90-day high. Large OI drawdowns can indicate leverage has been flushed.
+          </Typography>
+        </Box>
+
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="Open Interest (USD)" sx={{ borderColor: '#a78bfa', color: '#ddd6fe' }} />
+          <Chip size="small" variant="outlined" label="OI drawdown from 90D high" sx={{ borderColor: '#fb7185', color: '#fecdd3' }} />
+        </Stack>
+
+        <Box sx={{ height: { xs: 320, sm: 400 }, width: '100%', minWidth: 0 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart key={`oi-${range}`} data={chartData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis yAxisId="oi" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => (typeof v === 'number' ? `$${(v / 1e9).toFixed(1)}B` : '')} />
+              <YAxis yAxisId="drawdown" orientation="right" domain={[-100, 0]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => (typeof v === 'number' ? `${v.toFixed(0)}%` : '')} />
+              <ReferenceLine yAxisId="drawdown" y={-20} stroke="#fb7185" strokeDasharray="4 4" strokeWidth={1} />
+              <ReferenceLine yAxisId="drawdown" y={-35} stroke="#ef4444" strokeDasharray="4 4" strokeWidth={1} />
+              <Tooltip content={<CustomTooltip />} />
+              {renderChartBrush()}
+              <Line yAxisId="oi" type="monotone" dataKey="BTC_OPEN_INTEREST_USD" name="BTC Open Interest" stroke="#a78bfa" strokeWidth={2} dot={false} isAnimationActive={false} />
+              <Line yAxisId="drawdown" type="monotone" dataKey="BTC_OI_DRAWDOWN_90D_PCT" name="OI Drawdown %" stroke="#fb7185" strokeWidth={2} dot={false} isAnimationActive={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Box>
+      </Paper>
+      </>
       )}
 
       {/* Main Chart: BTC + Liquidity Overlay + LIQ_SCORE background shading */}

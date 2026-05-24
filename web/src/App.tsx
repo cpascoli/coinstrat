@@ -93,9 +93,15 @@ export interface SignalData {
   BOTTOM_CAPITULATION_SCORE?: number;
   BOTTOM_LIQUIDITY_SCORE?: number;
   BOTTOM_MACRO_SCORE?: number;
+  BOTTOM_PRICE_SETUP_SCORE?: number;
+  BOTTOM_PRICE_REPAIR_SCORE?: number;
   BOTTOM_STRUCTURE_SCORE?: number;
   BOTTOM_ACCUM_BAND?: string;
   BOTTOM_DEPLOYMENT_RANGE?: string;
+  BTC_FUNDING_RATE?: number;
+  BTC_FUNDING_7D_AVG?: number;
+  BTC_OPEN_INTEREST_USD?: number;
+  BTC_OI_DRAWDOWN_90D?: number;
   // Euphoria Exhaustion diagnostics
   SIP?: number;                // Supply in Profit (%)
   SIP_EUPHORIA_FLAG?: number;  // 1 if euphoria detected this cycle

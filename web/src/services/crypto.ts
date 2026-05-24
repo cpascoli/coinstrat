@@ -92,6 +92,120 @@ async function fetchBinanceKlines(symbol: string, interval: string, startMs: num
 }
 
 /**
+ * Fetch BTC perpetual funding from Binance Futures and aggregate 8-hour
+ * funding observations into daily averages.
+ */
+export async function fetchBTCFundingRates(): Promise<PricePoint[]> {
+  const limit = 1000;
+  const startMs = Date.UTC(2019, 8, 1); // Binance BTCUSDT perp history starts around 2019.
+  const endMs = Date.now();
+  const daily = new Map<string, { sum: number; count: number }>();
+  let currentStartMs = startMs;
+
+  try {
+    while (currentStartMs < endMs) {
+      const params = new URLSearchParams({
+        symbol: 'BTCUSDT',
+        startTime: currentStartMs.toString(),
+        endTime: endMs.toString(),
+        limit: limit.toString(),
+      });
+      const response = await fetch(`https://fapi.binance.com/fapi/v1/fundingRate?${params}`);
+      if (!response.ok) throw new Error(`Binance funding error: ${response.statusText}`);
+      const rows: any[] = await response.json();
+      if (!Array.isArray(rows) || rows.length === 0) break;
+
+      for (const row of rows) {
+        const rate = Number(row.fundingRate);
+        const ts = Number(row.fundingTime);
+        if (!Number.isFinite(rate) || !Number.isFinite(ts)) continue;
+        const date = new Date(ts).toISOString().split('T')[0];
+        const prev = daily.get(date) ?? { sum: 0, count: 0 };
+        prev.sum += rate;
+        prev.count += 1;
+        daily.set(date, prev);
+      }
+
+      const lastTs = Number(rows[rows.length - 1]?.fundingTime);
+      if (!Number.isFinite(lastTs) || lastTs <= currentStartMs) break;
+      currentStartMs = lastTs + 1;
+      if (rows.length < limit) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    return Array.from(daily.entries())
+      .map(([date, v]) => ({ date, value: v.sum / v.count }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  } catch (error) {
+    console.error('Error fetching Binance BTC funding rates:', error);
+    return [];
+  }
+}
+
+/**
+ * Fetch BTC perpetual open interest from Binance Futures.
+ * Binance's public history endpoint can be limited by their retention policy,
+ * so this should be treated as a recent-history feed unless cached server-side.
+ */
+export async function fetchBTCOpenInterest(): Promise<PricePoint[]> {
+  const limit = 500;
+  const isDev = import.meta.env.DEV;
+  const candidates = isDev
+    ? [
+        '/.netlify/functions/derivatives-open-interest',
+        '/api/derivatives/open-interest',
+      ]
+    : ['/api/derivatives/open-interest'];
+
+  try {
+    for (const url of candidates) {
+      try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`Open interest cache error: ${response.statusText}`);
+        const json = await response.json();
+        const rows = Array.isArray(json?.data) ? json.data : [];
+        const parsed = rows
+          .map((row: any) => ({
+            date: row.date,
+            value: Number(row.value),
+          }))
+          .filter((row: PricePoint) => typeof row.date === 'string' && Number.isFinite(row.value))
+          .sort((a: PricePoint, b: PricePoint) => a.date.localeCompare(b.date));
+        if (parsed.length > 0) return parsed;
+      } catch {
+        // Fall through to next candidate, then direct Binance.
+      }
+    }
+
+    const params = new URLSearchParams({
+      symbol: 'BTCUSDT',
+      period: '1d',
+      limit: limit.toString(),
+    });
+    const response = await fetch(`https://fapi.binance.com/futures/data/openInterestHist?${params}`);
+    if (!response.ok) throw new Error(`Binance open interest error: ${response.statusText}`);
+    const rows: any[] = await response.json();
+    if (!Array.isArray(rows)) return [];
+
+    return rows
+      .map((row) => {
+        const ts = Number(row.timestamp);
+        const value = Number(row.sumOpenInterestValue ?? row.sumOpenInterest);
+        if (!Number.isFinite(ts) || !Number.isFinite(value)) return null;
+        return {
+          date: new Date(ts).toISOString().split('T')[0],
+          value,
+        };
+      })
+      .filter((row): row is PricePoint => row !== null)
+      .sort((a, b) => a.date.localeCompare(b.date));
+  } catch (error) {
+    console.error('Error fetching Binance BTC open interest:', error);
+    return [];
+  }
+}
+
+/**
  * Merges two arrays of PricePoints, ensuring unique dates and sorting.
  */
 function mergeUnique(a: PricePoint[], b: PricePoint[]): PricePoint[] {

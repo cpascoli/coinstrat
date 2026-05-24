@@ -10,6 +10,7 @@ import fetch from 'node-fetch';
 // JSON is imported statically so esbuild bundles it inline — no file-system
 // access at runtime and no path-resolution issues in the Lambda environment.
 import btcDailyRaw from '../../../public/data/btc_daily.json';
+import { getCachedFundingRateSeries, getCachedOpenInterestSeries } from './derivativesCache';
 
 // ── Types ───────────────────────────────────────────────────────────────
 
@@ -86,6 +87,8 @@ function scoreBottomAccumulation(d: any) {
   const lthSopr = Number(d.LTH_SOPR);
   const sip = Number(d.SIP);
   const drawdown = Number(d.BTC_DRAWDOWN_FROM_365D_HIGH);
+  const funding7d = Number(d.BTC_FUNDING_7D_AVG);
+  const oiDrawdown90d = Number(d.BTC_OI_DRAWDOWN_90D);
   const low60 = Number(d.BTC_60D_LOW);
   const low30 = Number(d.BTC_30D_LOW);
   const priorLow30 = Number(d.BTC_PRIOR_30D_LOW);
@@ -103,11 +106,23 @@ function scoreBottomAccumulation(d: any) {
       : 0)
   );
 
-  const capitulation = Math.min(20,
+  const legacyCapitulation = Math.min(20,
     (Number.isFinite(lthSopr) ? lthSopr < 0.98 ? 9 : lthSopr < 1 ? 7 : lthSopr < 1.03 ? 3 : 0 : 0) +
     (Number.isFinite(sip) ? sip < 65 ? 6 : sip < 75 ? 4 : sip < 85 ? 2 : 0 : 0) +
     (Number.isFinite(drawdown) ? drawdown <= -0.55 ? 5 : drawdown <= -0.4 ? 3 : drawdown <= -0.25 ? 1 : 0 : 0)
   );
+  const holderStress = Math.min(15,
+    (Number.isFinite(lthSopr) ? lthSopr < 0.98 ? 7 : lthSopr < 1 ? 5 : lthSopr < 1.03 ? 2 : 0 : 0) +
+    (Number.isFinite(sip) ? sip < 65 ? 4 : sip < 75 ? 3 : sip < 85 ? 1 : 0 : 0) +
+    (Number.isFinite(drawdown) ? drawdown <= -0.55 ? 4 : drawdown <= -0.4 ? 3 : drawdown <= -0.25 ? 1 : 0 : 0)
+  );
+  const derivativesStress = Math.min(5,
+    (Number.isFinite(funding7d) ? funding7d < -0.0001 ? 3 : funding7d <= 0 ? 2 : funding7d < 0.0001 ? 1 : 0 : 0) +
+    (Number.isFinite(oiDrawdown90d) ? oiDrawdown90d <= -0.35 ? 2 : oiDrawdown90d <= -0.2 ? 1 : 0 : 0)
+  );
+  const capitulation = (Number.isFinite(funding7d) || Number.isFinite(oiDrawdown90d))
+    ? Math.min(20, holderStress + derivativesStress)
+    : legacyCapitulation;
 
   const liquidityTurn = Math.min(20,
     (d.LIQ_SCORE >= 2 ? 9 : d.LIQ_SCORE >= 1 ? 5 : 0) +
@@ -123,9 +138,20 @@ function scoreBottomAccumulation(d: any) {
     (Number.isFinite(d.ISM_PMI) ? d.ISM_PMI >= 50 ? 3 : d.ISM_PMI >= 45 ? 1 : 0 : 0)
   );
 
-  const drawdownDepth = Number.isFinite(drawdown)
-    ? drawdown <= -0.55 ? 2 : drawdown <= -0.25 ? 1 : 0
+  const setupDrawdownDepth = Number.isFinite(drawdown)
+    ? drawdown <= -0.55 ? 3 : drawdown <= -0.4 ? 2 : drawdown <= -0.25 ? 1 : 0
     : 0;
+  const setupBelowMa40w = Number.isFinite(price) && Number.isFinite(ma40w) && ma40w > 0
+    ? price <= ma40w * 0.8 ? 3 : price <= ma40w * 0.9 ? 2 : price < ma40w ? 1 : 0
+    : 0;
+  const setupBelowSthRp = Number.isFinite(price) && Number.isFinite(sthRp) && sthRp > 0
+    ? price <= sthRp * 0.85 ? 3 : price <= sthRp * 0.95 ? 2 : price < sthRp ? 1 : 0
+    : 0;
+  const setupNegativeMomentum = Number.isFinite(roc30) && Number.isFinite(roc90)
+    ? (roc30 < 0 && roc90 < 0 ? 1 : 0)
+    : 0;
+  const priceSetup = Math.min(10, setupDrawdownDepth + setupBelowMa40w + setupBelowSthRp + setupNegativeMomentum);
+
   const heldAboveLocalLow =
     Number.isFinite(price) &&
     Number.isFinite(low60) &&
@@ -142,18 +168,18 @@ function scoreBottomAccumulation(d: any) {
     ? 2
     : (heldAboveLocalLow || lowsStoppedBreaking ? 1 : 0);
 
-  const priceStructure = Math.min(20,
+  const priceRepair = Math.min(10,
     (Number.isFinite(price) && Number.isFinite(ma40w) && ma40w > 0
-      ? price >= ma40w ? 5 : price >= ma40w * 0.9 ? 3 : price >= ma40w * 0.8 ? 1 : 0
+      ? price >= ma40w ? 3 : price >= ma40w * 0.9 ? 2 : price >= ma40w * 0.8 ? 1 : 0
       : 0) +
     (Number.isFinite(price) && Number.isFinite(sthRp) && sthRp > 0
-      ? price >= sthRp ? 5 : price >= sthRp * 0.95 ? 3 : price >= sthRp * 0.9 ? 1 : 0
+      ? price >= sthRp ? 3 : price >= sthRp * 0.95 ? 2 : price >= sthRp * 0.9 ? 1 : 0
       : 0) +
-    (Number.isFinite(roc30) && roc30 > 0 ? 3 : 0) +
-    (Number.isFinite(roc90) && roc90 > 0 ? 3 : 0) +
-    drawdownDepth +
+    (Number.isFinite(roc30) && roc30 > 0 ? 1 : 0) +
+    (Number.isFinite(roc90) && roc90 > 0 ? 1 : 0) +
     baseStabilization
   );
+  const priceStructure = priceSetup + priceRepair;
 
   const total = onchainValue + capitulation + liquidityTurn + macroRisk + priceStructure;
   const band =
@@ -169,12 +195,13 @@ function scoreBottomAccumulation(d: any) {
     total >= 25 ? '0-10%' :
     '0%';
 
-  return { onchainValue, capitulation, liquidityTurn, macroRisk, priceStructure, total, band, deployment };
+  return { onchainValue, capitulation, liquidityTurn, macroRisk, priceSetup, priceRepair, priceStructure, total, band, deployment };
 }
 
 // ── Server-side data fetching (recent tail only) ────────────────────────
 
 const LOOKBACK_DAYS = 500; // covers 365-day YoY + buffer
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function lookbackDate(): string {
   const d = new Date();
@@ -216,6 +243,22 @@ async function fetchBtcTail(): Promise<DataPoint[]> {
       date: new Date(e.time * 1000).toISOString().split('T')[0],
       value: e.close as number,
     }));
+}
+
+async function fetchBinanceFundingRates(fullHistory = false): Promise<DataPoint[]> {
+  try {
+    return await getCachedFundingRateSeries(fullHistory);
+  } catch (error) {
+    console.error('Funding rate cache fetch failed:', error);
+    return [];
+  }
+}
+
+async function fetchBinanceOpenInterest(): Promise<DataPoint[]> {
+  return getCachedOpenInterestSeries().catch((error) => {
+    console.error('Open interest cache fetch failed:', error);
+    return [];
+  });
 }
 
 /**
@@ -289,27 +332,35 @@ async function fetchISM_PMI(): Promise<DataPoint[]> {
   const all: DataPoint[] = [];
   let url = baseUrl;
 
-  while (url) {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`ISM PMI: HTTP ${res.status}`);
-    const json = (await res.json()) as any;
-    const occurrences: any[] = json.occurrences ?? [];
+  try {
+    while (url) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`ISM PMI: HTTP ${res.status}`);
+      const json = (await res.json()) as any;
+      const occurrences: any[] = json.occurrences ?? [];
 
-    for (const o of occurrences) {
-      if (o.actual == null) continue;
-      const date = o.occurrence_time?.split('T')[0];
-      if (!date) continue;
-      all.push({ date, value: Number(o.actual) });
+      for (const o of occurrences) {
+        if (o.actual == null) continue;
+        const date = o.occurrence_time?.split('T')[0];
+        if (!date) continue;
+        all.push({ date, value: Number(o.actual) });
+      }
+
+      if (json.next_page_cursor) {
+        url = `${baseUrl}&cursor=${encodeURIComponent(json.next_page_cursor)}`;
+      } else {
+        break;
+      }
     }
 
-    if (json.next_page_cursor) {
-      url = `${baseUrl}&cursor=${encodeURIComponent(json.next_page_cursor)}`;
-    } else {
-      break;
-    }
+    return all.sort((a, b) => a.date.localeCompare(b.date));
+  } catch (error) {
+    // FRED removed ISM-owned PMI series in 2016, so there is no reliable FRED
+    // fallback. Keep cached PMI values where they exist and let BIZ_CYCLE_SCORE
+    // fall back to SAHM + yield-curve inputs instead of aborting refreshes.
+    console.warn('[compute] Investing.com ISM PMI fetch failed; continuing without fresh PMI.', error);
+    return [];
   }
-
-  return all.sort((a, b) => a.date.localeCompare(b.date));
 }
 
 // ── Merge helper ────────────────────────────────────────────────────────
@@ -370,7 +421,7 @@ export async function refreshSignals(
     btcPrices, mvrv,
     ecbAssets, bojAssets, eurUsd, jpyUsd,
     lthSopr, lthNupl, supplyInProfit, sthRealizedPrice, lthRealizedPrice,
-    ismPmi,
+    ismPmi, btcFundingRates, btcOpenInterest,
   ] = await Promise.all([
     fetchFredSeries('WALCL', fullHistory),
     fetchFredSeries('WTREGEN', fullHistory),
@@ -391,6 +442,8 @@ export async function refreshSignals(
     fetchBGeometrics('sth_realized_price'),
     fetchBGeometrics('lth_realized_price'),
     fetchISM_PMI(),
+    fetchBinanceFundingRates(fullHistory),
+    fetchBinanceOpenInterest(),
   ]);
 
   const rrpM = rrp.map((o) => ({ ...o, value: o.value * 1000 }));
@@ -419,7 +472,7 @@ export async function refreshSignals(
   const seedKeys = [
     'BTCUSD', 'DXY', 'SAHM', 'YC_M', 'NO', 'MVRV', 'US_LIQ', 'SIP', 'LTH_SOPR', 'LTH_NUPL',
     'STH_REALIZED_PRICE', 'LTH_REALIZED_PRICE', 'ECB_RAW', 'BOJ_RAW', 'EURUSD', 'JPYUSD', 'WALCL', 'WTREGEN', 'RRPONTSYD',
-    'G3_ASSETS', 'ISM_PMI',
+    'G3_ASSETS', 'ISM_PMI', 'BTC_FUNDING_RATE', 'BTC_OPEN_INTEREST_USD',
   ];
 
   for (let i = 0; i < allDates.length; i++) {
@@ -445,6 +498,8 @@ export async function refreshSignals(
   overlaySeries(lthRealizedPrice, daily, allDates, 'LTH_REALIZED_PRICE');
   overlaySeries(supplyInProfit, daily, allDates, 'SIP');
   overlaySeries(ismPmi, daily, allDates, 'ISM_PMI');
+  overlaySeries(btcFundingRates, daily, allDates, 'BTC_FUNDING_RATE');
+  overlaySeries(btcOpenInterest, daily, allDates, 'BTC_OPEN_INTEREST_USD');
   overlaySeries(ecbAssets, daily, allDates, 'ECB_RAW');
   overlaySeries(bojAssets, daily, allDates, 'BOJ_RAW');
   overlaySeries(eurUsd, daily, allDates, 'EURUSD');
@@ -633,6 +688,18 @@ export async function refreshSignals(
     d.BTC_ROC30 = btcRoc30[i];
     d.BTC_ROC90 = btcRoc90[i];
   });
+
+  const fundingVals = daily.map((d) => d.BTC_FUNDING_RATE);
+  const funding7d = rollingMean(fundingVals, 7);
+  const oiVals = daily.map((d) => d.BTC_OPEN_INTEREST_USD);
+  const oiHigh90 = rollingMax(oiVals, 90);
+  daily.forEach((d, i) => {
+    d.BTC_FUNDING_7D_AVG = funding7d[i];
+    d.BTC_OI_90D_HIGH = oiHigh90[i];
+    d.BTC_OI_DRAWDOWN_90D = Number.isFinite(oiVals[i]) && Number.isFinite(oiHigh90[i]) && oiHigh90[i] > 0
+      ? (oiVals[i] / oiHigh90[i]) - 1
+      : NaN;
+  });
   const btcMA200 = rollingMean(btcVals, 200);
   daily.forEach((d, i) => { d.BTC_MA200 = btcMA200[i]; });
 
@@ -727,6 +794,8 @@ export async function refreshSignals(
     d.BOTTOM_CAPITULATION_SCORE = bottom.capitulation;
     d.BOTTOM_LIQUIDITY_SCORE = bottom.liquidityTurn;
     d.BOTTOM_MACRO_SCORE = bottom.macroRisk;
+    d.BOTTOM_PRICE_SETUP_SCORE = bottom.priceSetup;
+    d.BOTTOM_PRICE_REPAIR_SCORE = bottom.priceRepair;
     d.BOTTOM_STRUCTURE_SCORE = bottom.priceStructure;
     d.BOTTOM_ACCUM_SCORE = bottom.total;
     d.BOTTOM_ACCUM_BAND = bottom.band;

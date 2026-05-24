@@ -20,7 +20,7 @@ const SCORES: ScoreDoc[] = [
     meaning:
       'A 0-100 staged-deployment gauge that estimates how attractive the current BTC market is for bottom accumulation over the next weeks or months.',
     formula:
-      'Sum five 0-20 components: on-chain value, capitulation, liquidity turn, macro risk, and price structure. The first version uses existing CoinStrat inputs only.',
+      'Sum four 0-20 components plus two 0-10 price components: on-chain value, capitulation, liquidity turn, macro support, price setup/damage, and price repair/confirmation.',
     rationale:
       'CORE stays a clean risk-on/risk-off signal. The Bottom Accumulation Score answers a different question: if capital is sidelined, how much evidence do we have that this is an attractive zone to start deploying it?',
     thresholds: [
@@ -32,7 +32,8 @@ const SCORES: ScoreDoc[] = [
     ],
     notes: [
       'Suggested deployment bands are intentionally broad: 0%, 0-10%, 25-40%, 50-75%, and 75-100%.',
-      'Price structure avoids reusing the persistence-filtered PRICE_REGIME_ON signal. It scores STH realized price reclaim, 40-week moving-average proximity, 30-day and 90-day momentum, and drawdown/base formation.',
+      'Capitulation now includes optional Binance derivatives context: 7-day BTCUSDT perpetual funding and open-interest drawdown from the 90-day high. When these feeds are unavailable, the score falls back to holder stress, Supply in Profit, and BTC drawdown.',
+      'The price components avoid reusing the persistence-filtered PRICE_REGIME_ON signal. Price setup rewards deep price impairment, while price repair rewards reclaim, momentum, and base stabilization.',
       'The score does not override CORE. It is a sizing and context layer for investors who want staged accumulation.',
       'Future versions can add funding rates, open interest flushes, ETF flows, stablecoin supply, oil shocks, real yields, and credit spreads.',
     ],
