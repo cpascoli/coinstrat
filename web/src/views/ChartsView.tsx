@@ -8,13 +8,14 @@ import { format } from 'date-fns';
 import { Activity } from 'lucide-react';
 import { Box, Chip, Paper, Stack, Tab, Tabs, ToggleButton, ToggleButtonGroup, Typography } from '@mui/material';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { fitCQM, type CQMFit, type CQMPoint, snapshotAt } from '../utils/cqm';
 
 interface Props {
   data: SignalData[];
 }
 
 type RangeKey = 'all' | '10y' | '5y' | '2y' | '1y';
-type ChartsSection = 'system' | 'bottom' | 'valuation' | 'liquidity' | 'business' | 'global' | 'usd';
+type ChartsSection = 'system' | 'bottom' | 'valuation' | 'liquidity' | 'business' | 'global' | 'usd' | 'cqm';
 
 type RegimeKey = 'LIQ_SCORE' | 'BIZ_CYCLE_SCORE';
 type RegimeSpan = { x1: number; x2: number; value: 0 | 1 | 2 };
@@ -236,7 +237,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
   const section: ChartsSection = useMemo(() => {
     const m = location.pathname.match(/^\/charts\/([^/]+)/);
     const seg = (m?.[1] ?? 'system').toLowerCase();
-    if (seg === 'system' || seg === 'bottom' || seg === 'valuation' || seg === 'liquidity' || seg === 'business' || seg === 'global' || seg === 'usd') return seg as ChartsSection;
+    if (seg === 'system' || seg === 'bottom' || seg === 'valuation' || seg === 'liquidity' || seg === 'business' || seg === 'global' || seg === 'usd' || seg === 'cqm') return seg as ChartsSection;
     return 'system';
   }, [location.pathname]);
 
@@ -248,7 +249,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
     }
     const m = location.pathname.match(/^\/charts\/([^/]+)/);
     const seg = (m?.[1] ?? '').toLowerCase();
-    if (seg && seg !== 'system' && seg !== 'bottom' && seg !== 'valuation' && seg !== 'liquidity' && seg !== 'business' && seg !== 'global' && seg !== 'usd') {
+    if (seg && seg !== 'system' && seg !== 'bottom' && seg !== 'valuation' && seg !== 'liquidity' && seg !== 'business' && seg !== 'global' && seg !== 'usd' && seg !== 'cqm') {
       navigate('/charts/system', { replace: true });
     }
   }, [location.pathname, navigate]);
@@ -325,6 +326,9 @@ const ChartsView: React.FC<Props> = ({ data }) => {
 
         // Percent series
         if (name.includes('YOY') || name.includes('ROC') || name.includes('%')) return `${v.toFixed(2)}%`;
+
+        // CQM Score is a 0..1 oscillator -> render as a percent with 2 decimals
+        if (name === 'CQM Score') return `${(v * 100).toFixed(2)}%`;
 
         // Score series
         if (name.includes('Score')) return v.toFixed(0);
@@ -506,6 +510,57 @@ const ChartsView: React.FC<Props> = ({ data }) => {
   const systemSpans = useMemo(() => buildSystemSpans(chartData as any), [chartData]);
   const mvrvSpans = useMemo(() => buildMvrvSpans(chartData as any), [chartData]);
 
+  // --- CoinStrat Quantile Model (CQM) -------------------------------------
+  // Fit on the full BTC history once; the fit is then evaluated against the
+  // current range-filtered chartData for plotting.
+  const cqmFit: CQMFit | null = useMemo(() => {
+    if (!data || data.length < 365) return null;
+    const points: { date: string; ts: number; price: number }[] = [];
+    for (const d of data) {
+      const price = Number((d as any).BTCUSD);
+      if (!Number.isFinite(price) || price <= 0) continue;
+      const ts = new Date(d.Date).getTime();
+      if (!Number.isFinite(ts)) continue;
+      points.push({ date: d.Date, ts, price });
+    }
+    if (points.length < 365) return null;
+    try {
+      return fitCQM(points);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('CQM fit failed:', err);
+      return null;
+    }
+  }, [data]);
+
+  const cqmChartData = useMemo(() => {
+    if (!cqmFit) return chartData as any[];
+    const cqmMap = new Map<number, CQMPoint>();
+    for (const s of cqmFit.signals) cqmMap.set(s.ts, s);
+    return (chartData as any[]).map((d) => {
+      const cqm = cqmMap.get(d.ts);
+      if (!cqm) return d;
+      return {
+        ...d,
+        CQM_LOWER: cqm.solidLower,
+        CQM_MEDIAN: cqm.solidMedian,
+        CQM_UPPER: cqm.solidUpper,
+        CQM_DASHED_LOW: cqm.dashedLow,
+        CQM_DASHED_HIGH: cqm.dashedHigh,
+        CQM_SCORE: cqm.score,
+        CQM_RISK_PCT: cqm.risk * 100,
+        CQM_TR_LOWER: cqm.trendRiskLower,
+        CQM_TR_MEDIAN: cqm.trendRiskMedian,
+        CQM_TR_UPPER: cqm.trendRiskUpper,
+      };
+    });
+  }, [chartData, cqmFit]);
+
+  const cqmSnapshot = useMemo(() => {
+    if (!cqmFit) return null;
+    return snapshotAt(cqmFit);
+  }, [cqmFit]);
+
   const tickCount = range === 'all' ? 10 : range === '10y' ? 10 : range === '5y' ? 8 : range === '2y' ? 8 : 6;
 
   const btcDomain = useMemo(() => {
@@ -554,6 +609,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           <Tab value="global" label="Global Liq." sx={{ minHeight: 40 }} />
           <Tab value="business" label="Business Cycle" sx={{ minHeight: 40 }} />
           <Tab value="usd" label="USD" sx={{ minHeight: 40 }} />
+          <Tab value="cqm" label="CQM" sx={{ minHeight: 40 }} />
         </Tabs>
 
         <ToggleButtonGroup
@@ -1797,6 +1853,239 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               <Tooltip content={<CustomTooltip />} />
               {renderChartBrush()}
               <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={2} dot={false} isAnimationActive={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Box>
+      </Paper>
+      )}
+
+      {/* CoinStrat Quantile Model — Price Bands */}
+      {section === 'cqm' && (
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Box sx={{ mb: 2.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            CoinStrat Quantile Model — Price Bands
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            CoinStrat Quantile Model is inspired by BTCAnalytica's Empirical Quantile Model. All three solid bands are reverse-engineered to shelf during bear markets (step up at new ATHs, plateau through corrections); verified at the May 22, 2026 snapshot ($45.4K / $108.4K / $159.4K).
+            <br />
+            <b>Solid red 99.9%</b> = max(rolling all-time-high × {cqmFit ? cqmFit.upperAthFactor.toFixed(2) : '1.28'}, gold band) — verified +0.1% vs chart.
+            <br />
+            <b>Solid gold 50%</b> = min(running max of (rolling-{cqmFit ? cqmFit.solidGoldWindow : 730}-day Q0.5(price/ATH) × ATH(t)), {cqmFit ? cqmFit.solidGoldFloorBuffer.toFixed(1) : '2.0'} × rolling-{cqmFit ? cqmFit.solidGoldFloorWindow : 30}-day min price) — verified +3.2% vs chart. The price-relative ceiling pulls gold down during deep bear bottoms (2015, 2018, 2022) so it stays approximately between red and green instead of plateauing at the previous-cycle bull peak.
+            <br />
+            <b>Solid green 0.1%</b> = min(shelved time-decayed weighted Q{cqmFit ? cqmFit.solidGreenQuantile.toFixed(2) : '0.05'}(price/ATH) × ATH(t), {cqmFit ? cqmFit.solidGreenFloorBuffer.toFixed(2) : '0.95'} × rolling-{cqmFit ? cqmFit.solidGreenFloorWindow : 30}-day min price) with a {cqmFit ? cqmFit.solidGreenHalfLifeYears.toFixed(1) : '1.0'}-year half-life — verified +5.2% vs chart. The shelved component handles the non-stationary growth of the green/ATH multiplier (~0.27 in 2018 → ~0.37 in 2026); the price-floor constraint forces the line below BTC at every cycle bottom (2015, 2018, 2020 covid, 2022) so it visually acts as a true deep-value floor.
+            <br />
+            Dashed bands are an OLS-trend approximation of the QR 0.1% / 99.9% lines (true QR fits would diverge more aggressively at the extremes).
+            <br />
+            Fit on BTC history from 2014-01-01 onward (time_power=0.6, low_q=0.06, high_q=0.68, score_power=1.5) to match the EQM-model Python replica's calibration. See EQM-model/README.md for the full derivation.
+          </Typography>
+        </Box>
+
+        {!cqmFit && (
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="body2" color="text.secondary">
+              Not enough BTC history yet to fit the CQM (needs ≥365 daily prices).
+            </Typography>
+          </Box>
+        )}
+
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="BTCUSD" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
+          <Chip size="small" variant="outlined" label="CQM 0.1% (solid floor)" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="CQM 50% (solid median)" sx={{ borderColor: '#facc15', color: '#fef08a' }} />
+          <Chip size="small" variant="outlined" label="CQM 99.9% (solid ceiling)" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
+          <Chip size="small" variant="outlined" label="QR-approx 0.1% / 99.9% (dashed)" sx={{ borderColor: '#94a3b8', color: '#cbd5e1' }} />
+        </Stack>
+
+        <Box sx={{ height: { xs: 360, sm: 460, md: 540 }, width: '100%', minWidth: 0 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart key={`cqm-bands-${range}`} data={cqmChartData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis
+                yAxisId="btc"
+                scale="log"
+                domain={['auto', 'auto']}
+                tick={{ fontSize: 10, fill: '#94a3b8' }}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(val) => {
+                  if (typeof val !== 'number' || isNaN(val)) return '';
+                  if (val >= 1000) return `$${Math.round(val / 1000)}k`;
+                  return `$${Math.round(val)}`;
+                }}
+              />
+              <Tooltip content={<CustomTooltip />} />
+              {renderChartBrush()}
+              <Line yAxisId="btc" type="monotone" dataKey="CQM_DASHED_HIGH" name="QR-approx 99.9%" stroke="#ef4444" strokeWidth={1} strokeDasharray="6 4" dot={false} isAnimationActive={false} opacity={0.7} connectNulls />
+              <Line yAxisId="btc" type="monotone" dataKey="CQM_DASHED_LOW" name="QR-approx 0.1%" stroke="#22c55e" strokeWidth={1} strokeDasharray="6 4" dot={false} isAnimationActive={false} opacity={0.7} connectNulls />
+              <Line yAxisId="btc" type="monotone" dataKey="CQM_UPPER" name="CQM 99.9%" stroke="#ef4444" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
+              <Line yAxisId="btc" type="monotone" dataKey="CQM_MEDIAN" name="CQM 50%" stroke="#facc15" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
+              <Line yAxisId="btc" type="monotone" dataKey="CQM_LOWER" name="CQM 0.1%" stroke="#22c55e" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
+              <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.6} dot={false} isAnimationActive={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Box>
+
+        {cqmSnapshot && (
+          <Box sx={{ mt: 2, display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
+            <Chip size="small" label={`As of ${cqmSnapshot.date}`} sx={{ bgcolor: 'rgba(148,163,184,0.18)', color: '#cbd5e1' }} />
+            <Chip size="small" label={`Price $${Math.round(cqmSnapshot.price).toLocaleString()}`} sx={{ bgcolor: 'rgba(229,231,235,0.18)', color: '#e5e7eb' }} />
+            <Chip size="small" label={`CQM 0.1% $${Math.round(cqmSnapshot.solidLower).toLocaleString()}`} sx={{ bgcolor: 'rgba(34,197,94,0.18)', color: '#bbf7d0' }} />
+            <Chip size="small" label={`CQM 50% $${Math.round(cqmSnapshot.solidMedian).toLocaleString()}`} sx={{ bgcolor: 'rgba(250,204,21,0.18)', color: '#fef08a' }} />
+            <Chip size="small" label={`CQM 99.9% $${Math.round(cqmSnapshot.solidUpper).toLocaleString()}`} sx={{ bgcolor: 'rgba(239,68,68,0.18)', color: '#fecaca' }} />
+            <Chip size="small" label={`Risk ${(cqmSnapshot.risk * 100).toFixed(1)}%`} sx={{ bgcolor: 'rgba(96,165,250,0.18)', color: '#bfdbfe' }} />
+            <Chip size="small" label={`Score ${cqmSnapshot.score.toFixed(3)}`} sx={{ bgcolor: 'rgba(167,139,250,0.18)', color: '#ddd6fe' }} />
+          </Box>
+        )}
+      </Paper>
+      )}
+
+      {/* CoinStrat Quantile Model — Trend-Risk Composite */}
+      {section === 'cqm' && (
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Box sx={{ mb: 2.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            CQM Trend-Risk Composite
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            Short-term smoother — a 60-day rolling quantile envelope on raw price (10th / 50th / 90th percentile of the trailing window).
+            <br />
+            This is a placeholder proxy for the BTCAnalytica panel; the underlying formula has not been confirmed. The 60-day median tracks the local price level after smoothing out daily noise; the 10–90 envelope shows how dispersed the last two months of trading have been.
+            <br />
+            Useful as a fast-reacting overlay on top of the long-run CQM bands above, especially around regime shifts.
+          </Typography>
+        </Box>
+
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="BTCUSD" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
+          <Chip size="small" variant="outlined" label="60d median (50%)" sx={{ borderColor: '#facc15', color: '#fef08a' }} />
+          <Chip size="small" variant="outlined" label="60d envelope 10–90% (dashed)" sx={{ borderColor: '#94a3b8', color: '#cbd5e1' }} />
+        </Stack>
+
+        <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart key={`cqm-trend-risk-${range}`} data={cqmChartData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis
+                yAxisId="btc"
+                scale="log"
+                domain={['auto', 'auto']}
+                tick={{ fontSize: 10, fill: '#94a3b8' }}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(val) => {
+                  if (typeof val !== 'number' || isNaN(val)) return '';
+                  if (val >= 1000) return `$${Math.round(val / 1000)}k`;
+                  return `$${Math.round(val)}`;
+                }}
+              />
+              <Tooltip content={<CustomTooltip />} />
+              {renderChartBrush()}
+              <Line yAxisId="btc" type="monotone" dataKey="CQM_TR_UPPER" name="60d 90%" stroke="#94a3b8" strokeWidth={1.2} strokeDasharray="6 4" dot={false} isAnimationActive={false} connectNulls />
+              <Line yAxisId="btc" type="monotone" dataKey="CQM_TR_LOWER" name="60d 10%" stroke="#94a3b8" strokeWidth={1.2} strokeDasharray="6 4" dot={false} isAnimationActive={false} connectNulls />
+              <Line yAxisId="btc" type="monotone" dataKey="CQM_TR_MEDIAN" name="60d median" stroke="#facc15" strokeWidth={2.2} dot={false} isAnimationActive={false} connectNulls />
+              <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.6} dot={false} isAnimationActive={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Box>
+
+        {cqmSnapshot && cqmSnapshot.trendRiskMedian !== null && (
+          <Box sx={{ mt: 2, display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
+            <Chip size="small" label={`As of ${cqmSnapshot.date}`} sx={{ bgcolor: 'rgba(148,163,184,0.18)', color: '#cbd5e1' }} />
+            <Chip size="small" label={`Price $${Math.round(cqmSnapshot.price).toLocaleString()}`} sx={{ bgcolor: 'rgba(229,231,235,0.18)', color: '#e5e7eb' }} />
+            {cqmSnapshot.trendRiskLower !== null && (
+              <Chip size="small" label={`60d 10% $${Math.round(cqmSnapshot.trendRiskLower).toLocaleString()}`} sx={{ bgcolor: 'rgba(148,163,184,0.18)', color: '#cbd5e1' }} />
+            )}
+            <Chip size="small" label={`60d median $${Math.round(cqmSnapshot.trendRiskMedian).toLocaleString()}`} sx={{ bgcolor: 'rgba(250,204,21,0.18)', color: '#fef08a' }} />
+            {cqmSnapshot.trendRiskUpper !== null && (
+              <Chip size="small" label={`60d 90% $${Math.round(cqmSnapshot.trendRiskUpper).toLocaleString()}`} sx={{ bgcolor: 'rgba(148,163,184,0.18)', color: '#cbd5e1' }} />
+            )}
+          </Box>
+        )}
+      </Paper>
+      )}
+
+      {/* CoinStrat Quantile Model — Risk */}
+      {section === 'cqm' && (
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Box sx={{ mb: 2.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            CQM Risk
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            CQM Risk maps the residual against the long-run trend through the calibrated [low_q, high_q] = [{cqmFit ? cqmFit.lowQ.toFixed(2) : '0.06'}, {cqmFit ? cqmFit.highQ.toFixed(2) : '0.68'}] residual-percentile window.
+            <br />
+            DCA rule: <code>daily_usd = base × (1 − 2 × Risk)</code>. Risk ≤ 0% → buy +base, Risk = 50% → flat, Risk ≥ 100% → sell base.
+          </Typography>
+        </Box>
+
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="0–25% Buy zone" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="25–50% Accumulate" sx={{ borderColor: '#84cc16', color: '#d9f99d' }} />
+          <Chip size="small" variant="outlined" label="50–75% Trim" sx={{ borderColor: '#f59e0b', color: '#fde68a' }} />
+          <Chip size="small" variant="outlined" label="75–100% Sell zone" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
+        </Stack>
+
+        <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart key={`cqm-risk-${range}`} data={cqmChartData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
+              <ReferenceArea yAxisId="risk" y1={0} y2={25} fill="#22c55e" fillOpacity={0.16} strokeOpacity={0} />
+              <ReferenceArea yAxisId="risk" y1={25} y2={50} fill="#84cc16" fillOpacity={0.14} strokeOpacity={0} />
+              <ReferenceArea yAxisId="risk" y1={50} y2={75} fill="#f59e0b" fillOpacity={0.14} strokeOpacity={0} />
+              <ReferenceArea yAxisId="risk" y1={75} y2={100} fill="#ef4444" fillOpacity={0.16} strokeOpacity={0} />
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis yAxisId="risk" domain={[0, 100]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => (typeof v === 'number' ? `${v.toFixed(0)}%` : '')} />
+              <YAxis yAxisId="btc" orientation="right" scale="log" domain={[btcDomain.y1, btcDomain.y2]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
+              <ReferenceLine yAxisId="risk" y={50} stroke="#94a3b8" strokeDasharray="6 3" strokeWidth={1.2} />
+              <Tooltip content={<CustomTooltip />} />
+              {renderChartBrush()}
+              <Line yAxisId="risk" type="monotone" dataKey="CQM_RISK_PCT" name="CQM Risk %" stroke="#facc15" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls />
+              <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.4} dot={false} isAnimationActive={false} opacity={0.45} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Box>
+      </Paper>
+      )}
+
+      {/* CoinStrat Quantile Model — Score */}
+      {section === 'cqm' && (
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Box sx={{ mb: 2.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            CQM Score
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            Pointier valuation oscillator: <code>score = risk<sup>score_power</sup></code> with score_power = {cqmFit ? cqmFit.scorePower.toFixed(2) : '1.50'}.
+            <br />
+            Raising risk to a power &gt; 1 sharpens the peaks during euphoria and softens the floor — closer to BTCAnalytica's reference oscillator than raw risk.
+          </Typography>
+        </Box>
+
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="0.0–0.25 Cool" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="0.25–0.50 Neutral" sx={{ borderColor: '#84cc16', color: '#d9f99d' }} />
+          <Chip size="small" variant="outlined" label="0.50–0.75 Hot" sx={{ borderColor: '#f59e0b', color: '#fde68a' }} />
+          <Chip size="small" variant="outlined" label="0.75–1.00 Euphoric" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
+        </Stack>
+
+        <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart key={`cqm-score-${range}`} data={cqmChartData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
+              <ReferenceArea yAxisId="score" y1={0} y2={0.25} fill="#22c55e" fillOpacity={0.16} strokeOpacity={0} />
+              <ReferenceArea yAxisId="score" y1={0.25} y2={0.50} fill="#84cc16" fillOpacity={0.14} strokeOpacity={0} />
+              <ReferenceArea yAxisId="score" y1={0.50} y2={0.75} fill="#f59e0b" fillOpacity={0.14} strokeOpacity={0} />
+              <ReferenceArea yAxisId="score" y1={0.75} y2={1.0} fill="#ef4444" fillOpacity={0.16} strokeOpacity={0} />
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis yAxisId="score" domain={[0, 1]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => (typeof v === 'number' ? `${(v * 100).toFixed(0)}%` : '')} />
+              <YAxis yAxisId="btc" orientation="right" scale="log" domain={[btcDomain.y1, btcDomain.y2]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
+              <Tooltip content={<CustomTooltip />} />
+              {renderChartBrush()}
+              <Line yAxisId="score" type="monotone" dataKey="CQM_SCORE" name="CQM Score" stroke="#a78bfa" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls />
+              <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.4} dot={false} isAnimationActive={false} opacity={0.45} />
             </LineChart>
           </ResponsiveContainer>
         </Box>

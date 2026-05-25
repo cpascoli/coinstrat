@@ -7,6 +7,7 @@ import { SignalData } from '../App';
 import {
   runBacktest, BacktestConfig, StrategyResult, DcaFrequency, OffSignalMode,
 } from '../services/backtest';
+import { fitCQM, type CQMFit } from '../utils/cqm';
 import { format } from 'date-fns';
 import { FlaskConical, TrendingUp, Coins, BarChart3, ShieldAlert, DollarSign, ArrowDownToLine, Wallet } from 'lucide-react';
 import {
@@ -49,6 +50,7 @@ const STRATEGY_COLORS: Record<string, string> = {
   'Baseline DCA': '#94a3b8',
   'CORE DCA': '#60a5fa',
   'CORE DCA + MACRO 3x': '#22c55e',
+  'CQM Risk DCA': '#a855f7',
 };
 
 // Build system-state spans for regime shading (same logic as ChartsView)
@@ -114,6 +116,44 @@ const Backtest: React.FC<Props> = ({ data }) => {
   const [dcaAmount, setDcaAmount] = useState<number>(100);
   const [offSignalMode, setOffSignalMode] = useState<OffSignalMode>('pause');
   const [macroAccel, setMacroAccel] = useState<boolean>(true);
+  const [cqmDca, setCqmDca] = useState<boolean>(false);
+  // CQM trade fraction (cash for buys, btc_value for sells). UI exposes
+  // 1% / 2% / 3% / 4% / 5% as preset values; stored as a fraction (0.01..0.05).
+  const [cqmTradeFraction, setCqmTradeFraction] = useState<number>(0.01);
+
+  // --- CoinStrat Quantile Model (CQM) -------------------------------------
+  // Fit on the FULL BTC history once when the data arrives. The fit
+  // produces a per-day CQM Risk in [0, 1] used by the CQM Risk-Weighted
+  // DCA strategy. Fit is independent of the selected backtest range so we
+  // always use a stable, full-history calibration.
+  const cqmFit: CQMFit | null = useMemo(() => {
+    if (!cqmDca) return null;
+    if (!data || data.length < 365) return null;
+    const points: { date: string; ts: number; price: number }[] = [];
+    for (const d of data) {
+      const price = Number((d as any).BTCUSD);
+      if (!Number.isFinite(price) || price <= 0) continue;
+      const ts = new Date(d.Date).getTime();
+      if (!Number.isFinite(ts)) continue;
+      points.push({ date: d.Date, ts, price });
+    }
+    if (points.length < 365) return null;
+    try {
+      return fitCQM(points);
+    } catch (err) {
+      console.warn('CQM fit failed:', err);
+      return null;
+    }
+  }, [data, cqmDca]);
+
+  // date (YYYY-MM-DD) → CQM Risk in [0, 1]. Empty when CQM is disabled.
+  const cqmRiskByDate = useMemo(() => {
+    const map = new Map<string, number>();
+    if (cqmFit) {
+      for (const s of cqmFit.signals) map.set(s.date, s.risk);
+    }
+    return map;
+  }, [cqmFit]);
 
   // Compute start date from range selection or custom date
   const startDate = useMemo(() => {
@@ -139,9 +179,12 @@ const Backtest: React.FC<Props> = ({ data }) => {
       offSignalMode,
       macroAccel,
       accelMultiplier: 3,
+      cqmDca: cqmDca && cqmRiskByDate.size > 0,
+      cqmRiskByDate: cqmRiskByDate.size > 0 ? cqmRiskByDate : undefined,
+      cqmTradeFraction,
     };
     return runBacktest(data, config);
-  }, [data, startDate, dcaAmount, frequency, offSignalMode, macroAccel]);
+  }, [data, startDate, dcaAmount, frequency, offSignalMode, macroAccel, cqmDca, cqmRiskByDate, cqmTradeFraction]);
 
   // Build chart data by merging strategy series with signal data for regime shading
   const chartData = useMemo(() => {
@@ -404,7 +447,7 @@ const Backtest: React.FC<Props> = ({ data }) => {
           </Grid>
 
           {/* MACRO 3x Toggle */}
-          <Grid item xs={12} sm="auto">
+          <Grid item xs={6} sm="auto">
             <Stack direction="row" alignItems="center" spacing={1}>
               <Switch
                 checked={macroAccel}
@@ -417,6 +460,71 @@ const Backtest: React.FC<Props> = ({ data }) => {
               </Typography>
             </Stack>
           </Grid>
+
+          {/* CQM Risk DCA Toggle */}
+          <Grid item xs={6} sm="auto">
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <Switch
+                checked={cqmDca}
+                onChange={(_, checked) => setCqmDca(checked)}
+                size="small"
+                sx={{
+                  '& .MuiSwitch-switchBase.Mui-checked': { color: '#a855f7' },
+                  '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': {
+                    backgroundColor: '#a855f7',
+                  },
+                }}
+              />
+              <Typography
+                variant="body2"
+                sx={{ fontWeight: 700 }}
+                title="CoinStrat Quantile Model — Risk-Weighted DCA: size = max(base, fraction × cash) on BUYs, max(base, fraction × btc_value) on SELLs; trade = size × (1 − 2 × Risk)"
+              >
+                CQM Risk DCA
+              </Typography>
+            </Stack>
+          </Grid>
+
+          {/* CQM Trade Fraction (visible only when CQM is on) */}
+          {cqmDca && (
+            <Grid item xs={12} sm="auto">
+              <Stack spacing={0.5}>
+                <Typography variant="overline" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
+                  CQM Trade Fraction
+                </Typography>
+                <ToggleButtonGroup
+                  exclusive
+                  value={cqmTradeFraction}
+                  onChange={(_, next) => {
+                    if (typeof next === 'number') setCqmTradeFraction(next);
+                  }}
+                  size="small"
+                  sx={{
+                    flexWrap: 'wrap',
+                    '& .MuiToggleButton-root.Mui-selected': {
+                      color: '#a855f7',
+                      borderColor: '#a855f7',
+                      backgroundColor: 'rgba(168, 85, 247, 0.12)',
+                    },
+                    '& .MuiToggleButton-root.Mui-selected:hover': {
+                      backgroundColor: 'rgba(168, 85, 247, 0.18)',
+                    },
+                  }}
+                >
+                  <ToggleButton value={0.01}>1%</ToggleButton>
+                  <ToggleButton value={0.02}>2%</ToggleButton>
+                  <ToggleButton value={0.03}>3%</ToggleButton>
+                  <ToggleButton value={0.04}>4%</ToggleButton>
+                  <ToggleButton value={0.05}>5%</ToggleButton>
+                  <ToggleButton value={0.20}>20%</ToggleButton>
+                  <ToggleButton value={0.25}>25%</ToggleButton>
+                  <ToggleButton value={0.50}>50%</ToggleButton>
+                  <ToggleButton value={0.75}>75%</ToggleButton>
+                  <ToggleButton value={1.00}>100%</ToggleButton>
+                </ToggleButtonGroup>
+              </Stack>
+            </Grid>
+          )}
         </Grid>
       </Paper>
 
@@ -425,8 +533,10 @@ const Backtest: React.FC<Props> = ({ data }) => {
         <Grid container spacing={2}>
           {results.map((r) => {
             const color = STRATEGY_COLORS[r.name] ?? '#94a3b8';
+            // 2 strategies → md=6; 3 → md=4; 4 → md=3 (1 row of 4 on desktop, 2x2 on tablet)
+            const colSize = results.length >= 4 ? 3 : results.length === 3 ? 4 : 6;
             return (
-              <Grid item xs={12} md={macroAccel ? 4 : 6} key={r.name}>
+              <Grid item xs={12} sm={6} md={colSize} key={r.name}>
                 <Card sx={{ borderTop: `3px solid ${color}` }}>
                   <CardHeader
                     title={
@@ -501,7 +611,10 @@ const Backtest: React.FC<Props> = ({ data }) => {
             <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
               Total portfolio value (BTC holdings at market price + cash reserves) for each strategy.
               All strategies receive the same DCA deposits; CoinStrat holds cash as dry powder when CORE is OFF and deploys reserves on re-entry.
-              Background shading shows the CoinStrat system state (CORE = accumulation permission; MACRO = 3× intensity modifier).
+              {cqmDca && cqmFit && (
+                <> CQM Risk DCA trades <code>(1 − 2 × Risk) × size</code> per period, where <code>size = max(base, {(cqmTradeFraction * 100).toFixed(0)}% × cash)</code> on BUYs and <code>size = max(base, {(cqmTradeFraction * 100).toFixed(0)}% × btc_value)</code> on SELLs — each side scales with its own reserve. The {(cqmTradeFraction * 100).toFixed(0)}% term lets the strategy redeploy accumulated dry powder when Risk falls and liquidate ~{(cqmTradeFraction * 100).toFixed(0)}% of the BTC position per period at cycle tops, instead of staying anchored to a flat USD base.</>
+              )}
+              {' '}Background shading shows the CoinStrat system state (CORE = accumulation permission; MACRO = 3× intensity modifier).
             </Typography>
           </Box>
 

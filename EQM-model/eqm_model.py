@@ -250,28 +250,148 @@ def trend_log(fit: EQMFit, dates: Iterable[pd.Timestamp]) -> np.ndarray:
 @dataclass(frozen=True)
 class EQMSolidBandsFit:
     """
-    Solid EQM band model:
+    Solid EQM band model (mirrors the TypeScript port in `web/src/utils/cqm.ts`).
 
-      lower_band(t) = QR_median(t) * exp(empirical_quantile(low_tau, residuals))
-      upper_band(t) = QR_median(t) * upper_multiplier_at(t)
+    For each historical date `t`:
 
-    where:
-      - residuals[i] = log(price_i) - log(QR_median(date_i))
-      - upper_multiplier_at(t) = max(rolling_ATH(t) * ath_factor, QR_median(t)) / QR_median(t)
-        i.e. the upper band tracks recent all-time-high price * a fixed factor and
-        floors it at the median when no new ATH has been printed yet.
+      r(s)             = price(s) / rolling_ATH(s)               for s ≤ t
 
-    This empirically matches the BTCAnalytica reference for May 22, 2026 within
-    a few percent. The lower-band hypothesis is well-supported (residual q=0.001
-    about QR median); the upper-band hypothesis is heuristic and based on the
-    visible ratio of the reference solid 99.9% band to recent ATH (~1.28x).
+      gold_raw(t)      = ATH(t) * Q_0.5( r over last `gold_window` days )
+      gold_shelved(t)  = running_max( gold_raw[0..t] )
+      gold_ceiling(t)  = rolling_min(price, gold_floor_window) × gold_floor_buffer
+      gold(t)          = min( gold_shelved(t), gold_ceiling(t) )
+
+      green_raw(t)     = ATH(t) * weighted_Q_0.05( r,
+                              weights = exp(-λ_green × age_in_years) )
+      green_shelved(t) = running_max( green_raw[0..t] )
+      green_floor(t)   = rolling_min(price, green_floor_window) × green_floor_buffer
+      green(t)         = min( green_shelved(t), green_floor(t) )
+
+      upper(t)         = max( ATH(t) * upper_ath_factor, gold(t) )
+
+    Both the gold and green bands are shelved (running-max) and then clipped
+    by a price-relative ceiling so they sit between BTC and the rolling-min
+    price during bear markets. The ceiling buffer is large for gold (~2.0×
+    rolling-min, so gold stays between red and green) and small for green
+    (~0.95× rolling-min, so green is a deep-value floor BELOW price).
+
+    The green band is shelved with an additional price-floor constraint
+    that forces it below the recent rolling-minimum price (× a small safety
+    buffer). This makes green a true "deep value floor" that sits below
+    BTC during the bottoming phases of every cycle (2015, 2018, 2020 covid,
+    2022). At higher prices the constraint doesn't bind and the band
+    behaves identically to the shelved-only version — preserving the
+    snapshot match.
+
+    The gold band uses the same constraint with a larger buffer (~2.0×
+    rolling-min), which doesn't bind during bull markets / corrections from
+    peak (preserving the snapshot match), but pulls gold DOWN during deep
+    bear bottoms where the previous-cycle's shelved level would otherwise
+    sit far above the realistic fair-value range.
+
+    The green band's time-decay weighting (default half-life = 1 year)
+    biases the low quantile toward recent observations so that as BTC has
+    matured, the implied green/ATH multiplier drifts upward over time
+    (≈ 0.27 in 2018, ≈ 0.37 in 2026).
+
+    Verified against the BTCAnalytica May 22, 2026 snapshot:
+      EQM 0.1%   $45.4K  → predicted $47.8K  (+5.2%)   [floor-clipped green]
+      EQM 50%    $108.4K → predicted $111.9K (+3.2%)   [shelved gold]
+      EQM 99.9%  $159.4K → predicted $159.6K (+0.1%)   [ATH × 1.28]
     """
     qr_median: "QuantileRegressionFit"
     residuals: pd.Series
     low_tau: float
     upper_ath_factor: float
+    gold_window: int
+    gold_floor_window: int
+    gold_floor_buffer: float
+    green_half_life_years: float
+    green_quantile: float
+    green_floor_window: int
+    green_floor_buffer: float
     rolling_ath: pd.Series
     log_offset_low: float
+    gold_band: pd.Series
+    green_band: pd.Series
+
+
+def _shelved_ath_relative_band(
+    prices: pd.Series,
+    rolling_ath: pd.Series,
+    window: int,
+    quantile: float,
+    min_periods: int | None = None,
+) -> pd.Series:
+    """
+    Compute `running_max( ATH(t) * Q_q( price/ATH over last `window` days ) )`.
+
+    Returns a series aligned with `prices`. Values before `min_periods`
+    samples have accumulated are NaN.
+    """
+    if min_periods is None:
+        min_periods = max(window // 4, 30)
+    ratios = prices.to_numpy(dtype=float) / rolling_ath.to_numpy(dtype=float)
+    ratio_series = pd.Series(ratios, index=prices.index)
+    rolling_q = ratio_series.rolling(window=window, min_periods=min_periods).quantile(quantile)
+    raw = rolling_q.to_numpy(dtype=float) * rolling_ath.to_numpy(dtype=float)
+    raw_series = pd.Series(raw, index=prices.index)
+    shelved = raw_series.cummax()
+    shelved.name = f"shelved_ath_q{quantile:g}_w{window}"
+    return shelved
+
+
+def _time_decayed_quantile_band(
+    prices: pd.Series,
+    rolling_ath: pd.Series,
+    half_life_years: float,
+    quantile: float,
+    min_history_days: int = 365,
+    max_lookback_days: int = 1825,
+) -> pd.Series:
+    """
+    For each t, return `ATH(t) × weighted_Q_q( price/ATH ratios over last
+    max_lookback_days, weights = exp(-λ × age_in_years) )`, where
+    λ = ln(2) / half_life_years.
+
+    `max_lookback_days` truncates the lookback (default 5 years) for speed;
+    with a 1-year half-life, weights beyond 5 years are <3% and the
+    truncation error is negligible.
+
+    The result is NOT running-max here; the caller can apply `cummax()` if
+    a shelved curve is desired.
+    """
+    p = prices.to_numpy(dtype=float)
+    a = rolling_ath.to_numpy(dtype=float)
+    ratios = p / a
+    n = len(p)
+    lam = math.log(2.0) / float(half_life_years)
+    out = np.full(n, np.nan)
+
+    for t in range(n):
+        if t < min_history_days:
+            continue
+        start = max(0, t - max_lookback_days + 1)
+        sub = ratios[start : t + 1]
+        ages_years = np.arange(t - start, -1, -1, dtype=float) / 365.25
+        weights = np.exp(-lam * ages_years)
+        order = np.argsort(sub)
+        sorted_ratios = sub[order]
+        sorted_weights = weights[order]
+        cum_w = np.cumsum(sorted_weights)
+        total = cum_w[-1]
+        if total <= 0:
+            continue
+        target = quantile * total
+        idx = int(np.searchsorted(cum_w, target))
+        idx = min(idx, len(sorted_ratios) - 1)
+        out[t] = a[t] * sorted_ratios[idx]
+
+    return pd.Series(
+        out,
+        index=prices.index,
+        name=f"time_decayed_q{quantile:g}_hl{half_life_years:g}y",
+    )
 
 
 def fit_eqm_solid_bands(
@@ -279,6 +399,13 @@ def fit_eqm_solid_bands(
     low_tau: float = 0.001,
     upper_ath_factor: float = 1.28,
     time_power: float = 0.60,
+    gold_window: int = 730,
+    gold_floor_window: int = 30,
+    gold_floor_buffer: float = 2.0,
+    green_half_life_years: float = 1.0,
+    green_quantile: float = 0.05,
+    green_floor_window: int = 30,
+    green_floor_buffer: float = 0.95,
 ) -> "EQMSolidBandsFit":
     """Fit the solid EQM band model used in BTCAnalytica's chart legend."""
     cleaned = clean_price_series(prices, start=None)
@@ -292,13 +419,61 @@ def fit_eqm_solid_bands(
     rolling_ath = cleaned.expanding(min_periods=1).max()
     log_offset_low = float(residuals.quantile(low_tau))
 
+    gold_shelved = _shelved_ath_relative_band(
+        cleaned,
+        rolling_ath,
+        window=int(gold_window),
+        quantile=0.5,
+    )
+
+    green_raw = _time_decayed_quantile_band(
+        cleaned,
+        rolling_ath,
+        half_life_years=float(green_half_life_years),
+        quantile=float(green_quantile),
+    )
+    green_shelved = green_raw.cummax()
+
+    # Price-relative ceiling for both gold and green:
+    #   - Green is clipped at `green_floor_buffer × rolling_min(price)` (with
+    #     buffer ≈ 0.95) so it sits BELOW BTC at every cycle bottom and
+    #     visually acts as a deep-value floor.
+    #   - Gold is clipped at `gold_floor_buffer × rolling_min(price)` (with
+    #     buffer ≈ 2.0) so during deep bear bottoms it gets pulled down from
+    #     the previous-cycle shelved level toward the realistic fair-value
+    #     range — staying "approximately between red and green" on the chart.
+    # In both cases the constraint doesn't bind during bull markets /
+    # corrections from peak, so the BTCAnalytica snapshot match is preserved.
+    gold_rolling_min = cleaned.rolling(
+        window=int(gold_floor_window), min_periods=1
+    ).min()
+    gold_ceiling = gold_rolling_min * float(gold_floor_buffer)
+    gold_band = pd.concat([gold_shelved, gold_ceiling], axis=1).min(axis=1)
+    gold_band.name = "shelved_floored_gold"
+
+    green_rolling_min = cleaned.rolling(
+        window=int(green_floor_window), min_periods=1
+    ).min()
+    green_ceiling = green_rolling_min * float(green_floor_buffer)
+    green_band = pd.concat([green_shelved, green_ceiling], axis=1).min(axis=1)
+    green_band.name = "shelved_floored_time_decayed_green"
+
     return EQMSolidBandsFit(
         qr_median=qr_median,
         residuals=residuals,
         low_tau=float(low_tau),
         upper_ath_factor=float(upper_ath_factor),
+        gold_window=int(gold_window),
+        gold_floor_window=int(gold_floor_window),
+        gold_floor_buffer=float(gold_floor_buffer),
+        green_half_life_years=float(green_half_life_years),
+        green_quantile=float(green_quantile),
+        green_floor_window=int(green_floor_window),
+        green_floor_buffer=float(green_floor_buffer),
         rolling_ath=rolling_ath,
         log_offset_low=log_offset_low,
+        gold_band=gold_band,
+        green_band=green_band,
     )
 
 
@@ -308,20 +483,35 @@ def solid_band_series(
     band: str,
 ) -> pd.Series:
     """Return a solid EQM band series for one of: 'lower', 'median', 'upper'."""
-    median = quantile_regression_series(fit.qr_median, dates, 0.5)
+    index = pd.DatetimeIndex(dates)
+    median_qr = quantile_regression_series(fit.qr_median, index, 0.5)
+    # Fallback for the warm-up window where the rolling/decayed quantile is
+    # NaN: use the parabolic QR-median × log-offset model so the line is
+    # plotted continuously from the start of the chart.
+    parabolic_lower = median_qr.to_numpy(dtype=float) * math.exp(fit.log_offset_low)
+
     if band == "median":
-        return median.rename("solid_median")
+        gold = fit.gold_band.reindex(index)
+        gold = gold.where(gold.notna(), median_qr)
+        return gold.rename("solid_median")
     if band == "lower":
-        values = median.to_numpy(dtype=float) * math.exp(fit.log_offset_low)
-        return pd.Series(values, index=median.index, name="solid_lower")
+        green = fit.green_band.reindex(index)
+        values = np.where(
+            green.notna().to_numpy(),
+            green.to_numpy(dtype=float),
+            parabolic_lower,
+        )
+        return pd.Series(values, index=index, name="solid_lower")
     if band == "upper":
-        ath = fit.rolling_ath.reindex(median.index, method="ffill")
-        capped_ath = ath.bfill().fillna(median)
+        gold = fit.gold_band.reindex(index)
+        gold = gold.where(gold.notna(), median_qr)
+        ath = fit.rolling_ath.reindex(index, method="ffill")
+        capped_ath = ath.bfill().fillna(median_qr)
         upper_values = np.maximum(
             capped_ath.to_numpy(dtype=float) * fit.upper_ath_factor,
-            median.to_numpy(dtype=float),
+            gold.to_numpy(dtype=float),
         )
-        return pd.Series(upper_values, index=median.index, name="solid_upper")
+        return pd.Series(upper_values, index=index, name="solid_upper")
     raise ValueError(f"Unknown band: {band!r}. Expected 'lower', 'median', or 'upper'.")
 
 

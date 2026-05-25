@@ -93,6 +93,26 @@
   to = "/.netlify/functions/admin-alerts"
   status = 200
 
+[[redirects]]
+  from = "/api/admin/cqm-bot/status"
+  to = "/.netlify/functions/admin-cqm-bot-status"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/cqm-bot/settings"
+  to = "/.netlify/functions/admin-cqm-bot-settings"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/cqm-bot/execute"
+  to = "/.netlify/functions/admin-cqm-bot-execute"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/cqm-bot/orders"
+  to = "/.netlify/functions/admin-cqm-bot-orders"
+  status = 200
+
 # --- Email ---
 
 [[redirects]]

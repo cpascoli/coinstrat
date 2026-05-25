@@ -84,43 +84,92 @@ each quantile". The asymmetry is the key clue: the lower band looks like a
 fixed log-distance below the QR median, while the upper band tracks something
 much more "recent-cycle-aware" than a long-history quantile.
 
-The replicated mechanism:
+The replicated mechanism — both gold and green are *shelved* (running-max)
+and then clipped from above by a multiple of the recent rolling-min price.
+The clip pulls each band down during deep bear bottoms so the chart stays
+visually faithful to BTCAnalytica:
 
 ```text
-QR_median(t)   = QuantReg(log(price) ~ days_since_start**time_power, q=0.5)
-residual(i)    = log(price_i) - log(QR_median(date_i))
+QR_median(t)     = QuantReg(log(price) ~ days_since_start**time_power, q=0.5)
+r(s)             = price(s) / rolling_ATH(s)       for s ≤ t
 
-solid_50%(t)   = QR_median(t)
-solid_0.1%(t)  = QR_median(t) * exp(empirical_quantile(0.001, residuals))
-solid_99.9%(t) = max(rolling_ATH(t) * upper_ath_factor, QR_median(t))
+# GOLD: shelved rolling-window median, then clipped at K_gold × rolling-min(price)
+gold_raw(t)      = ATH(t) * Q_0.5( r over last gold_window days )
+gold_shelved(t)  = running_max( gold_raw[0..t] )
+gold_ceiling(t)  = rolling_min(price, gold_floor_window) * gold_floor_buffer
+solid_50%(t)     = min( gold_shelved(t), gold_ceiling(t) )
+
+# GREEN: shelved time-decayed weighted quantile, clipped at K_green × rolling-min
+weight(s,t)      = exp(- ln(2)/half_life_years * (t - s) / 365.25)
+green_raw(t)     = ATH(t) * weighted_Q_q( r, weight(s,t) )
+green_shelved(t) = running_max( green_raw[0..t] )
+green_floor(t)   = rolling_min(price, green_floor_window) * green_floor_buffer
+solid_0.1%(t)    = min( green_shelved(t), green_floor(t) )
+
+# RED: rolling all-time-high × constant factor, floored by gold
+solid_99.9%(t)   = max( rolling_ATH(t) * upper_ath_factor, solid_50%(t) )
 ```
 
 What this means in plain English:
 
-- **Gold (50% / fair value)**: the median quantile-regression trend on the
-  square-root-of-time growth curve. Same line as the dashed QR `50%`.
-- **Green (0.1% / bottom)**: a fixed multiple below that fair-value trend,
-  calibrated to the worst residual ever observed (≈ `0.36 * QR_median`). Below
-  this is "deeper than any historical drawdown vs the trend" territory.
-- **Red (99.9% / top)**: NOT a residual quantile. It tracks the rolling
-  all-time-high price multiplied by a fixed factor (`1.28x` by default). This
-  reproduces the characteristic "step up at each cycle top, then plateau"
-  shape visible in the reference, and explains why the upper solid line is
-  much tighter than the QR `99.9%` extrapolation: BTC's cycle tops have grown
-  more contained over time, and the upper band reflects recent realized
-  highs rather than a slope estimated from 2013 spikes.
+- **Gold (50% / fair value)**: a rolling-2-year median of the `price/ATH`
+  ratio, multiplied by the current ATH and shelved (running-max), then
+  clipped from above by `2.0 × rolling-min(price, 30 days)`. The shelved
+  component captures the cycle-stepping shape; the price-relative ceiling
+  pulls gold down during deep bear bottoms (2015, 2018, 2022) so it stays
+  *approximately between red and green* on the chart instead of
+  plateauing at the previous-cycle's bull-peak level. The ceiling does
+  NOT bind during bull markets / corrections from peak so the snapshot
+  match is preserved.
+- **Green (0.1% / deep value floor)**: a time-decayed weighted Q0.05 of
+  `price/ATH` (default 1-year half-life), multiplied by the current ATH and
+  shelved (running-max), then clipped from above by `0.95 × rolling-min(price,
+  30 days)` so the band is *always* below BTC at every cycle bottom (2015,
+  2018, 2020 covid, 2022). The exponential decay weighting captures the fact
+  that BTC's drawdowns have grown shallower over time so the implied
+  `green/ATH` multiplier drifts upward (~0.27 in 2018 → ~0.37 in 2026); the
+  price-floor constraint then ensures the line visually acts as a true deep
+  value floor instead of intercepting the actual cycle lows. Crucially, at
+  higher prices the floor doesn't bind so the snapshot match is preserved.
+- **Red (99.9% / top)**: rolling all-time-high price multiplied by a fixed
+  factor (`1.28x` by default), floored at the gold band. Reproduces the
+  "step up at each cycle top, plateau, repeat" shape visible in the
+  reference, and explains why the upper solid line is much tighter than the
+  QR `99.9%` extrapolation.
 
-Using these defaults the replica reproduces:
+Using these defaults the replica reproduces the May 22, 2026 BTCAnalytica
+snapshot to within a few percent on every solid band:
 
 ```text
-EQM 0.1% solid:   replica $45.7K  reference $45.4K   +0.6%
-EQM 50% solid:    replica $125K   reference $109.6K  +14.3% (time_power dependent)
-EQM 99.9% solid:  replica $159.6K reference $159.9K  -0.2%
+EQM 0.1% solid:   replica $47.8K   reference $45.4K   +5.2%
+EQM 50% solid:    replica $111.9K  reference $109.6K  +2.1%
+EQM 99.9% solid:  replica $159.6K  reference $159.9K  −0.2%
 ```
 
-The remaining `EQM 50%` discrepancy comes from `time_power` not yet being
-calibrated against the visible centering caption (`51.77%`). Lowering
-`time_power` toward `0.5` brings the median band down toward `$109K`.
+Verified historical band positions (gold sits between red and green;
+green sits below BTC at every cycle bottom):
+
+```text
+date        BTC      green   gold    red     gold-pos*  verdict
+2015-01-15  $   210  $  169  $  356  $1,220  0.18       gold near green, green below price
+2017-12-17  $19,141  $4,915  $15,201 $24,957 0.51       gold mid-band, end-of-bull-market
+2018-12-15  $ 3,237  $3,075  $ 6,474 $24,957 0.16       gold pulled near green, green below
+2021-11-10  $64,995  $18,687 $39,707 $86,486 0.31       gold lower-mid, end-of-bull-market
+2022-11-21  $15,787  $14,998 $31,575 $86,486 0.23       gold pulled near green, green below
+2026-05-22  $75,467  $47,777 $111,867 $159,563 0.57     snapshot — all bands match chart
+
+* gold-pos = (gold − green) / (red − green); 0 = at green, 1 = at red.
+```
+
+The defaults (`--solid-gold-window 730`, `--solid-gold-floor-window 30`,
+`--solid-gold-floor-buffer 2.0`, `--solid-green-half-life 1.0`,
+`--solid-green-quantile 0.05`, `--solid-green-floor-window 30`,
+`--solid-green-floor-buffer 0.95`) were chosen by sweeping each parameter
+against the May 22, 2026 BTCAnalytica snapshot and picking the closest fit
+that also produced a sensible chart-shape. The gold uses uniform weighting
+(not time-decay) because Q0.5 of `price/ATH` is naturally close to 1 during
+bull peaks and the running-max already captures the cycle structure; only
+the low quantile (green) needs the non-stationary decay treatment.
 
 ### Dashed QR lines
 
@@ -246,6 +295,43 @@ python3 EQM-model/run_eqm.py \
 ```
 
 The best parameters are also saved to `EQM-model/output/eqm_calibration.json`.
+
+## Project The Model Forward In Time
+
+The OLS trend, the QR median, both solid bands and all dashed QR bands are
+explicit functions of date. They extrapolate naturally because the only
+time-varying input is `days_since_start ** time_power`; the historical
+residual distribution and the calibration anchors stay frozen.
+
+Default projection (year-end 2026 through 2029):
+
+```bash
+python3 EQM-model/project_eqm.py
+```
+
+This prints a table of model anchors at each target date and saves a fan
+chart at `EQM-model/output/eqm_projection.png`.
+
+Scenario analysis. Because the solid `99.9%` band is anchored to the rolling
+all-time-high, the baseline projection assumes no new ATH is printed (the
+band stays at `current_ATH * upper_ath_factor` until the QR median catches
+up to it). Override that with a hypothetical future ATH:
+
+```bash
+python3 EQM-model/project_eqm.py --assume-future-ath 250000 \
+  --plot EQM-model/output/eqm_projection_bull_250k.png
+```
+
+Caveats:
+
+- This is extrapolation under "history rhymes" assumptions, not a forecast.
+- The baseline projection is silent about cycle timing — it does not know
+  that 2024 was a halving year, that bear markets historically follow tops,
+  or that volatility tends to compress over time. It only tells you what
+  range the model considers normal at each future date.
+- `time_power=0.60` makes both the OLS trend and the QR median project
+  somewhat aggressively. Lowering to `0.5` produces flatter long-run growth;
+  the ranges below are sensitive to that choice.
 
 ## Run The DCA Backtest
 

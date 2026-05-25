@@ -12,6 +12,43 @@ export interface BacktestConfig {
   offSignalMode: OffSignalMode;
   macroAccel: boolean;        // enable accelerated strategy
   accelMultiplier: number;    // default 3
+  /**
+   * Enable the CoinStrat Quantile Model (CQM) Risk-Weighted DCA strategy.
+   * Rule (BTCAnalytica's EQM tweet, with a symmetric balance-aware
+   * acceleration):
+   *   BUY  (Risk < 0.5): size = max(base, cqmTradeFraction × cashBalance)
+   *   SELL (Risk > 0.5): size = max(base, cqmTradeFraction × btcValue)
+   *   target_trade_usd = size × (1 − 2 × Risk)
+   * → Risk = 0 (bottom): buy `size`  (capped by available cash)
+   * → Risk = 0.5 (fair):  do nothing
+   * → Risk = 1 (top):    sell `size` of BTC  (capped by available BTC)
+   *
+   * Each side scales with its own reserve: cash on buys, BTC value
+   * (= btcHeld × price) on sells. So 1% of dry powder is deployed per
+   * period during deep bears, and 1% of the BTC position is liquidated
+   * per period at cycle tops. With the default 1% fraction both rules
+   * reduce to plain `base × (1 − 2 × Risk)` until the relevant reserve
+   * exceeds `base / cqmTradeFraction`.
+   *
+   * Each period still deposits `dcaAmount` of cash for equal-funding
+   * fairness; the rule then determines how that cash (and any reserves)
+   * is allocated.
+   */
+  cqmDca?: boolean;
+  /**
+   * Risk lookup keyed by Date (YYYY-MM-DD) → CQM risk in [0, 1]. Required
+   * when `cqmDca` is true. Dates not in the map fall back to risk=0.5
+   * (neutral, no trade).
+   */
+  cqmRiskByDate?: Map<string, number>;
+  /**
+   * Fraction of the relevant reserve the CQM strategy is allowed to
+   * deploy per period (in addition to the base DCA amount). Applied to
+   * cash balance for buys and to BTC value (btcHeld × price) for sells.
+   * Default: 0.01 (1%). Set to 0 to recover the original
+   * `base × (1 − 2 × Risk)` rule.
+   */
+  cqmTradeFraction?: number;
 }
 
 // --- Results ---
@@ -373,6 +410,75 @@ export function runBacktest(
       },
     );
     results.push(accelerated);
+  }
+
+  // 6. Optionally run CQM Risk-Weighted DCA.
+  //    Rule (each side scales with its own reserve):
+  //      BUY  (Risk < 0.5): size = max(base, fraction × cashBalance)
+  //      SELL (Risk > 0.5): size = max(base, fraction × btcValue)
+  //      target_trade_usd = size × (1 − 2 × Risk)
+  //    where btcValue = btcHeld × price.
+  //    Each period we deposit `dcaAmount` of cash (equal-funding).
+  //    BTC sells are capped by current btcHeld (no shorts in this port).
+  if (config.cqmDca && config.cqmRiskByDate && config.cqmRiskByDate.size > 0) {
+    const riskMap = config.cqmRiskByDate;
+    const tradeFraction = Math.max(0, config.cqmTradeFraction ?? 0.01);
+    const cqm = runStrategy(
+      'CQM Risk DCA',
+      sampled,
+      filtered,
+      config,
+      (d, state) => {
+        const risk = riskMap.get(d.Date);
+        // Fall back to neutral (risk = 0.5 → no trade) when missing.
+        const r = Number.isFinite(risk) ? Math.max(0, Math.min(1, risk as number)) : 0.5;
+        const tradeSign = 1 - 2 * r;
+        if (tradeSign > 0) {
+          // BUY side: scale with cash balance (the buy-side reserve) so
+          // accumulated dry powder is redeployed into BTC when Risk
+          // eventually drops, instead of staying stranded.
+          const size = Math.max(
+            config.dcaAmount,
+            tradeFraction * state.cashBalance,
+          );
+          return {
+            extraDeposit: 0,
+            buyBtcUsd: size * tradeSign,
+            sellBtcUsd: 0,
+            sellAll: false,
+            deployReserves: false,
+          };
+        }
+        if (tradeSign < 0) {
+          // SELL side: scale with BTC value (the sell-side reserve), so
+          // the sell rate keeps up with bull-market appreciation. A flat
+          // `base` would become negligible at high BTC prices; tying it
+          // to btcValue means we liquidate ~1%/period of the BTC
+          // position when Risk hits the top — symmetric with the buy
+          // side's 1%-of-cash deployment.
+          const btcValue = state.btcHeld * d.BTCUSD;
+          const size = Math.max(
+            config.dcaAmount,
+            tradeFraction * btcValue,
+          );
+          return {
+            extraDeposit: 0,
+            buyBtcUsd: 0,
+            sellBtcUsd: size * (-tradeSign),
+            sellAll: false,
+            deployReserves: false,
+          };
+        }
+        return {
+          extraDeposit: 0,
+          buyBtcUsd: 0,
+          sellBtcUsd: 0,
+          sellAll: false,
+          deployReserves: false,
+        };
+      },
+    );
+    results.push(cqm);
   }
 
   return results;

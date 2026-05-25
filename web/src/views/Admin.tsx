@@ -41,6 +41,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, type Profile, type Tier } from '../lib/supabase';
+import CqmBotTab from './admin/CqmBotTab';
 
 function parseJsonOrApiFailure(status: number, text: string): { ok: true; data: unknown } | { ok: false; message: string } {
   const trimmed = text.trim();
@@ -705,158 +706,6 @@ const Admin: React.FC = () => {
         <StatCard icon={<Mail size={20} />} label="Subscribers" value={activeSubscribers.length} color="#22c55e" />
       </Stack>
 
-      <Paper sx={{ p: 2.5, mb: 3 }}>
-        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
-          <Database size={18} />
-          <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>Signal Cache</Typography>
-        </Stack>
-
-        <Stack direction="row" spacing={4} alignItems="center" flexWrap="wrap" useFlexGap>
-          <Box>
-            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>Latest signal date</Typography>
-            <Typography variant="body1" sx={{ fontWeight: 700, fontFamily: 'monospace' }}>
-              {cacheInfo.latestDate ?? '—'}
-            </Typography>
-          </Box>
-          <Box>
-            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>Last refreshed</Typography>
-            <Typography variant="body1" sx={{ fontWeight: 700, fontFamily: 'monospace' }}>
-              {cacheInfo.cachedAt ? new Date(cacheInfo.cachedAt).toLocaleString() : '—'}
-            </Typography>
-          </Box>
-          <Box>
-            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>Cache status</Typography>
-            <Box sx={{ mt: 0.5 }}>
-              <Chip
-                size="small"
-                label={
-                  cacheInfo.stale === null
-                    ? 'Unknown'
-                    : cacheInfo.stale
-                      ? 'Stale snapshot'
-                      : 'Fresh snapshot'
-                }
-                sx={{
-                  fontWeight: 700,
-                  bgcolor:
-                    cacheInfo.stale === null
-                      ? 'rgba(148,163,184,0.12)'
-                      : cacheInfo.stale
-                        ? 'rgba(245,158,11,0.14)'
-                        : 'rgba(34,197,94,0.14)',
-                  color:
-                    cacheInfo.stale === null
-                      ? '#94a3b8'
-                      : cacheInfo.stale
-                        ? '#f59e0b'
-                        : '#22c55e',
-                }}
-              />
-            </Box>
-          </Box>
-          <Box sx={{ ml: 'auto', display: 'flex', gap: 1 }}>
-            <Button
-              variant="outlined"
-              size="small"
-              disabled={rebuilding || refreshing || signalPatchBusy}
-              onClick={handlePatchMvrv}
-              startIcon={patchingMvrv ? <CircularProgress size={14} color="inherit" /> : <RefreshCw size={14} />}
-              sx={{ textTransform: 'none', fontWeight: 700 }}
-            >
-              {patchingMvrv ? 'Patching…' : 'Patch MVRV'}
-            </Button>
-            <Button
-              variant="outlined"
-              size="small"
-              disabled={rebuilding || refreshing || signalPatchBusy}
-              onClick={handlePatchSthLthRp}
-              startIcon={patchingSthLthRp ? <CircularProgress size={14} color="inherit" /> : <RefreshCw size={14} />}
-              sx={{ textTransform: 'none', fontWeight: 700 }}
-            >
-              {patchingSthLthRp ? 'Patching…' : 'Patch STH/LTH RP'}
-            </Button>
-            <Button
-              variant="outlined"
-              size="small"
-              disabled={rebuilding || refreshing || signalPatchBusy}
-              onClick={handleRebuild}
-              startIcon={rebuilding ? <CircularProgress size={14} color="inherit" /> : <RefreshCw size={14} />}
-              sx={{ textTransform: 'none', fontWeight: 700 }}
-            >
-              {rebuilding ? 'Rebuilding…' : 'Rebuild cache'}
-            </Button>
-            <Button
-              variant="contained"
-              size="small"
-              disabled={refreshing || rebuilding || signalPatchBusy}
-              onClick={handleRefresh}
-              startIcon={refreshing ? <CircularProgress size={14} color="inherit" /> : <RefreshCw size={14} />}
-              sx={{ textTransform: 'none', fontWeight: 700 }}
-            >
-              {refreshing ? 'Refreshing…' : 'Refresh now'}
-            </Button>
-          </Box>
-        </Stack>
-
-        {refreshResult && (
-          <Alert severity="success" sx={{ mt: 1.5 }}>{refreshResult}</Alert>
-        )}
-      </Paper>
-
-      <Paper sx={{ p: 2.5, mb: 3 }}>
-        <Stack spacing={1.75}>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <Mail size={18} />
-            <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>Scheduled Alerts</Typography>
-          </Stack>
-
-          <Typography variant="body2" color="text.secondary">
-            Manually run the same workflow as the 4-hour scheduler: refresh signals, create any new alert events, and send up to 50 pending alert emails.
-          </Typography>
-
-          {scheduledAlertsLoading ? (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
-              <CircularProgress size={18} />
-              <Typography variant="body2" color="text.secondary">
-                Loading pending alert backlog…
-              </Typography>
-            </Box>
-          ) : (
-            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-              <Chip label={`Pending backlog: ${scheduledAlertsStatus?.backlogTotal ?? 0}`} size="small" variant="outlined" />
-              <Chip label={`Ready now: ${scheduledAlertsStatus?.readyTotal ?? 0}`} size="small" variant="outlined" />
-              <Chip label={`Next run can send: ${scheduledAlertsStatus?.nextRunAttemptEstimate ?? 0}`} size="small" variant="outlined" />
-              <Chip label={`Fixed alerts: ${scheduledAlertsStatus?.signalBacklog ?? 0}`} size="small" variant="outlined" />
-              <Chip label={`Strategy alerts: ${scheduledAlertsStatus?.strategyBacklog ?? 0}`} size="small" variant="outlined" />
-            </Stack>
-          )}
-
-          <Box>
-            <Button
-              variant="contained"
-              disabled={scheduledAlertsRunning || scheduledAlertsLoading}
-              onClick={handleRunScheduledAlerts}
-              startIcon={scheduledAlertsRunning ? <CircularProgress size={14} color="inherit" /> : <Send size={14} />}
-              sx={{ textTransform: 'none', fontWeight: 700 }}
-            >
-              {scheduledAlertsRunning ? 'Running scheduled alerts…' : 'Run scheduled alerts now'}
-            </Button>
-          </Box>
-
-          {scheduledAlertsResult && (
-            <Alert severity="success">
-              Refresh mode: {scheduledAlertsResult.refresh.mode}.{' '}
-              {scheduledAlertsResult.refresh.new_rows === 0
-                ? (scheduledAlertsResult.refresh.message ?? 'No new rows were added.')
-                : `New rows: ${scheduledAlertsResult.refresh.new_rows ?? 0}. `}
-              Emails attempted: {scheduledAlertsResult.deliveries.attempted}.{' '}
-              Sent: {scheduledAlertsResult.deliveries.sent}. Failed: {scheduledAlertsResult.deliveries.failed}.{' '}
-              Remaining backlog: {scheduledAlertsResult.deliveries.remainingBacklog}.
-            </Alert>
-          )}
-        </Stack>
-      </Paper>
-
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
       {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
 
@@ -865,12 +714,14 @@ const Admin: React.FC = () => {
         onChange={(_, value) => setTabIdx(value)}
         sx={{ mb: 2, '& .MuiTab-root': { fontWeight: 700, textTransform: 'none' } }}
       >
+        <Tab label="CQM Bot" />
         <Tab label={`Registered Users (${users.length})`} />
         <Tab label={`Newsletter Subscribers (${activeSubscribers.length})`} />
         <Tab label="Newsletter" />
+        <Tab label="Signals & Alerts" />
       </Tabs>
 
-      {tabIdx === 0 && (
+      {tabIdx === 1 && (
         <Paper>
           {loading ? (
             <Box sx={{ p: 4, textAlign: 'center' }}>
@@ -940,7 +791,7 @@ const Admin: React.FC = () => {
         </Paper>
       )}
 
-      {tabIdx === 1 && (
+      {tabIdx === 2 && (
         <Paper>
           {loading ? (
             <Box sx={{ p: 4, textAlign: 'center' }}>
@@ -1017,7 +868,7 @@ const Admin: React.FC = () => {
         </Paper>
       )}
 
-      {tabIdx === 2 && (
+      {tabIdx === 3 && (
         <Stack spacing={2.5}>
           {newsletterMessage && (
             <Alert severity={newsletterMessage.severity}>{newsletterMessage.text}</Alert>
@@ -1410,6 +1261,164 @@ const Admin: React.FC = () => {
               </Paper>
             </Stack>
           </Stack>
+        </Stack>
+      )}
+
+      {tabIdx === 0 && <CqmBotTab authHeaders={authHeaders} />}
+
+      {tabIdx === 4 && (
+        <Stack spacing={3}>
+          <Paper sx={{ p: 2.5 }}>
+            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
+              <Database size={18} />
+              <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>Signal Cache</Typography>
+            </Stack>
+
+            <Stack direction="row" spacing={4} alignItems="center" flexWrap="wrap" useFlexGap>
+              <Box>
+                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>Latest signal date</Typography>
+                <Typography variant="body1" sx={{ fontWeight: 700, fontFamily: 'monospace' }}>
+                  {cacheInfo.latestDate ?? '—'}
+                </Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>Last refreshed</Typography>
+                <Typography variant="body1" sx={{ fontWeight: 700, fontFamily: 'monospace' }}>
+                  {cacheInfo.cachedAt ? new Date(cacheInfo.cachedAt).toLocaleString() : '—'}
+                </Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>Cache status</Typography>
+                <Box sx={{ mt: 0.5 }}>
+                  <Chip
+                    size="small"
+                    label={
+                      cacheInfo.stale === null
+                        ? 'Unknown'
+                        : cacheInfo.stale
+                          ? 'Stale snapshot'
+                          : 'Fresh snapshot'
+                    }
+                    sx={{
+                      fontWeight: 700,
+                      bgcolor:
+                        cacheInfo.stale === null
+                          ? 'rgba(148,163,184,0.12)'
+                          : cacheInfo.stale
+                            ? 'rgba(245,158,11,0.14)'
+                            : 'rgba(34,197,94,0.14)',
+                      color:
+                        cacheInfo.stale === null
+                          ? '#94a3b8'
+                          : cacheInfo.stale
+                            ? '#f59e0b'
+                            : '#22c55e',
+                    }}
+                  />
+                </Box>
+              </Box>
+              <Box sx={{ ml: 'auto', display: 'flex', gap: 1 }}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  disabled={rebuilding || refreshing || signalPatchBusy}
+                  onClick={handlePatchMvrv}
+                  startIcon={patchingMvrv ? <CircularProgress size={14} color="inherit" /> : <RefreshCw size={14} />}
+                  sx={{ textTransform: 'none', fontWeight: 700 }}
+                >
+                  {patchingMvrv ? 'Patching…' : 'Patch MVRV'}
+                </Button>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  disabled={rebuilding || refreshing || signalPatchBusy}
+                  onClick={handlePatchSthLthRp}
+                  startIcon={patchingSthLthRp ? <CircularProgress size={14} color="inherit" /> : <RefreshCw size={14} />}
+                  sx={{ textTransform: 'none', fontWeight: 700 }}
+                >
+                  {patchingSthLthRp ? 'Patching…' : 'Patch STH/LTH RP'}
+                </Button>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  disabled={rebuilding || refreshing || signalPatchBusy}
+                  onClick={handleRebuild}
+                  startIcon={rebuilding ? <CircularProgress size={14} color="inherit" /> : <RefreshCw size={14} />}
+                  sx={{ textTransform: 'none', fontWeight: 700 }}
+                >
+                  {rebuilding ? 'Rebuilding…' : 'Rebuild cache'}
+                </Button>
+                <Button
+                  variant="contained"
+                  size="small"
+                  disabled={refreshing || rebuilding || signalPatchBusy}
+                  onClick={handleRefresh}
+                  startIcon={refreshing ? <CircularProgress size={14} color="inherit" /> : <RefreshCw size={14} />}
+                  sx={{ textTransform: 'none', fontWeight: 700 }}
+                >
+                  {refreshing ? 'Refreshing…' : 'Refresh now'}
+                </Button>
+              </Box>
+            </Stack>
+
+            {refreshResult && (
+              <Alert severity="success" sx={{ mt: 1.5 }}>{refreshResult}</Alert>
+            )}
+          </Paper>
+
+          <Paper sx={{ p: 2.5 }}>
+            <Stack spacing={1.75}>
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <Mail size={18} />
+                <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>Scheduled Alerts</Typography>
+              </Stack>
+
+              <Typography variant="body2" color="text.secondary">
+                Manually run the same workflow as the 4-hour scheduler: refresh signals, create any new alert events, and send up to 50 pending alert emails.
+              </Typography>
+
+              {scheduledAlertsLoading ? (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
+                  <CircularProgress size={18} />
+                  <Typography variant="body2" color="text.secondary">
+                    Loading pending alert backlog…
+                  </Typography>
+                </Box>
+              ) : (
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                  <Chip label={`Pending backlog: ${scheduledAlertsStatus?.backlogTotal ?? 0}`} size="small" variant="outlined" />
+                  <Chip label={`Ready now: ${scheduledAlertsStatus?.readyTotal ?? 0}`} size="small" variant="outlined" />
+                  <Chip label={`Next run can send: ${scheduledAlertsStatus?.nextRunAttemptEstimate ?? 0}`} size="small" variant="outlined" />
+                  <Chip label={`Fixed alerts: ${scheduledAlertsStatus?.signalBacklog ?? 0}`} size="small" variant="outlined" />
+                  <Chip label={`Strategy alerts: ${scheduledAlertsStatus?.strategyBacklog ?? 0}`} size="small" variant="outlined" />
+                </Stack>
+              )}
+
+              <Box>
+                <Button
+                  variant="contained"
+                  disabled={scheduledAlertsRunning || scheduledAlertsLoading}
+                  onClick={handleRunScheduledAlerts}
+                  startIcon={scheduledAlertsRunning ? <CircularProgress size={14} color="inherit" /> : <Send size={14} />}
+                  sx={{ textTransform: 'none', fontWeight: 700 }}
+                >
+                  {scheduledAlertsRunning ? 'Running scheduled alerts…' : 'Run scheduled alerts now'}
+                </Button>
+              </Box>
+
+              {scheduledAlertsResult && (
+                <Alert severity="success">
+                  Refresh mode: {scheduledAlertsResult.refresh.mode}.{' '}
+                  {scheduledAlertsResult.refresh.new_rows === 0
+                    ? (scheduledAlertsResult.refresh.message ?? 'No new rows were added.')
+                    : `New rows: ${scheduledAlertsResult.refresh.new_rows ?? 0}. `}
+                  Emails attempted: {scheduledAlertsResult.deliveries.attempted}.{' '}
+                  Sent: {scheduledAlertsResult.deliveries.sent}. Failed: {scheduledAlertsResult.deliveries.failed}.{' '}
+                  Remaining backlog: {scheduledAlertsResult.deliveries.remainingBacklog}.
+                </Alert>
+              )}
+            </Stack>
+          </Paper>
         </Stack>
       )}
     </Box>
