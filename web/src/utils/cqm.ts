@@ -104,6 +104,13 @@ export interface CQMFit {
   lowQ: number;
   highQ: number;
   scorePower: number;
+  riskGammaStart: number;
+  riskGamma2018: number;
+  riskGamma2022: number;
+  riskGammaCurrent: number;
+  riskHighQuantileStart: number;
+  riskHighQuantile2018: number;
+  riskHighQuantile2022: number;
   // Sorted residual arrays for empirical quantile lookups
   sortedOlsResiduals: Float64Array;
   sortedQrResiduals: Float64Array;
@@ -138,6 +145,17 @@ export interface CQMConfig {
   lowQ?: number;
   highQ?: number;
   scorePower?: number;
+  /**
+   * Cycle-aware risk mapping. Older cycles use a higher upper percentile
+   * anchor so early BTC blow-off moves don't all hard-clip at 100% risk.
+   * The latest endpoint decays back to `highQ`, preserving today's snapshot.
+   */
+  riskGammaStart?: number;
+  riskGamma2018?: number;
+  riskGamma2022?: number;
+  riskHighQuantileStart?: number;
+  riskHighQuantile2018?: number;
+  riskHighQuantile2022?: number;
   /**
    * Multiplier applied to the rolling all-time-high to produce the solid
    * upper (red) band. Verified at 1.28 against the BTCAnalytica snapshot.
@@ -208,6 +226,12 @@ const DEFAULT_CONFIG: Required<CQMConfig> = {
   lowQ: 0.06,
   highQ: 0.68,
   scorePower: 1.5,
+  riskGammaStart: 1.35,
+  riskGamma2018: 1.20,
+  riskGamma2022: 1.08,
+  riskHighQuantileStart: 0.999,
+  riskHighQuantile2018: 0.990,
+  riskHighQuantile2022: 0.950,
   upperAthFactor: 1.28,
   solidGoldWindow: 730,
   solidGoldFloorWindow: 30,
@@ -345,6 +369,35 @@ function empiricalPercentile(sorted: Float64Array, value: number): number {
     else hi = mid;
   }
   return lo / n;
+}
+
+function interpolateCycleKnot(
+  ts: number,
+  endTs: number,
+  startValue: number,
+  value2018: number,
+  value2022: number,
+  currentValue: number,
+): number {
+  const knots = [
+    { ts: new Date('2014-01-01').getTime(), value: startValue },
+    { ts: new Date('2018-01-01').getTime(), value: value2018 },
+    { ts: new Date('2022-01-01').getTime(), value: value2022 },
+    { ts: endTs, value: currentValue },
+  ];
+  if (ts <= knots[0].ts) return knots[0].value;
+
+  for (let i = 1; i < knots.length; i++) {
+    const previous = knots[i - 1];
+    const next = knots[i];
+    if (ts <= next.ts) {
+      const span = Math.max(next.ts - previous.ts, DAY_MS);
+      const progress = (ts - previous.ts) / span;
+      return previous.value + progress * (next.value - previous.value);
+    }
+  }
+
+  return knots[knots.length - 1].value;
 }
 
 /**
@@ -593,6 +646,25 @@ export function fitCQM(prices: PricePoint[], config: CQMConfig = {}): CQMFit {
   // Warm-up fallback for the first ~365 days where the time-decayed quantile
   // is not yet defined: use QR_median × exp(0.001 quantile of residuals).
   const solidGreenWarmupOffset = empiricalQuantile(sortedQr, 0.001);
+  const endTs = cleaned[n - 1].ts;
+  const latestPct = empiricalPercentile(sortedOls, olsResiduals[n - 1]);
+  const latestLinearRisk = clamp(
+    (latestPct - cfg.lowQ) / (cfg.highQ - cfg.lowQ),
+    0,
+    1,
+  );
+  const latestSoftZ = clamp(
+    (latestPct - cfg.lowQ) / (cfg.highQ - cfg.lowQ),
+    0,
+    1,
+  );
+  const riskGammaCurrent =
+    latestLinearRisk > 0 &&
+    latestLinearRisk < 1 &&
+    latestSoftZ > 0 &&
+    latestSoftZ < 1
+      ? Math.log(latestLinearRisk) / Math.log(latestSoftZ)
+      : 1.0;
 
   // Build the daily signal series
   const signals: CQMPoint[] = new Array(n);
@@ -628,9 +700,28 @@ export function fitCQM(prices: PricePoint[], config: CQMConfig = {}): CQMFit {
     const dashedLow = trendOls * Math.exp(empiricalQuantile(sortedOls, 0.001));
     const dashedHigh = trendOls * Math.exp(empiricalQuantile(sortedOls, 0.999));
 
-    // Risk: percentile of residual stretched through [low_q, high_q]
+    // Risk: cycle-aware percentile mapping. Older cycles use a higher upper
+    // anchor to account for BTC's diminishing return profile; the latest
+    // endpoint decays back to cfg.highQ, preserving the current calibration.
     const pct = empiricalPercentile(sortedOls, olsResiduals[i]);
-    const risk = clamp((pct - cfg.lowQ) / (cfg.highQ - cfg.lowQ), 0, 1);
+    const riskHighQ = interpolateCycleKnot(
+      cleaned[i].ts,
+      endTs,
+      cfg.riskHighQuantileStart,
+      cfg.riskHighQuantile2018,
+      cfg.riskHighQuantile2022,
+      cfg.highQ,
+    );
+    const riskGamma = interpolateCycleKnot(
+      cleaned[i].ts,
+      endTs,
+      cfg.riskGammaStart,
+      cfg.riskGamma2018,
+      cfg.riskGamma2022,
+      riskGammaCurrent,
+    );
+    const riskZ = clamp((pct - cfg.lowQ) / (riskHighQ - cfg.lowQ), 0, 1);
+    const risk = Math.pow(riskZ, riskGamma);
     // Score: same percentile raised to score_power (matches the Python replica)
     const score = Math.pow(risk, cfg.scorePower);
 
@@ -663,6 +754,13 @@ export function fitCQM(prices: PricePoint[], config: CQMConfig = {}): CQMFit {
     lowQ: cfg.lowQ,
     highQ: cfg.highQ,
     scorePower: cfg.scorePower,
+    riskGammaStart: cfg.riskGammaStart,
+    riskGamma2018: cfg.riskGamma2018,
+    riskGamma2022: cfg.riskGamma2022,
+    riskGammaCurrent,
+    riskHighQuantileStart: cfg.riskHighQuantileStart,
+    riskHighQuantile2018: cfg.riskHighQuantile2018,
+    riskHighQuantile2022: cfg.riskHighQuantile2022,
     sortedOlsResiduals: sortedOls,
     sortedQrResiduals: sortedQr,
     solidGoldWindow: cfg.solidGoldWindow,

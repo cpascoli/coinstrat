@@ -229,6 +229,16 @@ function mvrvColor(v: 0 | 1 | 2 | 3) {
   }
 }
 
+type CqmRiskBucket = 'COOL' | 'WARM' | 'HOT' | 'EUPHORIC';
+
+function cqmRiskBucket(riskPct: number): CqmRiskBucket | null {
+  if (!Number.isFinite(riskPct)) return null;
+  if (riskPct < 25) return 'COOL';
+  if (riskPct < 50) return 'WARM';
+  if (riskPct < 75) return 'HOT';
+  return 'EUPHORIC';
+}
+
 const ChartsView: React.FC<Props> = ({ data }) => {
   const [range, setRange] = useState<RangeKey>('all');
   const location = useLocation();
@@ -537,9 +547,16 @@ const ChartsView: React.FC<Props> = ({ data }) => {
     if (!cqmFit) return chartData as any[];
     const cqmMap = new Map<number, CQMPoint>();
     for (const s of cqmFit.signals) cqmMap.set(s.ts, s);
-    return (chartData as any[]).map((d) => {
+    return (chartData as any[]).map((d, i, arr) => {
       const cqm = cqmMap.get(d.ts);
       if (!cqm) return d;
+      const riskPct = cqm.risk * 100;
+      const bucket = cqmRiskBucket(riskPct);
+      const prevBucket = i > 0 ? cqmRiskBucket((cqmMap.get(arr[i - 1]?.ts)?.risk ?? NaN) * 100) : null;
+      const nextBucket = i < arr.length - 1 ? cqmRiskBucket((cqmMap.get(arr[i + 1]?.ts)?.risk ?? NaN) * 100) : null;
+      const inBucket = (target: CqmRiskBucket) => (
+        bucket === target || prevBucket === target || nextBucket === target
+      );
       return {
         ...d,
         CQM_LOWER: cqm.solidLower,
@@ -548,7 +565,15 @@ const ChartsView: React.FC<Props> = ({ data }) => {
         CQM_DASHED_LOW: cqm.dashedLow,
         CQM_DASHED_HIGH: cqm.dashedHigh,
         CQM_SCORE: cqm.score,
-        CQM_RISK_PCT: cqm.risk * 100,
+        CQM_RISK_PCT: riskPct,
+        CQM_RISK_COOL: inBucket('COOL') ? riskPct : null,
+        CQM_RISK_WARM: inBucket('WARM') ? riskPct : null,
+        CQM_RISK_HOT: inBucket('HOT') ? riskPct : null,
+        CQM_RISK_EUPHORIC: inBucket('EUPHORIC') ? riskPct : null,
+        CQM_SCORE_COOL: inBucket('COOL') ? cqm.score : null,
+        CQM_SCORE_WARM: inBucket('WARM') ? cqm.score : null,
+        CQM_SCORE_HOT: inBucket('HOT') ? cqm.score : null,
+        CQM_SCORE_EUPHORIC: inBucket('EUPHORIC') ? cqm.score : null,
         CQM_TR_LOWER: cqm.trendRiskLower,
         CQM_TR_MEDIAN: cqm.trendRiskMedian,
         CQM_TR_UPPER: cqm.trendRiskUpper,
@@ -2015,7 +2040,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             CQM Risk
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            CQM Risk maps the residual against the long-run trend through the calibrated [low_q, high_q] = [{cqmFit ? cqmFit.lowQ.toFixed(2) : '0.06'}, {cqmFit ? cqmFit.highQ.toFixed(2) : '0.68'}] residual-percentile window.
+            CQM Risk maps the residual against the long-run trend through cycle-aware upper percentile anchors that decay toward today's calibrated [low_q, high_q] = [{cqmFit ? cqmFit.lowQ.toFixed(2) : '0.06'}, {cqmFit ? cqmFit.highQ.toFixed(2) : '0.68'}] endpoint.
             <br />
             DCA rule: <code>daily_usd = base × (1 − 2 × Risk)</code>. Risk ≤ 0% → buy +base, Risk = 50% → flat, Risk ≥ 100% → sell base.
           </Typography>
@@ -2042,7 +2067,10 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               <ReferenceLine yAxisId="risk" y={50} stroke="#94a3b8" strokeDasharray="6 3" strokeWidth={1.2} />
               <Tooltip content={<CustomTooltip />} />
               {renderChartBrush()}
-              <Line yAxisId="risk" type="monotone" dataKey="CQM_RISK_PCT" name="CQM Risk %" stroke="#facc15" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls />
+              <Line yAxisId="risk" type="monotone" dataKey="CQM_RISK_COOL" name="CQM Risk %" stroke="#22c55e" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
+              <Line yAxisId="risk" type="monotone" dataKey="CQM_RISK_WARM" name="CQM Risk %" stroke="#84cc16" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
+              <Line yAxisId="risk" type="monotone" dataKey="CQM_RISK_HOT" name="CQM Risk %" stroke="#f59e0b" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
+              <Line yAxisId="risk" type="monotone" dataKey="CQM_RISK_EUPHORIC" name="CQM Risk %" stroke="#ef4444" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
               <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.4} dot={false} isAnimationActive={false} opacity={0.45} />
             </LineChart>
           </ResponsiveContainer>
@@ -2058,7 +2086,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             CQM Score
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            Pointier valuation oscillator: <code>score = risk<sup>score_power</sup></code> with score_power = {cqmFit ? cqmFit.scorePower.toFixed(2) : '1.50'}.
+            Pointier valuation oscillator: <code>score = risk<sup>score_power</sup></code> with score_power = {cqmFit ? cqmFit.scorePower.toFixed(2) : '1.50'}. The line is colored by CQM Risk heat, matching the BTCAnalytica-style score panel.
             <br />
             Raising risk to a power &gt; 1 sharpens the peaks during euphoria and softens the floor — closer to BTCAnalytica's reference oscillator than raw risk.
           </Typography>
@@ -2084,7 +2112,10 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               <YAxis yAxisId="btc" orientation="right" scale="log" domain={[btcDomain.y1, btcDomain.y2]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
               <Tooltip content={<CustomTooltip />} />
               {renderChartBrush()}
-              <Line yAxisId="score" type="monotone" dataKey="CQM_SCORE" name="CQM Score" stroke="#a78bfa" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls />
+              <Line yAxisId="score" type="monotone" dataKey="CQM_SCORE_COOL" name="CQM Score" stroke="#22c55e" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
+              <Line yAxisId="score" type="monotone" dataKey="CQM_SCORE_WARM" name="CQM Score" stroke="#84cc16" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
+              <Line yAxisId="score" type="monotone" dataKey="CQM_SCORE_HOT" name="CQM Score" stroke="#f59e0b" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
+              <Line yAxisId="score" type="monotone" dataKey="CQM_SCORE_EUPHORIC" name="CQM Score" stroke="#ef4444" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
               <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.4} dot={false} isAnimationActive={false} opacity={0.45} />
             </LineChart>
           </ResponsiveContainer>

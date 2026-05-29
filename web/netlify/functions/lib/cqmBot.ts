@@ -151,6 +151,7 @@ const FREQUENCY_INTERVAL_MS: Record<BotFrequency, number> = {
   weekly: 7 * 24 * 60 * 60 * 1000,
   monthly: 30 * 24 * 60 * 60 * 1000,
 };
+const FREQUENCY_GUARD_GRACE_MS = 5 * 60 * 1000;
 
 export interface FrequencyGuard {
   canExecute: boolean;
@@ -168,7 +169,10 @@ export function computeFrequencyGuard(
   }
   const last = new Date(lastOrder.triggered_at).getTime();
   const next = last + FREQUENCY_INTERVAL_MS[frequency];
-  const canExecute = now.getTime() >= next;
+  // Netlify scheduled functions fire on a minute boundary, while our order row
+  // is inserted a few seconds later. Allow a small grace window so "daily" does
+  // not skip tomorrow's run just because today's order was recorded at :37:26.
+  const canExecute = now.getTime() + FREQUENCY_GUARD_GRACE_MS >= next;
   return {
     canExecute,
     nextSlotAt: new Date(next).toISOString(),

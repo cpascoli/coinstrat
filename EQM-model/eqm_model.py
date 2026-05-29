@@ -41,6 +41,14 @@ class EQMFit:
     score_lower_quantile: float = 0.06
     score_upper_quantile: float = 0.995
     score_power: float = 1.0
+    risk_gamma_start: float = 1.30
+    risk_gamma_2018: float = 1.10
+    risk_gamma_2022: float = 0.90
+    risk_gamma_current: float = 0.75
+    risk_high_quantile_start: float = 0.999
+    risk_high_quantile_2018: float = 0.990
+    risk_high_quantile_2022: float = 0.950
+    end_date: pd.Timestamp | None = None
 
 
 @dataclass(frozen=True)
@@ -140,6 +148,12 @@ def fit_eqm(
     score_lower_quantile: float = 0.06,
     score_upper_quantile: float = 0.995,
     score_power: float = 1.0,
+    risk_gamma_start: float = 1.35,
+    risk_gamma_2018: float = 1.20,
+    risk_gamma_2022: float = 1.08,
+    risk_high_quantile_start: float = 0.999,
+    risk_high_quantile_2018: float = 0.990,
+    risk_high_quantile_2022: float = 0.950,
 ) -> EQMFit:
     """
     Fit the EQM proxy.
@@ -184,6 +198,18 @@ def fit_eqm(
 
     score_raw = ((residuals - score_low) / (score_high - score_low)).clip(0.0, 1.0)
     scores = pd.Series(np.power(score_raw, score_power), index=residuals.index, name="eqm_score")
+    end_date = pd.Timestamp(prices.index.max())
+
+    latest_residual_percentile = empirical_percentile(residuals, float(residuals.iloc[-1]))
+    latest_linear_risk = (latest_residual_percentile - low_quantile) / (high_quantile - low_quantile)
+    latest_linear_risk = float(np.clip(latest_linear_risk, 0.0, 1.0))
+    latest_soft_z = (latest_residual_percentile - low_quantile) / (high_quantile - low_quantile)
+    latest_soft_z = float(np.clip(latest_soft_z, 0.0, 1.0))
+    if 0.0 < latest_linear_risk < 1.0 and 0.0 < latest_soft_z < 1.0:
+        risk_gamma_current = math.log(latest_linear_risk) / math.log(latest_soft_z)
+    else:
+        # Degenerate endpoints cannot solve a unique exponent; keep continuity.
+        risk_gamma_current = 1.0
 
     return EQMFit(
         intercept=float(intercept),
@@ -200,6 +226,14 @@ def fit_eqm(
         score_lower_quantile=float(score_lower_quantile),
         score_upper_quantile=float(score_upper_quantile),
         score_power=float(score_power),
+        risk_gamma_start=float(risk_gamma_start),
+        risk_gamma_2018=float(risk_gamma_2018),
+        risk_gamma_2022=float(risk_gamma_2022),
+        risk_gamma_current=float(risk_gamma_current),
+        risk_high_quantile_start=float(risk_high_quantile_start),
+        risk_high_quantile_2018=float(risk_high_quantile_2018),
+        risk_high_quantile_2022=float(risk_high_quantile_2022),
+        end_date=end_date,
     )
 
 
@@ -564,19 +598,73 @@ def risk_for_score(fit: EQMFit, score: float) -> float:
     return empirical_percentile(fit.scores, score)
 
 
+def risk_gamma_for_date(fit: EQMFit, date: pd.Timestamp) -> float:
+    """Cycle-aware soft-risk exponent, linearly interpolated across BTC cycles."""
+    end_date = pd.Timestamp(fit.end_date or fit.residuals.index.max())
+    knots = [
+        (pd.Timestamp("2014-01-01"), fit.risk_gamma_start),
+        (pd.Timestamp("2018-01-01"), fit.risk_gamma_2018),
+        (pd.Timestamp("2022-01-01"), fit.risk_gamma_2022),
+        (end_date, fit.risk_gamma_current),
+    ]
+    target = pd.Timestamp(date)
+    if target <= knots[0][0]:
+        return float(knots[0][1])
+
+    previous_date, previous_gamma = knots[0]
+    for next_date, next_gamma in knots[1:]:
+        if target <= next_date:
+            span_days = max((next_date - previous_date).days, 1)
+            progress = (target - previous_date).days / span_days
+            return float(previous_gamma + progress * (next_gamma - previous_gamma))
+        previous_date, previous_gamma = next_date, next_gamma
+
+    return float(knots[-1][1])
+
+
+def risk_high_quantile_for_date(fit: EQMFit, date: pd.Timestamp) -> float:
+    """Cycle-aware upper risk anchor that decays toward today's calibration."""
+    end_date = pd.Timestamp(fit.end_date or fit.residuals.index.max())
+    knots = [
+        (pd.Timestamp("2014-01-01"), fit.risk_high_quantile_start),
+        (pd.Timestamp("2018-01-01"), fit.risk_high_quantile_2018),
+        (pd.Timestamp("2022-01-01"), fit.risk_high_quantile_2022),
+        (end_date, fit.high_quantile),
+    ]
+    target = pd.Timestamp(date)
+    if target <= knots[0][0]:
+        return float(knots[0][1])
+
+    previous_date, previous_quantile = knots[0]
+    for next_date, next_quantile in knots[1:]:
+        if target <= next_date:
+            span_days = max((next_date - previous_date).days, 1)
+            progress = (target - previous_date).days / span_days
+            return float(previous_quantile + progress * (next_quantile - previous_quantile))
+        previous_date, previous_quantile = next_date, next_quantile
+
+    return float(knots[-1][1])
+
+
 def risk_for_price(fit: EQMFit, date: pd.Timestamp, price: float) -> float:
-    """Map price to risk at a date."""
+    """Map price to cycle-aware soft risk at a date."""
     log_trend = float(trend_log(fit, [pd.Timestamp(date)])[0])
     residual = math.log(price) - log_trend
     residual_percentile = empirical_percentile(fit.residuals, residual)
-    risk = (residual_percentile - fit.low_quantile) / (fit.high_quantile - fit.low_quantile)
-    return float(np.clip(risk, 0.0, 1.0))
+    high_quantile = risk_high_quantile_for_date(fit, pd.Timestamp(date))
+    soft_z = (residual_percentile - fit.low_quantile) / (high_quantile - fit.low_quantile)
+    soft_z = float(np.clip(soft_z, 0.0, 1.0))
+    return float(soft_z ** risk_gamma_for_date(fit, pd.Timestamp(date)))
 
 
 def price_for_risk(fit: EQMFit, date: pd.Timestamp, risk: float) -> float:
     """Invert the current date's price-risk curve."""
     risk = float(np.clip(risk, 0.0, 1.0))
-    residual_quantile = fit.low_quantile + risk * (fit.high_quantile - fit.low_quantile)
+    gamma = risk_gamma_for_date(fit, pd.Timestamp(date))
+    if gamma <= 0:
+        raise ValueError("Risk gamma must be positive")
+    high_quantile = risk_high_quantile_for_date(fit, pd.Timestamp(date))
+    residual_quantile = fit.low_quantile + (risk ** (1.0 / gamma)) * (high_quantile - fit.low_quantile)
     residual = float(fit.residuals.quantile(residual_quantile))
     log_price = float(trend_log(fit, [pd.Timestamp(date)])[0]) + residual
     return float(math.exp(log_price))
