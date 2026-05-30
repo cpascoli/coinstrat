@@ -1,5 +1,14 @@
 /**
- * Scheduled CQM Risk DCA bot — runs every day at 11:37 UTC.
+ * Scheduled CQM Risk DCA bot — runs every day at 00:00 UTC.
+ *
+ * Timing rationale: analysis of 9 quarters of Kraken hourly BTC data
+ * (XBTUSD/XBTGBP) shows the daily low lands in the 00:00 UTC hour ~13-14% of
+ * days — roughly 3x the uniform 4.2% baseline and by far the most common hour,
+ * with a broader cheap band spanning 23:00-01:00 UTC. The pattern is stable
+ * across 1-9 quarter lookbacks and holds on 6 of 7 weekdays (Sunday's low
+ * shifts ~1h earlier to 23:00). Firing at midnight UTC therefore targets the
+ * statistically cheapest part of the day for our BTC-GBP DCA. See
+ * hour-analysis/ for the supporting scripts and charts.
  *
  * Behavior:
  *   - If the bot is paused (`cqm_bot_settings.enabled = false`)
@@ -41,8 +50,9 @@ interface ScheduledInvocationBody {
 }
 
 export const config: Config = {
-  // Every day at 11:37 UTC. Standard 5-field cron (m h dom mon dow).
-  schedule: '37 11 * * *',
+  // Every day at 00:00 UTC — statistically the cheapest hour for BTC.
+  // Standard 5-field cron (m h dom mon dow); Netlify always interprets it as UTC.
+  schedule: '0 0 * * *',
 };
 
 async function readScheduledBody(request: Request): Promise<ScheduledInvocationBody> {

@@ -171,7 +171,7 @@ export function computeFrequencyGuard(
   const next = last + FREQUENCY_INTERVAL_MS[frequency];
   // Netlify scheduled functions fire on a minute boundary, while our order row
   // is inserted a few seconds later. Allow a small grace window so "daily" does
-  // not skip tomorrow's run just because today's order was recorded at :37:26.
+  // not skip tomorrow's run just because today's order was recorded at 00:00:26.
   const canExecute = now.getTime() + FREQUENCY_GUARD_GRACE_MS >= next;
   return {
     canExecute,

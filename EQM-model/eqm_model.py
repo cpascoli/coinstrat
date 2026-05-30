@@ -121,6 +121,73 @@ def fetch_stooq_btc() -> pd.Series:
     return series
 
 
+def fetch_binance_btc(start_ms: int | None = None, symbol: str = "BTCUSDT") -> pd.Series:
+    """Fetch daily BTC closes from Binance klines (mirrors web/src/services/crypto.ts).
+
+    Returns a daily close series indexed by date. `start_ms` optionally limits
+    the fetch to candles on/after that epoch-millisecond timestamp; otherwise
+    Binance returns its most recent window.
+    """
+    url = "https://api.binance.com/api/v3/klines"
+    end_ms = int(pd.Timestamp.utcnow().timestamp() * 1000)
+    if start_ms is None:
+        start_ms = int(pd.Timestamp("2017-08-01").timestamp() * 1000)
+
+    rows: list[tuple[pd.Timestamp, float]] = []
+    cursor = int(start_ms)
+    while cursor < end_ms:
+        params = {
+            "symbol": symbol,
+            "interval": "1d",
+            "limit": 1000,
+            "startTime": cursor,
+            "endTime": end_ms,
+        }
+        response = requests.get(url, params=params, timeout=30)
+        response.raise_for_status()
+        candles = response.json()
+        if not isinstance(candles, list) or not candles:
+            break
+        for candle in candles:
+            open_time = pd.Timestamp(int(candle[0]), unit="ms")
+            rows.append((open_time.normalize(), float(candle[4])))
+        last_open = int(candles[-1][0])
+        if last_open + 1 <= cursor:
+            break
+        cursor = last_open + 1
+        if len(candles) < 1000:
+            break
+
+    if not rows:
+        raise RuntimeError("Binance returned no klines.")
+    series = pd.Series({date: price for date, price in rows}, name="BTCUSD").sort_index()
+    series.index = pd.DatetimeIndex(series.index)
+    return series
+
+
+def load_local_plus_binance_tail(path: Path = DEFAULT_LOCAL_JSON) -> pd.Series:
+    """Load the bundled history and extend it with the live Binance daily tail.
+
+    This is the Python equivalent of the app's hybrid `fetchBTCPrice`: local
+    JSON for deep history, Binance klines for everything after the last local
+    date. Binance values take precedence on any overlapping dates.
+    """
+    local = load_local_json(path)
+    last_local = pd.Timestamp(local.index.max())
+    start_ms = int((last_local + pd.Timedelta(days=1)).timestamp() * 1000)
+    try:
+        tail = fetch_binance_btc(start_ms=start_ms)
+    except Exception as error:  # noqa: BLE001 - network is best-effort
+        print(f"[warn] Binance tail fetch failed ({error}); using local history only.")
+        return local
+    merged = local.copy()
+    for date, price in tail.items():
+        merged.loc[date] = price
+    merged = merged.sort_index()
+    merged.name = "BTCUSD"
+    return merged
+
+
 def clean_price_series(series: pd.Series, start: str | None = "2011-01-01") -> pd.Series:
     """Normalize index, remove bad rows, and optionally truncate early history."""
     out = series.copy()

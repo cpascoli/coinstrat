@@ -27,39 +27,50 @@ from eqm_model import (
     fit_eqm,
     fit_eqm_solid_bands,
     fit_quantile_regression,
-    load_local_json,
+    load_local_plus_binance_tail,
     quantile_regression_series,
     solid_band_series,
 )
 
+# Calibrated risk-curve params (see calibrate_eqm.py) — keep in sync with run_eqm.py.
+CALIB_TIME_POWER = 0.70
+CALIB_LOW_QUANTILE = 0.005
+CALIB_HIGH_QUANTILE = 0.61
+CALIB_SCORE_LOWER = 0.06
+CALIB_SCORE_UPPER = 0.86
 
-REFERENCE_IMAGE = Path(__file__).resolve().parents[1] / "EQM" / "btcanalytica_model.jpeg"
+REFERENCE_IMAGE = Path(__file__).resolve().parents[1] / "EQM" / "btcanalytica_model_20250528.jpeg"
 DEFAULT_REPLICA_IMAGE = Path(__file__).resolve().parent / "output" / "eqm_replica.png"
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "output"
 
 
 @dataclass(frozen=True)
 class ReferenceSnapshot:
-    """Visible May 22, 2026 close values from the BTCAnalytica chart."""
+    """Visible May 28, 2026 close values from the BTCAnalytica chart.
 
-    as_of: str = "2026-05-22"
-    price: float = 75_500.0
-    eqm_score: float = 0.145
-    eqm_risk: float = 0.285
-    eqm_trend_risk: float = 72_300.0
-    eqm_band_001: float = 45_400.0
-    eqm_band_50: float = 109_600.0
-    eqm_band_999: float = 159_900.0
-    eqm_qr_001: float = 50_800.0
-    eqm_qr_50: float = 100_400.0
-    eqm_qr_999: float = 269_400.0
+    Price / score / risk / 7 risk-price knots are read directly from the chart's
+    boxes. The solid-band and QR values have no on-chart box in the reference, so
+    they are approximate visual reads (and barely move week-over-week).
+    """
+
+    as_of: str = "2026-05-28"
+    price: float = 73_000.0
+    eqm_score: float = 0.138
+    eqm_risk: float = 0.264
+    eqm_trend_risk: float = 71_400.0
+    eqm_band_001: float = 45_000.0
+    eqm_band_50: float = 108_000.0
+    eqm_band_999: float = 160_000.0
+    eqm_qr_001: float = 50_600.0
+    eqm_qr_50: float = 108_500.0
+    eqm_qr_999: float = 261_300.0
     risk_price_0: float = 45_000.0
     risk_price_10: float = 59_000.0
     risk_price_25: float = 72_000.0
     risk_price_50: float = 101_000.0
     risk_price_75: float = 125_000.0
     risk_price_90: float = 138_000.0
-    risk_price_100: float = 160_000.0
+    risk_price_100: float = 161_000.0
 
 
 def fmt_money(value: float | None) -> str:
@@ -158,12 +169,12 @@ def build_side_by_side_figure(
 
     ax_ref = fig.add_subplot(grid[0, 0])
     ax_ref.imshow(reference_image)
-    ax_ref.set_title("Reference: BTCAnalytica EQM (May 22, 2026)", fontsize=12, fontweight="bold")
+    ax_ref.set_title("Reference: BTCAnalytica EQM (May 28, 2026)", fontsize=12, fontweight="bold")
     ax_ref.axis("off")
 
     ax_rep = fig.add_subplot(grid[0, 1])
     ax_rep.imshow(replica_image)
-    ax_rep.set_title("Replica: prototype EQM (May 22, 2026)", fontsize=12, fontweight="bold")
+    ax_rep.set_title("Replica: prototype EQM (May 28, 2026)", fontsize=12, fontweight="bold")
     ax_rep.axis("off")
 
     ax_diff = fig.add_subplot(grid[1, :])
@@ -193,7 +204,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Compare EQM replica to reference")
     parser.add_argument(
         "--snapshot-date",
-        default="2026-05-22",
+        default="2026-05-28",
         help="Snapshot date for the replica (must exist in the price history)",
     )
     parser.add_argument(
@@ -230,10 +241,17 @@ def main() -> None:
             "Run run_eqm.py first to generate it."
         )
 
-    prices = clean_price_series(load_local_json(DEFAULT_LOCAL_JSON), start=args.start_history)
-    fit = fit_eqm(prices)
-    qr_fit = fit_quantile_regression(prices, quantiles=(0.001, 0.5, 0.999), time_power=0.60)
-    solid_fit = fit_eqm_solid_bands(prices)
+    prices = clean_price_series(load_local_plus_binance_tail(DEFAULT_LOCAL_JSON), start=args.start_history)
+    fit = fit_eqm(
+        prices,
+        low_quantile=CALIB_LOW_QUANTILE,
+        high_quantile=CALIB_HIGH_QUANTILE,
+        time_power=CALIB_TIME_POWER,
+        score_lower_quantile=CALIB_SCORE_LOWER,
+        score_upper_quantile=CALIB_SCORE_UPPER,
+    )
+    qr_fit = fit_quantile_regression(prices, quantiles=(0.001, 0.5, 0.999), time_power=CALIB_TIME_POWER)
+    solid_fit = fit_eqm_solid_bands(prices, time_power=CALIB_TIME_POWER)
     snapshot_date = pd.Timestamp(args.snapshot_date)
     snapshot = current_snapshot(fit, prices, snapshot_date)
 
