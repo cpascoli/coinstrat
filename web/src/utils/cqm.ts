@@ -48,9 +48,13 @@
  * EQM Risk (default riskMode='gated'):
  *   global_risk(t) = soft_map( percentile(residual_ols, full_sample) )
  *   rolling_risk(t)= soft_map( percentile(residual_ols, last 730 days) )
- *   risk(t)        = global_risk(t)  normally (preserves today's calibration)
- *   risk(t)        = min(global, rolling) when price ≤ 1.15 × min(price, 120d)
- *                    i.e. only at actual cycle-low basing zones.
+ *   risk(t)        = global_risk(t)  when price is far above the local low
+ *   near_low(t)    = min(price, last riskGateNearDays)
+ *   w(t)           = 0                               if price ≥ riskGateNearBuffer × near_low
+ *                  = 1                               if price ≤ near_low
+ *                  = linear ramp between those bands otherwise
+ *   target(t)      = min(global, rolling)
+ *   risk(t)        = global − w × (global − target)  (smooth gated blend near lows)
  *
  * Dashed QR fan (asymmetric quadratic quantile model, Cowen 2026):
  *   log10(price) = c_tau + a_tau * x + b(tau) * x^2,  x = ln(days since 2009) - mu
@@ -227,15 +231,16 @@ export interface CQMConfig {
   trendRiskHighQ?: number;      // default 0.90
   /**
    * EQM risk mapping mode. 'gated' (default) keeps the global full-sample risk
-   * except near cycle lows, where min(global, rolling) applies so the DCA
-   * bot buys more aggressively at bottoms without breaking today's calibration.
+   * except near cycle lows, where a smooth blend toward min(global, rolling)
+   * applies so the DCA bot buys more aggressively at bottoms without a hard
+   * cliff when price enters the near-low zone.
    */
   riskMode?: 'global' | 'rolling' | 'gated';
   /** Trailing window for rolling/gated risk (730 = 2 years). */
   riskRollDays?: number;
   /** Near-local-low lookback for gated risk (days). */
   riskGateNearDays?: number;
-  /** Price must be within this multiple of the near-low minimum for gating. */
+  /** Price at or above this × near-low min uses global risk only (weight = 0). */
   riskGateNearBuffer?: number;
 }
 
@@ -445,6 +450,33 @@ function riskFromPercentile(
   );
   const riskZ = clamp((pct - cfg.lowQ) / (riskHighQ - cfg.lowQ), 0, 1);
   return Math.pow(riskZ, riskGamma);
+}
+
+/** Blend weight 0 = global only; 1 = full min(global, rolling) target. */
+export function computeGateBlendWeight(
+  price: number,
+  nearLowMin: number,
+  cfg: Pick<Required<CQMConfig>, 'riskGateNearBuffer'>,
+): number {
+  if (!Number.isFinite(price) || !Number.isFinite(nearLowMin) || nearLowMin <= 0) {
+    return 0;
+  }
+  const enter = nearLowMin * cfg.riskGateNearBuffer;
+  const full = nearLowMin;
+  if (enter <= full) return price <= full ? 1 : 0;
+  if (price >= enter) return 0;
+  if (price <= full) return 1;
+  return clamp((enter - price) / (enter - full), 0, 1);
+}
+
+export function blendGatedRisk(
+  globalRisk: number,
+  rollingRisk: number,
+  weight: number,
+): number {
+  const w = clamp(weight, 0, 1);
+  const target = Math.min(globalRisk, rollingRisk);
+  return globalRisk - w * (globalRisk - target);
 }
 
 // --- asymmetric quadratic QR fan (Cowen 2026) ------------------------------
@@ -1054,8 +1086,8 @@ export function fitCQM(prices: PricePoint[], config: CQMConfig = {}): CQMFit {
     // Risk: cycle-aware percentile mapping. Older cycles use a higher upper
     // anchor to account for BTC's diminishing return profile; the latest
     // endpoint decays back to cfg.highQ, preserving the current calibration.
-    // With riskMode='gated', rolling 2y risk applies only near local cycle lows
-    // (within riskGateNearBuffer × rolling-min over riskGateNearDays).
+    // With riskMode='gated', blend toward min(global, rolling) between the near-low
+    // min (weight 1) and riskGateNearBuffer × near-low (weight 0).
     const pct = empiricalPercentile(sortedOls, olsResiduals[i]);
     let risk = riskFromPercentile(pct, cleaned[i].ts, endTs, cfg, riskGammaCurrent);
 
@@ -1069,12 +1101,11 @@ export function fitCQM(prices: PricePoint[], config: CQMConfig = {}): CQMFit {
       );
       if (cfg.riskMode === 'rolling') {
         risk = rollingRisk;
-      } else if (
-        cfg.riskMode === 'gated' &&
-        nearLowMin !== null &&
-        cleaned[i].price <= nearLowMin[i] * cfg.riskGateNearBuffer
-      ) {
-        risk = Math.min(risk, rollingRisk);
+      } else if (cfg.riskMode === 'gated' && nearLowMin !== null) {
+        const gateWeight = computeGateBlendWeight(cleaned[i].price, nearLowMin[i], cfg);
+        if (gateWeight > 0) {
+          risk = blendGatedRisk(risk, rollingRisk, gateWeight);
+        }
       }
     }
 

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { fitCQM, snapshotAt } from '../src/utils/cqm';
+import { fitCQM, snapshotAt, computeGateBlendWeight, blendGatedRisk } from '../src/utils/cqm';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -224,6 +224,51 @@ describe('CoinStrat Quantile Model', () => {
     if (!rollingSnap || !gatedSnap) return;
     // Rolling-only collapses today's risk; gated preserves the global reading.
     expect(rollingSnap.risk).toBeLessThan(gatedSnap.risk - 0.05);
+  });
+
+  it('gate blend weight ramps linearly between near-low enter and the raw low', () => {
+    const cfg = { riskGateNearBuffer: 1.15 };
+    const nearLow = 100;
+    expect(computeGateBlendWeight(116, nearLow, cfg)).toBe(0);
+    expect(computeGateBlendWeight(100, nearLow, cfg)).toBe(1);
+    expect(computeGateBlendWeight(107.5, nearLow, cfg)).toBeCloseTo(0.5, 6);
+  });
+
+  it('blendGatedRisk preserves global at weight 0 and min(global, rolling) at weight 1', () => {
+    expect(blendGatedRisk(0.25, 0, 0)).toBeCloseTo(0.25, 6);
+    expect(blendGatedRisk(0.25, 0, 1)).toBeCloseTo(0, 6);
+    expect(blendGatedRisk(0.25, 0, 0.5)).toBeCloseTo(0.125, 6);
+    expect(blendGatedRisk(0.20, 0.30, 1)).toBeCloseTo(0.20, 6);
+  });
+
+  it('gated blend softens near-low entry without a single-day cliff to zero', () => {
+    const extension = [
+      { date: '2026-05-24', ts: new Date('2026-05-24').getTime(), price: 77001 },
+      { date: '2026-05-25', ts: new Date('2026-05-25').getTime(), price: 77273.26 },
+      { date: '2026-05-26', ts: new Date('2026-05-26').getTime(), price: 75842.51 },
+      { date: '2026-05-27', ts: new Date('2026-05-27').getTime(), price: 74348.55 },
+      { date: '2026-05-28', ts: new Date('2026-05-28').getTime(), price: 73531.95 },
+      { date: '2026-05-29', ts: new Date('2026-05-29').getTime(), price: 73384.46 },
+      { date: '2026-05-30', ts: new Date('2026-05-30').getTime(), price: 73794.27 },
+      { date: '2026-05-31', ts: new Date('2026-05-31').getTime(), price: 73601.92 },
+      { date: '2026-06-01', ts: new Date('2026-06-01').getTime(), price: 71329.41 },
+      { date: '2026-06-02', ts: new Date('2026-06-02').getTime(), price: 67587.2 },
+    ];
+    const extended = [...points, ...extension];
+    const fit = fitCQM(extended, { riskMode: 'gated' });
+    const may31 = fit.signals.find((s) => s.date === '2026-05-31');
+    const jun1 = fit.signals.find((s) => s.date === '2026-06-01');
+    const jun2 = fit.signals.find((s) => s.date === '2026-06-02');
+    expect(may31).toBeDefined();
+    expect(jun1).toBeDefined();
+    expect(jun2).toBeDefined();
+    if (!may31 || !jun1 || !jun2) return;
+
+    const oneDayDrop = may31.risk - jun1.risk;
+    expect(oneDayDrop).toBeGreaterThan(0.02);
+    expect(oneDayDrop).toBeLessThan(0.20);
+    expect(jun1.risk).toBeGreaterThan(0.03);
+    expect(jun2.risk).toBeLessThanOrEqual(jun1.risk + 1e-9);
   });
 
   it('exposes asymmetric QR fan values at the snapshot date', () => {

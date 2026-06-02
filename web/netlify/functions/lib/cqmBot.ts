@@ -303,8 +303,8 @@ export async function completeExecutionLease(
  * Netlify Blobs signal cache and running `fitCQM()` on it.
  *
  * Uses the default gated 2y risk model: global risk everywhere except near
- * cycle lows, where min(global, rolling_2y) applies so the bot buys more at
- * bottoms without changing today's calibrated sizing.
+ * cycle lows, where risk blends smoothly toward min(global, rolling) so the
+ * bot buys more at bottoms without a hard cliff on zone entry.
  *
  * Reads the same cache key (`signals_latest`) used by `signal-current.ts`
  * and `signal-history.ts`, so the bot stays in sync with whatever data the
