@@ -562,8 +562,9 @@ const ChartsView: React.FC<Props> = ({ data }) => {
         CQM_LOWER: cqm.solidLower,
         CQM_MEDIAN: cqm.solidMedian,
         CQM_UPPER: cqm.solidUpper,
-        CQM_DASHED_LOW: cqm.dashedLow,
-        CQM_DASHED_HIGH: cqm.dashedHigh,
+        CQM_QR_LOW: cqm.qrDashedLow,
+        CQM_QR_MEDIAN: cqm.qrDashedMedian,
+        CQM_QR_HIGH: cqm.qrDashedHigh,
         CQM_SCORE: cqm.score,
         CQM_RISK_PCT: riskPct,
         CQM_RISK_COOL: inBucket('COOL') ? riskPct : null,
@@ -1892,17 +1893,9 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             CoinStrat Quantile Model — Price Bands
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            CoinStrat Quantile Model is inspired by BTCAnalytica's Empirical Quantile Model. All three solid bands are reverse-engineered to shelf during bear markets (step up at new ATHs, plateau through corrections); verified at the May 22, 2026 snapshot ($45.4K / $108.4K / $159.4K).
-            <br />
-            <b>Solid red 99.9%</b> = max(rolling all-time-high × {cqmFit ? cqmFit.upperAthFactor.toFixed(2) : '1.28'}, gold band) — verified +0.1% vs chart.
-            <br />
-            <b>Solid gold 50%</b> = min(running max of (rolling-{cqmFit ? cqmFit.solidGoldWindow : 730}-day Q0.5(price/ATH) × ATH(t)), {cqmFit ? cqmFit.solidGoldFloorBuffer.toFixed(1) : '2.0'} × rolling-{cqmFit ? cqmFit.solidGoldFloorWindow : 30}-day min price) — verified +3.2% vs chart. The price-relative ceiling pulls gold down during deep bear bottoms (2015, 2018, 2022) so it stays approximately between red and green instead of plateauing at the previous-cycle bull peak.
-            <br />
-            <b>Solid green 0.1%</b> = min(shelved time-decayed weighted Q{cqmFit ? cqmFit.solidGreenQuantile.toFixed(2) : '0.05'}(price/ATH) × ATH(t), {cqmFit ? cqmFit.solidGreenFloorBuffer.toFixed(2) : '0.95'} × rolling-{cqmFit ? cqmFit.solidGreenFloorWindow : 30}-day min price) with a {cqmFit ? cqmFit.solidGreenHalfLifeYears.toFixed(1) : '1.0'}-year half-life — verified +5.2% vs chart. The shelved component handles the non-stationary growth of the green/ATH multiplier (~0.27 in 2018 → ~0.37 in 2026); the price-floor constraint forces the line below BTC at every cycle bottom (2015, 2018, 2020 covid, 2022) so it visually acts as a true deep-value floor.
-            <br />
-            Dashed bands are an OLS-trend approximation of the QR 0.1% / 99.9% lines (true QR fits would diverge more aggressively at the extremes).
-            <br />
-            Fit on BTC history from 2014-01-01 onward (time_power=0.6, low_q=0.06, high_q=0.68, score_power=1.5) to match the EQM-model Python replica's calibration. See EQM-model/README.md for the full derivation.
+            Inspired by BTCAnalytica&apos;s Empirical Quantile Model. Three <b>solid</b> bands (green floor, gold fair value, red ceiling) shelf upward at new highs and are clipped near cycle lows so gold stays between red and green.
+            Three <b>dotted</b> lines are an asymmetric quantile fan in log-price vs time: the upper tail compresses across cycles while the lower tail stays near-linear (Cowen 2026).
+            Fit from 2014 onward for bands and risk; the QR fan also uses pre-2014 history for tail curvature. See <code>EQM-model/</code> for the Python reference.
           </Typography>
         </Box>
 
@@ -1919,7 +1912,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           <Chip size="small" variant="outlined" label="CQM 0.1% (solid floor)" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
           <Chip size="small" variant="outlined" label="CQM 50% (solid median)" sx={{ borderColor: '#facc15', color: '#fef08a' }} />
           <Chip size="small" variant="outlined" label="CQM 99.9% (solid ceiling)" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
-          <Chip size="small" variant="outlined" label="QR-approx 0.1% / 99.9% (dashed)" sx={{ borderColor: '#94a3b8', color: '#cbd5e1' }} />
+          <Chip size="small" variant="outlined" label="QR 0.1% / 50% / 99.9% (dotted)" sx={{ borderColor: '#e0a81f', color: '#fde68a' }} />
         </Stack>
 
         <Box sx={{ height: { xs: 360, sm: 460, md: 540 }, width: '100%', minWidth: 0 }}>
@@ -1942,8 +1935,9 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               />
               <Tooltip content={<CustomTooltip />} />
               {renderChartBrush()}
-              <Line yAxisId="btc" type="monotone" dataKey="CQM_DASHED_HIGH" name="QR-approx 99.9%" stroke="#ef4444" strokeWidth={1} strokeDasharray="6 4" dot={false} isAnimationActive={false} opacity={0.7} connectNulls />
-              <Line yAxisId="btc" type="monotone" dataKey="CQM_DASHED_LOW" name="QR-approx 0.1%" stroke="#22c55e" strokeWidth={1} strokeDasharray="6 4" dot={false} isAnimationActive={false} opacity={0.7} connectNulls />
+              <Line yAxisId="btc" type="monotone" dataKey="CQM_QR_HIGH" name="QR 99.9%" stroke="#ef4444" strokeWidth={1} strokeDasharray="6 4" dot={false} isAnimationActive={false} opacity={0.85} connectNulls />
+              <Line yAxisId="btc" type="monotone" dataKey="CQM_QR_MEDIAN" name="QR 50%" stroke="#e0a81f" strokeWidth={1.3} strokeDasharray="2 3" dot={false} isAnimationActive={false} opacity={0.95} connectNulls />
+              <Line yAxisId="btc" type="monotone" dataKey="CQM_QR_LOW" name="QR 0.1%" stroke="#22c55e" strokeWidth={1} strokeDasharray="6 4" dot={false} isAnimationActive={false} opacity={0.85} connectNulls />
               <Line yAxisId="btc" type="monotone" dataKey="CQM_UPPER" name="CQM 99.9%" stroke="#ef4444" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
               <Line yAxisId="btc" type="monotone" dataKey="CQM_MEDIAN" name="CQM 50%" stroke="#facc15" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
               <Line yAxisId="btc" type="monotone" dataKey="CQM_LOWER" name="CQM 0.1%" stroke="#22c55e" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
@@ -1959,6 +1953,9 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             <Chip size="small" label={`CQM 0.1% $${Math.round(cqmSnapshot.solidLower).toLocaleString()}`} sx={{ bgcolor: 'rgba(34,197,94,0.18)', color: '#bbf7d0' }} />
             <Chip size="small" label={`CQM 50% $${Math.round(cqmSnapshot.solidMedian).toLocaleString()}`} sx={{ bgcolor: 'rgba(250,204,21,0.18)', color: '#fef08a' }} />
             <Chip size="small" label={`CQM 99.9% $${Math.round(cqmSnapshot.solidUpper).toLocaleString()}`} sx={{ bgcolor: 'rgba(239,68,68,0.18)', color: '#fecaca' }} />
+            <Chip size="small" label={`QR 50% $${Math.round(cqmSnapshot.qrDashedMedian).toLocaleString()}`} sx={{ bgcolor: 'rgba(224,168,31,0.18)', color: '#fde68a' }} />
+            <Chip size="small" label={`QR 0.1% $${Math.round(cqmSnapshot.qrDashedLow).toLocaleString()}`} sx={{ bgcolor: 'rgba(34,197,94,0.12)', color: '#bbf7d0' }} />
+            <Chip size="small" label={`QR 99.9% $${Math.round(cqmSnapshot.qrDashedHigh).toLocaleString()}`} sx={{ bgcolor: 'rgba(239,68,68,0.12)', color: '#fecaca' }} />
             <Chip size="small" label={`Risk ${(cqmSnapshot.risk * 100).toFixed(1)}%`} sx={{ bgcolor: 'rgba(96,165,250,0.18)', color: '#bfdbfe' }} />
             <Chip size="small" label={`Score ${cqmSnapshot.score.toFixed(3)}`} sx={{ bgcolor: 'rgba(167,139,250,0.18)', color: '#ddd6fe' }} />
           </Box>
@@ -1976,7 +1973,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
             Short-term smoother — a 60-day rolling quantile envelope on raw price (10th / 50th / 90th percentile of the trailing window).
             <br />
-            This is a placeholder proxy for the BTCAnalytica panel; the underlying formula has not been confirmed. The 60-day median tracks the local price level after smoothing out daily noise; the 10–90 envelope shows how dispersed the last two months of trading have been.
+            The 60-day median tracks the local price level after smoothing out daily noise; the 10–90 envelope shows how dispersed the last two months of trading have been.
             <br />
             Useful as a fast-reacting overlay on top of the long-run CQM bands above, especially around regime shifts.
           </Typography>
@@ -2040,7 +2037,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             CQM Risk
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            CQM Risk maps the residual against the long-run trend through cycle-aware upper percentile anchors that decay toward today's calibrated [low_q, high_q] = [{cqmFit ? cqmFit.lowQ.toFixed(2) : '0.06'}, {cqmFit ? cqmFit.highQ.toFixed(2) : '0.68'}] endpoint.
+            CQM Risk maps price vs the long-run OLS trend through cycle-aware percentile anchors. Near cycle lows, a <b>gated 2-year</b> trailing window lowers risk so the DCA bot sizes up at bottoms without changing today&apos;s reading.
             <br />
             DCA rule: <code>daily_usd = base × (1 − 2 × Risk)</code>. Risk ≤ 0% → buy +base, Risk = 50% → flat, Risk ≥ 100% → sell base.
           </Typography>

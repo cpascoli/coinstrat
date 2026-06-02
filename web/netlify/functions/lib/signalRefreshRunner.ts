@@ -5,6 +5,7 @@ import {
   fetchBGeometrics,
   type SignalRow,
 } from './compute';
+import { patchCqmFieldsInCache } from './cqmCache';
 import { persistSignalAlertChanges, detectAlertChanges } from './signalAlerts';
 import { signalsStore } from './store';
 import { evaluateActiveStrategies } from './strategyAlerts';
@@ -17,6 +18,8 @@ interface CachedSignalsPayload {
 }
 
 const INCREMENTAL_REPLACE_TAIL_DAYS = 14;
+/** Must cover 365-day YoY liquidity scores plus replace tail. */
+const SCORE_LOOKBACK_BUFFER_DAYS = 400;
 
 export type SignalRefreshResult =
   | {
@@ -49,6 +52,14 @@ export type SignalRefreshResult =
   | {
     ok: true;
     mode: 'patch_bottom_scores';
+    patched: number;
+    total: number;
+    latest_date: string | null;
+    cached_at: string;
+  }
+  | {
+    ok: true;
+    mode: 'patch_cqm';
     patched: number;
     total: number;
     latest_date: string | null;
@@ -361,14 +372,68 @@ export async function patchBottomScoresInCache(): Promise<SignalRefreshResult> {
   };
 }
 
-export async function runSignalRefresh(mode: 'incremental' | 'rebuild'): Promise<SignalRefreshResult> {
-  const store = signalsStore();
+/**
+ * Back-fill CQM Risk / Score / QR band fields across the signal cache.
+ *
+ * Runs one `fitCQM()` pass and writes values onto each row. On incremental
+ * refreshes we only rewrite the recent tail; use `fromDate: null` for a full
+ * back-fill (manual `patch_cqm` mode).
+ */
+export async function patchCqmInCache(fromDate: string | null = null): Promise<SignalRefreshResult> {
   const cached = await loadCachedSignals();
   const cachedData = cached?.data ?? [];
 
-  await refreshDerivativesCache().catch((error) => {
-    console.warn('[signal-refresh] Derivatives cache refresh skipped:', error);
+  if (cachedData.length === 0) {
+    throw new Error('Cache is empty — cannot patch CQM fields.');
+  }
+
+  const result = await patchCqmFieldsInCache(cachedData, {
+    fromDate,
+    onlyMissing: fromDate == null,
   });
+
+  const cachedAt = new Date().toISOString();
+  const store = signalsStore();
+  await store.setJSON('signals_latest', {
+    timestamp: Date.now(),
+    count: result.rows.length,
+    data: result.rows,
+  });
+
+  console.log(
+    `[signal-refresh] CQM patch complete — updated ${result.patched} of ${result.rows.length} rows through ${result.latest_date}.`,
+  );
+
+  return {
+    ok: true,
+    mode: 'patch_cqm',
+    patched: result.patched,
+    total: result.rows.length,
+    latest_date: result.latest_date,
+    cached_at: cachedAt,
+  };
+}
+
+async function persistCacheWithCqmPatch(
+  rows: SignalRow[],
+  fromDate: string | null,
+): Promise<{ rows: SignalRow[]; cqm_patched: number }> {
+  const store = signalsStore();
+  const cqmPatch = await patchCqmFieldsInCache(rows, { fromDate });
+  await store.setJSON('signals_latest', {
+    timestamp: Date.now(),
+    count: cqmPatch.rows.length,
+    data: cqmPatch.rows,
+  });
+  console.log(
+    `[signal-refresh] CQM patch complete — updated ${cqmPatch.patched} of ${cqmPatch.rows.length} rows.`,
+  );
+  return { rows: cqmPatch.rows, cqm_patched: cqmPatch.patched };
+}
+
+export async function runSignalRefresh(mode: 'incremental' | 'rebuild'): Promise<SignalRefreshResult> {
+  const cached = await loadCachedSignals();
+  const cachedData = cached?.data ?? [];
 
   if (cachedData.length === 0) {
     throw new Error(
@@ -386,21 +451,17 @@ export async function runSignalRefresh(mode: 'incremental' | 'rebuild'): Promise
       fullHistory: true,
     });
 
-    await store.setJSON('signals_latest', {
-      timestamp: Date.now(),
-      count: rebuilt.length,
-      data: rebuilt,
-    });
+    const { rows: patchedRows } = await persistCacheWithCqmPatch(rebuilt, null);
 
-    const strategySummary = await evaluateActiveStrategies(rebuilt, []);
+    const strategySummary = await evaluateActiveStrategies(patchedRows, []);
 
-    console.log(`[signal-refresh] Rebuilt full cache with ${rebuilt.length} rows.`);
+    console.log(`[signal-refresh] Rebuilt full cache with ${patchedRows.length} rows.`);
 
     return {
       ok: true,
       mode: 'rebuild',
-      count: rebuilt.length,
-      latest_date: rebuilt[rebuilt.length - 1]?.Date ?? null,
+      count: patchedRows.length,
+      latest_date: patchedRows[patchedRows.length - 1]?.Date ?? null,
       cached_at: new Date().toISOString(),
       alerts: { events: 0, deliveries: 0 },
       strategies: strategySummary,
@@ -408,6 +469,8 @@ export async function runSignalRefresh(mode: 'incremental' | 'rebuild'): Promise
   }
 
   const lastDate = cachedData[cachedData.length - 1]?.Date;
+  const replaceFromDate = dateDaysBefore(lastDate, INCREMENTAL_REPLACE_TAIL_DAYS);
+  const windowStartDate = dateDaysBefore(replaceFromDate, SCORE_LOOKBACK_BUFFER_DAYS);
   console.log(
     `[signal-refresh] Incremental refresh from ${lastDate} (${cachedData.length} cached rows)…`,
   );
@@ -415,56 +478,54 @@ export async function runSignalRefresh(mode: 'incremental' | 'rebuild'): Promise
   const refreshedRows = await refreshSignals(cachedData, {
     returnFullDataset: true,
     fullHistory: false,
+    windowStartDate,
   });
-  const replaceFromDate = dateDaysBefore(lastDate, INCREMENTAL_REPLACE_TAIL_DAYS);
   const newRows = refreshedRows.filter((row) => row.Date > lastDate);
-
-  if (newRows.length === 0 && cachedData.some((row) => row.Date >= replaceFromDate) === false) {
-    return {
-      ok: true,
-      mode: 'incremental',
-      new_rows: 0,
-      message: 'Cache is already up-to-date.',
-      cached_at: cached?.timestamp
-        ? new Date(cached.timestamp).toISOString()
-        : null,
-      alerts: { events: 0, deliveries: 0 },
-      strategies: { strategies: 0, events: 0, deliveries: 0 },
-    };
-  }
 
   const combined = [
     ...cachedData.filter((row) => row.Date < replaceFromDate),
     ...refreshedRows.filter((row) => row.Date >= replaceFromDate),
   ];
+  const { rows: patchedRows } = await persistCacheWithCqmPatch(combined, replaceFromDate);
   const cachedAt = new Date().toISOString();
 
-  await store.setJSON('signals_latest', {
-    timestamp: Date.now(),
-    count: combined.length,
-    data: combined,
-  });
+  if (newRows.length === 0) {
+    console.log(
+      `[signal-refresh] Cache up-to-date on calendar days; refreshed macro tail from ${replaceFromDate} (${patchedRows.length} total).`,
+    );
+    return {
+      ok: true,
+      mode: 'incremental',
+      new_rows: 0,
+      total: patchedRows.length,
+      latest_date: lastDate,
+      message: 'Cache is already up-to-date; macro tail and CQM refreshed.',
+      cached_at: cachedAt,
+      alerts: { events: 0, deliveries: 0 },
+      strategies: { strategies: 0, events: 0, deliveries: 0 },
+    };
+  }
 
   const alertWindow = [cachedData[cachedData.length - 1], ...newRows];
   const alertChanges = detectAlertChanges(alertWindow);
   const alertSummary = alertChanges.length > 0
     ? await persistSignalAlertChanges(alertChanges)
     : { events: 0, deliveries: 0 };
-  const changedDates = combined
+  const changedDates = patchedRows
     .filter((row) => row.Date >= replaceFromDate)
     .map((row) => row.Date);
-  const strategySummary = await evaluateActiveStrategies(combined, changedDates);
+  const strategySummary = await evaluateActiveStrategies(patchedRows, changedDates);
 
   console.log(
-    `[signal-refresh] Replaced tail from ${replaceFromDate}, appended ${newRows.length} new rows (${combined.length} total).`,
+    `[signal-refresh] Replaced tail from ${replaceFromDate}, appended ${newRows.length} new rows (${patchedRows.length} total).`,
   );
 
   return {
     ok: true,
     mode: 'incremental',
     new_rows: newRows.length,
-    total: combined.length,
-    latest_date: newRows[newRows.length - 1]?.Date ?? combined[combined.length - 1]?.Date ?? lastDate,
+    total: patchedRows.length,
+    latest_date: newRows[newRows.length - 1]?.Date ?? patchedRows[patchedRows.length - 1]?.Date ?? lastDate,
     cached_at: cachedAt,
     alerts: alertSummary,
     strategies: strategySummary,

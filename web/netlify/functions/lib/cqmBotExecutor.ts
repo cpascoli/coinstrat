@@ -5,11 +5,11 @@
  *   1. The admin-gated `admin-cqm-bot-execute.ts` Netlify function when the
  *      admin clicks "Execute trade" in the UI.
  *   2. The Netlify scheduled function `scheduled-cqm-bot.ts` that fires on a
- *      cron at 11:37 UTC every day.
+ *      cron at 00:00 UTC every day.
  *
  * Both callers use the same business logic: pause guard → frequency hard
- * guard → CQM Risk → target sizing → BTC-GBP price → pending row → market
- * order → poll for fills → persist outcome.
+ * guard → execution lease → CQM Risk → target sizing → BTC-GBP price →
+ * pending row → market order → poll for fills → persist outcome.
  *
  * Returns a discriminated `ExecutionResult` rather than HTTP responses so
  * each caller can adapt the result to its own envelope (JSON HTTP for the
@@ -19,11 +19,15 @@ import crypto from 'crypto';
 
 import { serviceSupabase } from './auth';
 import {
+  completeExecutionLease,
+  computeExecutionLeaseDate,
   computeFrequencyGuard,
   computeLatestRisk,
   computeTarget,
   getLastSubmittedOrder,
   loadSettings,
+  releaseExecutionLease,
+  tryAcquireExecutionLease,
 } from './cqmBot';
 import {
   getProduct,
@@ -36,6 +40,7 @@ import {
 export type SkipReason =
   | 'paused'
   | 'frequency_guard'
+  | 'execution_lease'
   | 'no_trade_due'
   | 'risk_unavailable'
   | 'product_unavailable'
@@ -95,11 +100,52 @@ export async function runCqmBotExecution(ctx: ExecutionContext): Promise<Executi
     };
   }
 
+  // ---- Execution lease (before slow fitCQM work) -----------------------
+  const executionDate = computeExecutionLeaseDate(settings.frequency, lastOrder);
+  const lease = await tryAcquireExecutionLease({
+    executionDate,
+    frequency: settings.frequency,
+    source: ctx.source,
+  });
+  if (!lease.acquired) {
+    return {
+      kind: 'skipped',
+      reason: 'execution_lease',
+      message: 'Another invocation is already executing this cadence slot',
+      details: {
+        execution_date: executionDate,
+        frequency: settings.frequency,
+      },
+    };
+  }
+
+  let leaseReleased = false;
+  const abandonLease = async () => {
+    if (leaseReleased) return;
+    leaseReleased = true;
+    await releaseExecutionLease(lease.leaseId);
+  };
+
+  try {
+    return await executeWithLease(ctx, settings, lease.leaseId, abandonLease);
+  } catch (error) {
+    await abandonLease();
+    throw error;
+  }
+}
+
+async function executeWithLease(
+  ctx: ExecutionContext,
+  settings: Awaited<ReturnType<typeof loadSettings>>,
+  leaseId: string,
+  abandonLease: () => Promise<void>,
+): Promise<ExecutionResult> {
   // ---- CQM Risk + target sizing ----------------------------------------
   let risk;
   try {
     risk = await computeLatestRisk();
   } catch (err) {
+    await abandonLease();
     return {
       kind: 'skipped',
       reason: 'risk_unavailable',
@@ -109,6 +155,7 @@ export async function runCqmBotExecution(ctx: ExecutionContext): Promise<Executi
 
   const target = computeTarget(settings.base_amount_gbp, risk.risk);
   if (target.side === 'NONE') {
+    await abandonLease();
     return {
       kind: 'skipped',
       reason: 'no_trade_due',
@@ -122,6 +169,7 @@ export async function runCqmBotExecution(ctx: ExecutionContext): Promise<Executi
   try {
     product = await getProduct('BTC-GBP');
   } catch (err) {
+    await abandonLease();
     return {
       kind: 'skipped',
       reason: 'product_unavailable',
@@ -130,6 +178,7 @@ export async function runCqmBotExecution(ctx: ExecutionContext): Promise<Executi
   }
   const btcGbpPrice = Number(product.price);
   if (!Number.isFinite(btcGbpPrice) || btcGbpPrice <= 0) {
+    await abandonLease();
     return {
       kind: 'failed',
       message: 'Coinbase returned an invalid BTC-GBP price',
@@ -152,6 +201,7 @@ export async function runCqmBotExecution(ctx: ExecutionContext): Promise<Executi
     .single();
 
   if (insertErr || !pendingRow) {
+    await abandonLease();
     return {
       kind: 'failed',
       message: `Failed to record pending order: ${insertErr?.message ?? 'no row'}`,
@@ -169,6 +219,7 @@ export async function runCqmBotExecution(ctx: ExecutionContext): Promise<Executi
 
   if (target.side === 'SELL' && (!baseSize || Number(baseSize) <= 0)) {
     await markFailed(orderRowId, 'Computed BTC base_size rounded to zero');
+    await abandonLease();
     return {
       kind: 'skipped',
       reason: 'base_size_zero',
@@ -188,6 +239,7 @@ export async function runCqmBotExecution(ctx: ExecutionContext): Promise<Executi
   } catch (err) {
     const errMsg = normalizeError(err);
     await markFailed(orderRowId, errMsg);
+    await abandonLease();
     return {
       kind: 'failed',
       message: `Coinbase rejected the order: ${errMsg}`,
@@ -227,12 +279,15 @@ export async function runCqmBotExecution(ctx: ExecutionContext): Promise<Executi
     .single();
 
   if (updateErr) {
+    await completeExecutionLease(leaseId, orderRowId);
     return {
       kind: 'failed',
       message: `Order submitted but failed to update row: ${updateErr.message}`,
       order_row_id: orderRowId,
     };
   }
+
+  await completeExecutionLease(leaseId, orderRowId);
 
   return {
     kind: 'submitted',

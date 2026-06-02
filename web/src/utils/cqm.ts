@@ -45,12 +45,17 @@
  *   EQM 50%    $108.4K → predicted $111.9K (+3.2%)
  *   EQM 99.9%  $159.4K → predicted $159.6K (+0.1%)
  *
- * Dashed bands:
- *   dashed_q(t)    = OLS_trend(t) × exp( empirical_quantile(q, residuals_ols) )
+ * EQM Risk (default riskMode='gated'):
+ *   global_risk(t) = soft_map( percentile(residual_ols, full_sample) )
+ *   rolling_risk(t)= soft_map( percentile(residual_ols, last 730 days) )
+ *   risk(t)        = global_risk(t)  normally (preserves today's calibration)
+ *   risk(t)        = min(global, rolling) when price ≤ 1.15 × min(price, 120d)
+ *                    i.e. only at actual cycle-low basing zones.
  *
- * The dashed bands are a pragmatic substitute for true statsmodels QR fits at
- * the extreme quantiles; they capture the right shape but the slope at the
- * extreme tau will be slightly different from a full QR fit.
+ * Dashed QR fan (asymmetric quadratic quantile model, Cowen 2026):
+ *   log10(price) = c_tau + a_tau * x + b(tau) * x^2,  x = ln(days since 2009) - mu
+ *   Upper tail compresses (b_HI < 0); lower tail stays near-linear. Bands are
+ *   rearranged at each date so quantile lines never cross.
  */
 
 export interface CQMPoint {
@@ -62,8 +67,9 @@ export interface CQMPoint {
   solidLower: number;
   solidMedian: number;
   solidUpper: number;
-  dashedLow: number;        // approximation of QR(0.001)
-  dashedHigh: number;       // approximation of QR(0.999)
+  qrDashedLow: number;       // asymmetric QR 0.1%
+  qrDashedMedian: number;    // asymmetric QR 50% (dotted gold trendline)
+  qrDashedHigh: number;      // asymmetric QR 99.9%
   score: number;            // 0..1
   risk: number;             // 0..1
   // 60-day rolling quantile envelope on raw price (placeholder proxy
@@ -82,8 +88,9 @@ export interface CQMSnapshot {
   solidLower: number;
   solidMedian: number;
   solidUpper: number;
-  dashedLow: number;
-  dashedHigh: number;
+  qrDashedLow: number;
+  qrDashedMedian: number;
+  qrDashedHigh: number;
   score: number;
   risk: number;
   trendRiskLower: number | null;
@@ -218,6 +225,18 @@ export interface CQMConfig {
   trendRiskWindow?: number;     // calendar days (default 60)
   trendRiskLowQ?: number;       // default 0.10
   trendRiskHighQ?: number;      // default 0.90
+  /**
+   * EQM risk mapping mode. 'gated' (default) keeps the global full-sample risk
+   * except near cycle lows, where min(global, rolling) applies so the DCA
+   * bot buys more aggressively at bottoms without breaking today's calibration.
+   */
+  riskMode?: 'global' | 'rolling' | 'gated';
+  /** Trailing window for rolling/gated risk (730 = 2 years). */
+  riskRollDays?: number;
+  /** Near-local-low lookback for gated risk (days). */
+  riskGateNearDays?: number;
+  /** Price must be within this multiple of the near-low minimum for gating. */
+  riskGateNearBuffer?: number;
 }
 
 const DEFAULT_CONFIG: Required<CQMConfig> = {
@@ -244,6 +263,10 @@ const DEFAULT_CONFIG: Required<CQMConfig> = {
   trendRiskWindow: 60,
   trendRiskLowQ: 0.10,
   trendRiskHighQ: 0.90,
+  riskMode: 'gated',
+  riskRollDays: 730,
+  riskGateNearDays: 120,
+  riskGateNearBuffer: 1.15,
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -369,6 +392,297 @@ function empiricalPercentile(sorted: Float64Array, value: number): number {
     else hi = mid;
   }
   return lo / n;
+}
+
+/**
+ * Causal trailing-window percentile rank of each value in [0, 1].
+ * At index i uses only values in [i - window + 1, i].
+ */
+function rollingEmpiricalPercentile(
+  values: Float64Array,
+  window: number,
+  minPeriods: number,
+): Float64Array {
+  const n = values.length;
+  const out = new Float64Array(n);
+  out.fill(NaN);
+  for (let i = 0; i < n; i++) {
+    const start = Math.max(0, i - window + 1);
+    const len = i - start + 1;
+    if (len < minPeriods) continue;
+    const value = values[i];
+    let count = 0;
+    for (let j = start; j <= i; j++) {
+      if (values[j] <= value) count++;
+    }
+    out[i] = count / len;
+  }
+  return out;
+}
+
+function riskFromPercentile(
+  pct: number,
+  ts: number,
+  endTs: number,
+  cfg: Required<CQMConfig>,
+  riskGammaCurrent: number,
+): number {
+  const riskHighQ = interpolateCycleKnot(
+    ts,
+    endTs,
+    cfg.riskHighQuantileStart,
+    cfg.riskHighQuantile2018,
+    cfg.riskHighQuantile2022,
+    cfg.highQ,
+  );
+  const riskGamma = interpolateCycleKnot(
+    ts,
+    endTs,
+    cfg.riskGammaStart,
+    cfg.riskGamma2018,
+    cfg.riskGamma2022,
+    riskGammaCurrent,
+  );
+  const riskZ = clamp((pct - cfg.lowQ) / (riskHighQ - cfg.lowQ), 0, 1);
+  return Math.pow(riskZ, riskGamma);
+}
+
+// --- asymmetric quadratic QR fan (Cowen 2026) ------------------------------
+
+const QR_GENESIS_MS = new Date('2009-01-01').getTime();
+const QR_FAN_QUANTILES = [0.001, 0.5, 0.999] as const;
+const QR_LOWER_TAUS = [0.001, 0.01, 0.10, 0.25] as const;
+const QR_MEDIAN_TAUS = [0.5] as const;
+const QR_UPPER_TAUS = [0.75, 0.95, 0.99, 0.999] as const;
+const QR_SEED_CURVATURE: [number, number, number] = [-0.024, -0.113, -0.326];
+const ASYM_NM_MAX_ITER = 120;
+
+let asymFitCacheKey = '';
+let asymFitCache: AsymmetricQuantileFit | null = null;
+
+interface AsymmetricQuantileFit {
+  anchorMs: number;
+  mu: number;
+  paramsByQuantile: Map<number, [number, number, number]>;
+  bLow: number;
+  bMed: number;
+  bHigh: number;
+}
+
+function qrTimeX(ts: number, anchorMs: number, mu: number): number {
+  const days = Math.max(1, (ts - anchorMs) / DAY_MS);
+  return Math.log(days) - mu;
+}
+
+function fitQuantileReg(
+  x: Float64Array,
+  y: Float64Array,
+  tau: number,
+  maxIter = 60,
+): { intercept: number; slope: number } {
+  let { intercept, slope } = fitOLS(x, y);
+  const n = x.length;
+  const w = new Float64Array(n);
+  const eps = 1e-6;
+  for (let iter = 0; iter < maxIter; iter++) {
+    for (let i = 0; i < n; i++) {
+      const r = y[i] - intercept - slope * x[i];
+      const absr = Math.max(Math.abs(r), eps);
+      w[i] = (r >= 0 ? tau : 1 - tau) / absr;
+    }
+    const next = fitWLS(x, y, w);
+    const delta = Math.abs(next.intercept - intercept) + Math.abs(next.slope - slope);
+    intercept = next.intercept;
+    slope = next.slope;
+    if (delta < 1e-8) break;
+  }
+  return { intercept, slope };
+}
+
+function checkLoss(residuals: Float64Array, tau: number): number {
+  let total = 0;
+  for (let i = 0; i < residuals.length; i++) {
+    const r = residuals[i];
+    total += r * (r >= 0 ? tau : tau - 1);
+  }
+  return total;
+}
+
+function fitAsymmetricQuantileBands(prices: PricePoint[]): AsymmetricQuantileFit {
+  const cacheKey = `${prices.length}:${prices[0]?.ts}:${prices[prices.length - 1]?.ts}`;
+  if (asymFitCache && asymFitCacheKey === cacheKey) return asymFitCache;
+
+  const anchorMs = QR_GENESIS_MS;
+  const n = prices.length;
+  const xRaw = new Float64Array(n);
+  const y = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    xRaw[i] = qrTimeX(prices[i].ts, anchorMs, 0);
+    y[i] = Math.log10(prices[i].price);
+  }
+  let mu = 0;
+  for (let i = 0; i < n; i++) mu += xRaw[i];
+  mu /= n;
+  const x = new Float64Array(n);
+  const x2 = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    x[i] = xRaw[i] - mu;
+    x2[i] = x[i] * x[i];
+  }
+
+  const fitGroup = (
+    taus: readonly number[],
+    b: number,
+  ): { loss: number; params: Map<number, [number, number, number]> } => {
+    const yb = new Float64Array(n);
+    for (let i = 0; i < n; i++) yb[i] = y[i] - b * x2[i];
+    let loss = 0;
+    const params = new Map<number, [number, number, number]>();
+    for (const tau of taus) {
+      const { intercept: c, slope: a } = fitQuantileReg(x, yb, tau, 30);
+      params.set(tau, [c, a, b]);
+      const resid = new Float64Array(n);
+      for (let i = 0; i < n; i++) {
+        resid[i] = y[i] - (c + a * x[i] + b * x2[i]);
+      }
+      loss += checkLoss(resid, tau);
+    }
+    return { loss, params };
+  };
+
+  const objective = (bvec: Float64Array): number =>
+    fitGroup(QR_LOWER_TAUS, bvec[0]).loss
+    + fitGroup(QR_MEDIAN_TAUS, bvec[1]).loss
+    + fitGroup(QR_UPPER_TAUS, bvec[2]).loss;
+
+  const bOpt = nelderMeadSimplex(
+    objective,
+    new Float64Array(QR_SEED_CURVATURE),
+    { maxIter: ASYM_NM_MAX_ITER, xatol: 1e-3, fatol: 1e-4 },
+  );
+
+  const paramsByQuantile = new Map<number, [number, number, number]>();
+  for (const [taus, b] of [
+    [QR_LOWER_TAUS, bOpt[0]],
+    [QR_MEDIAN_TAUS, bOpt[1]],
+    [QR_UPPER_TAUS, bOpt[2]],
+  ] as const) {
+    fitGroup(taus, b).params.forEach((v, k) => paramsByQuantile.set(k, v));
+  }
+
+  const fit: AsymmetricQuantileFit = {
+    anchorMs,
+    mu,
+    paramsByQuantile,
+    bLow: bOpt[0],
+    bMed: bOpt[1],
+    bHigh: bOpt[2],
+  };
+  asymFitCacheKey = cacheKey;
+  asymFitCache = fit;
+  return fit;
+}
+
+function asymmetricPricesAt(
+  fit: AsymmetricQuantileFit,
+  ts: number,
+  quantiles: readonly number[],
+): Map<number, number> {
+  const x = qrTimeX(ts, fit.anchorMs, fit.mu);
+  const raw = quantiles.map((q) => {
+    const params = fit.paramsByQuantile.get(q);
+    if (!params) return NaN;
+    const [c, a, b] = params;
+    return 10 ** (c + a * x + b * x * x);
+  });
+  const sorted = [...raw].sort((a, b) => a - b);
+  const out = new Map<number, number>();
+  quantiles.forEach((q, i) => out.set(q, sorted[i]));
+  return out;
+}
+
+function nelderMeadSimplex(
+  fn: (x: Float64Array) => number,
+  x0: Float64Array,
+  opts: { maxIter: number; xatol: number; fatol: number },
+): Float64Array {
+  const n = x0.length;
+  const alpha = 1;
+  const gamma = 2;
+  const rho = 0.5;
+  const sigma = 0.5;
+  const simplex: Float64Array[] = [new Float64Array(x0)];
+  for (let i = 0; i < n; i++) {
+    const p = new Float64Array(x0);
+    p[i] += Math.abs(p[i]) > 1e-6 ? 0.05 * p[i] : 0.05;
+    simplex.push(p);
+  }
+  const f = simplex.map(fn);
+  for (let iter = 0; iter < opts.maxIter; iter++) {
+    const order = simplex.map((_, i) => i).sort((a, b) => f[a] - f[b]);
+    const best = order[0];
+    const worst = order[n];
+    const secondWorst = order[n - 1];
+    const xCent = new Float64Array(n);
+    for (let j = 0; j < n; j++) {
+      for (let k = 0; k < n; k++) xCent[k] += simplex[order[j]][k];
+    }
+    for (let k = 0; k < n; k++) xCent[k] /= n;
+    const fr = f[worst];
+    let maxDiff = 0;
+    for (let k = 0; k < n; k++) {
+      maxDiff = Math.max(maxDiff, Math.abs(simplex[worst][k] - simplex[best][k]));
+    }
+    if (maxDiff < opts.xatol && Math.abs(fr - f[best]) < opts.fatol) {
+      break;
+    }
+    const xr = new Float64Array(n);
+    for (let k = 0; k < n; k++) xr[k] = xCent[k] + alpha * (xCent[k] - simplex[worst][k]);
+    const fxr = fn(xr);
+    if (fxr < f[secondWorst] && fxr >= f[best]) {
+      simplex[worst] = xr;
+      f[worst] = fxr;
+      continue;
+    }
+    if (fxr < f[best]) {
+      const xe = new Float64Array(n);
+      for (let k = 0; k < n; k++) xe[k] = xCent[k] + gamma * (xr[k] - xCent[k]);
+      const fxe = fn(xe);
+      if (fxe < fxr) {
+        simplex[worst] = xe;
+        f[worst] = fxe;
+      } else {
+        simplex[worst] = xr;
+        f[worst] = fxr;
+      }
+      continue;
+    }
+    const xc = new Float64Array(n);
+    const useXr = fxr < fr;
+    for (let k = 0; k < n; k++) {
+      xc[k] = useXr
+        ? xCent[k] + rho * (xr[k] - xCent[k])
+        : xCent[k] - rho * (xCent[k] - simplex[worst][k]);
+    }
+    const fxc = fn(xc);
+    if (fxc < fr) {
+      simplex[worst] = xc;
+      f[worst] = fxc;
+      continue;
+    }
+    for (let j = 1; j <= n; j++) {
+      const p = simplex[j];
+      for (let k = 0; k < n; k++) {
+        p[k] = simplex[best][k] + sigma * (p[k] - simplex[best][k]);
+      }
+      f[j] = fn(p);
+    }
+  }
+  let bestIdx = 0;
+  for (let i = 1; i <= n; i++) {
+    if (f[i] < f[bestIdx]) bestIdx = i;
+  }
+  return simplex[bestIdx];
 }
 
 function interpolateCycleKnot(
@@ -525,6 +839,23 @@ export function fitCQM(prices: PricePoint[], config: CQMConfig = {}): CQMFit {
     );
   }
 
+  // Asymmetric QR fan: fit on full BTC history (pre-2014 included) so the
+  // compressing-upper tail curvature is learned from the 2011–2013 phase.
+  const asymInput: PricePoint[] = [];
+  for (const p of prices) {
+    if (!Number.isFinite(p.price) || p.price <= 0) continue;
+    asymInput.push(p);
+  }
+  asymInput.sort((a, b) => a.ts - b.ts);
+  let asymFit: AsymmetricQuantileFit | null = null;
+  if (asymInput.length >= 365) {
+    try {
+      asymFit = fitAsymmetricQuantileBands(asymInput);
+    } catch {
+      asymFit = null;
+    }
+  }
+
   const startTs = cleaned[0].ts;
   const startDate = new Date(startTs);
   const ts = cleaned.map((p) => p.ts);
@@ -643,6 +974,16 @@ export function fitCQM(prices: PricePoint[], config: CQMConfig = {}): CQMFit {
       ? greenRollingPriceMin
       : computeRollingMin(cfg.solidGoldFloorWindow);
 
+  const rollMinPeriods = Math.max(Math.floor(cfg.riskRollDays / 4), 30);
+  const rollingPct =
+    cfg.riskMode === 'global'
+      ? null
+      : rollingEmpiricalPercentile(olsResiduals, cfg.riskRollDays, rollMinPeriods);
+  const nearLowMin =
+    cfg.riskMode === 'gated'
+      ? computeRollingMin(cfg.riskGateNearDays)
+      : null;
+
   // Warm-up fallback for the first ~365 days where the time-decayed quantile
   // is not yet defined: use QR_median × exp(0.001 quantile of residuals).
   const solidGreenWarmupOffset = empiricalQuantile(sortedQr, 0.001);
@@ -696,32 +1037,47 @@ export function fitCQM(prices: PricePoint[], config: CQMConfig = {}): CQMFit {
       solidMedian,
     );
 
-    // Approximate dashed QR bands using OLS trend + empirical residual quantile
-    const dashedLow = trendOls * Math.exp(empiricalQuantile(sortedOls, 0.001));
-    const dashedHigh = trendOls * Math.exp(empiricalQuantile(sortedOls, 0.999));
+    // Asymmetric quadratic QR fan (0.1% / 50% / 99.9%), rearranged per date.
+    let qrDashedLow = trendOls * Math.exp(empiricalQuantile(sortedOls, 0.001));
+    let qrDashedMedian = qrMedian;
+    let qrDashedHigh = trendOls * Math.exp(empiricalQuantile(sortedOls, 0.999));
+    if (asymFit) {
+      const bands = asymmetricPricesAt(asymFit, cleaned[i].ts, QR_FAN_QUANTILES);
+      const low = bands.get(0.001);
+      const med = bands.get(0.5);
+      const high = bands.get(0.999);
+      if (low !== undefined && Number.isFinite(low)) qrDashedLow = low;
+      if (med !== undefined && Number.isFinite(med)) qrDashedMedian = med;
+      if (high !== undefined && Number.isFinite(high)) qrDashedHigh = high;
+    }
 
     // Risk: cycle-aware percentile mapping. Older cycles use a higher upper
     // anchor to account for BTC's diminishing return profile; the latest
     // endpoint decays back to cfg.highQ, preserving the current calibration.
+    // With riskMode='gated', rolling 2y risk applies only near local cycle lows
+    // (within riskGateNearBuffer × rolling-min over riskGateNearDays).
     const pct = empiricalPercentile(sortedOls, olsResiduals[i]);
-    const riskHighQ = interpolateCycleKnot(
-      cleaned[i].ts,
-      endTs,
-      cfg.riskHighQuantileStart,
-      cfg.riskHighQuantile2018,
-      cfg.riskHighQuantile2022,
-      cfg.highQ,
-    );
-    const riskGamma = interpolateCycleKnot(
-      cleaned[i].ts,
-      endTs,
-      cfg.riskGammaStart,
-      cfg.riskGamma2018,
-      cfg.riskGamma2022,
-      riskGammaCurrent,
-    );
-    const riskZ = clamp((pct - cfg.lowQ) / (riskHighQ - cfg.lowQ), 0, 1);
-    const risk = Math.pow(riskZ, riskGamma);
+    let risk = riskFromPercentile(pct, cleaned[i].ts, endTs, cfg, riskGammaCurrent);
+
+    if (rollingPct !== null && Number.isFinite(rollingPct[i])) {
+      const rollingRisk = riskFromPercentile(
+        rollingPct[i],
+        cleaned[i].ts,
+        endTs,
+        cfg,
+        riskGammaCurrent,
+      );
+      if (cfg.riskMode === 'rolling') {
+        risk = rollingRisk;
+      } else if (
+        cfg.riskMode === 'gated' &&
+        nearLowMin !== null &&
+        cleaned[i].price <= nearLowMin[i] * cfg.riskGateNearBuffer
+      ) {
+        risk = Math.min(risk, rollingRisk);
+      }
+    }
+
     // Score: same percentile raised to score_power (matches the Python replica)
     const score = Math.pow(risk, cfg.scorePower);
 
@@ -734,8 +1090,9 @@ export function fitCQM(prices: PricePoint[], config: CQMConfig = {}): CQMFit {
       solidLower,
       solidMedian,
       solidUpper,
-      dashedLow,
-      dashedHigh,
+      qrDashedLow,
+      qrDashedMedian,
+      qrDashedHigh,
       score,
       risk,
       trendRiskLower: trLower[i],
@@ -803,8 +1160,9 @@ export function snapshotAt(fit: CQMFit, ts?: number): CQMSnapshot | null {
     solidLower: target.solidLower,
     solidMedian: target.solidMedian,
     solidUpper: target.solidUpper,
-    dashedLow: target.dashedLow,
-    dashedHigh: target.dashedHigh,
+    qrDashedLow: target.qrDashedLow,
+    qrDashedMedian: target.qrDashedMedian,
+    qrDashedHigh: target.qrDashedHigh,
     score: target.score,
     risk: target.risk,
     trendRiskLower: target.trendRiskLower,

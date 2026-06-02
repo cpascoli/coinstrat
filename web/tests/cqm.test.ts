@@ -184,4 +184,59 @@ describe('CoinStrat Quantile Model', () => {
     const err = Math.abs(snapshot.solidUpper - chartRed) / chartRed;
     expect(err).toBeLessThan(0.005);
   });
+
+  it('gated 2y risk preserves today calibration and lowers cycle-bottom risk', () => {
+    const globalFit = fitCQM(points, { riskMode: 'global' });
+    const gatedFit = fitCQM(points, { riskMode: 'gated' });
+
+    const snapshotTs = new Date('2026-05-22').getTime();
+    const globalSnap = snapshotAt(globalFit, snapshotTs);
+    const gatedSnap = snapshotAt(gatedFit, snapshotTs);
+    expect(globalSnap).not.toBeNull();
+    expect(gatedSnap).not.toBeNull();
+    if (!globalSnap || !gatedSnap) return;
+
+    // Gated mode must not change today's risk vs global (reference ~28.6%).
+    expect(gatedSnap.risk).toBeCloseTo(globalSnap.risk, 6);
+    expect(gatedSnap.risk * 100).toBeCloseTo(28.6, 0);
+
+    const bottoms = ['2015-01-15', '2018-12-15', '2020-03-15', '2022-11-21'];
+    for (const date of bottoms) {
+      const ts = new Date(date).getTime();
+      const g = snapshotAt(globalFit, ts);
+      const gated = snapshotAt(gatedFit, ts);
+      expect(g, date).not.toBeNull();
+      expect(gated, date).not.toBeNull();
+      if (!g || !gated) continue;
+      expect(gated.risk).toBeLessThanOrEqual(g.risk + 1e-9);
+      expect(gated.risk).toBeLessThanOrEqual(0.15);
+    }
+  });
+
+  it('pure rolling risk would over-buy today (sanity check)', () => {
+    const rollingFit = fitCQM(points, { riskMode: 'rolling' });
+    const gatedFit = fitCQM(points, { riskMode: 'gated' });
+    const ts = new Date('2026-05-22').getTime();
+    const rollingSnap = snapshotAt(rollingFit, ts);
+    const gatedSnap = snapshotAt(gatedFit, ts);
+    expect(rollingSnap).not.toBeNull();
+    expect(gatedSnap).not.toBeNull();
+    if (!rollingSnap || !gatedSnap) return;
+    // Rolling-only collapses today's risk; gated preserves the global reading.
+    expect(rollingSnap.risk).toBeLessThan(gatedSnap.risk - 0.05);
+  });
+
+  it('exposes asymmetric QR fan values at the snapshot date', () => {
+    const fit = fitCQM(points);
+    const ts = new Date('2026-05-22').getTime();
+    const snapshot = snapshotAt(fit, ts);
+    expect(snapshot).not.toBeNull();
+    if (!snapshot) return;
+    expect(snapshot.qrDashedLow).toBeGreaterThan(0);
+    expect(snapshot.qrDashedMedian).toBeGreaterThan(snapshot.qrDashedLow);
+    expect(snapshot.qrDashedHigh).toBeGreaterThan(snapshot.qrDashedMedian);
+    // Upper QR tail should bend (compress) — at snapshot median below old OLS fan
+    expect(snapshot.qrDashedMedian / 1000).toBeGreaterThan(100);
+    expect(snapshot.qrDashedMedian / 1000).toBeLessThan(140);
+  });
 });

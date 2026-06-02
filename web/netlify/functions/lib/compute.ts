@@ -11,6 +11,7 @@ import fetch from 'node-fetch';
 // access at runtime and no path-resolution issues in the Lambda environment.
 import btcDailyRaw from '../../../public/data/btc_daily.json';
 import { getCachedFundingRateSeries, getCachedOpenInterestSeries } from './derivativesCache';
+import { fetchFredSeriesBatch } from './fredClient';
 
 // ── Types ───────────────────────────────────────────────────────────────
 
@@ -209,23 +210,20 @@ function lookbackDate(): string {
   return d.toISOString().split('T')[0];
 }
 
-async function fetchFredSeries(seriesId: string, fullHistory = false): Promise<DataPoint[]> {
-  const apiKey = process.env.FRED_API_KEY;
-  if (!apiKey) throw new Error('FRED_API_KEY not configured');
+const FRED_SIGNAL_SERIES = [
+  'WALCL', 'WTREGEN', 'RRPONTSYD', 'DTWEXBGS', 'SAHMREALTIME', 'T10Y3M', 'AMTMNO',
+  'ECBASSETSW', 'JPNASSETS', 'DEXUSEU', 'DEXJPUS',
+] as const;
 
-  const url =
-    `https://api.stlouisfed.org/fred/series/observations` +
-    `?series_id=${seriesId}&api_key=${apiKey}&file_type=json` +
-    (fullHistory ? '' : `&observation_start=${lookbackDate()}`);
-
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`FRED ${seriesId}: HTTP ${res.status}`);
-  const json = (await res.json()) as any;
-
-  return (json.observations ?? [])
-    .filter((o: any) => o.value !== '.')
-    .map((o: any) => ({ date: o.date as string, value: parseFloat(o.value) }))
-    .filter((o: DataPoint) => !isNaN(o.value));
+function forwardFillFields(daily: SignalRow[], fields: (keyof SignalRow)[]): void {
+  const last: Partial<Record<keyof SignalRow, number>> = {};
+  for (const d of daily) {
+    for (const k of fields) {
+      const v = d[k];
+      if (typeof v === 'number' && !isNaN(v)) last[k] = v;
+      else if (last[k] !== undefined) (d as Record<string, number>)[k as string] = last[k]!;
+    }
+  }
 }
 
 async function fetchBtcTail(): Promise<DataPoint[]> {
@@ -245,17 +243,17 @@ async function fetchBtcTail(): Promise<DataPoint[]> {
     }));
 }
 
-async function fetchBinanceFundingRates(fullHistory = false): Promise<DataPoint[]> {
+async function fetchBinanceFundingRates(fullHistory = false, cacheOnly = false): Promise<DataPoint[]> {
   try {
-    return await getCachedFundingRateSeries(fullHistory);
+    return await getCachedFundingRateSeries(fullHistory, { cacheOnly });
   } catch (error) {
     console.error('Funding rate cache fetch failed:', error);
     return [];
   }
 }
 
-async function fetchBinanceOpenInterest(): Promise<DataPoint[]> {
-  return getCachedOpenInterestSeries().catch((error) => {
+async function fetchBinanceOpenInterest(cacheOnly = false): Promise<DataPoint[]> {
+  return getCachedOpenInterestSeries({ cacheOnly }).catch((error) => {
     console.error('Open interest cache fetch failed:', error);
     return [];
   });
@@ -406,53 +404,64 @@ export async function refreshSignals(
   options?: {
     returnFullDataset?: boolean;
     fullHistory?: boolean;
+    /** Recompute from this date (plus score lookback inside the window). Saves time on incremental runs. */
+    windowStartDate?: string;
   },
 ): Promise<SignalRow[]> {
   const returnFullDataset = options?.returnFullDataset ?? false;
   const fullHistory = options?.fullHistory ?? false;
+  const useDerivativesCacheOnly = !fullHistory;
 
   const lastCachedDate =
     cachedSignals.length > 0 ? cachedSignals[cachedSignals.length - 1].Date : null;
 
-  // 1. Fetch recent tail from all APIs in parallel ─────────────────────
+  // 1. Fetch recent tail from all APIs ─────────────────────────────────
+  // FRED macro is fetched sequentially (cached + retried) on every refresh so
+  // daily macro updates are applied; failures return [] and cache is forward-filled.
+
+  const fredObservationStart = fullHistory ? null : lookbackDate();
+
+  const [fredMap, otherResults] = await Promise.all([
+    fetchFredSeriesBatch([...FRED_SIGNAL_SERIES], { observationStart: fredObservationStart }),
+    Promise.all([
+      loadMergedBtcSeries(),
+      fetchMVRVTail(fullHistory),
+      fetchBGeometrics('lth_sopr'),
+      fetchBGeometrics('lth_nupl'),
+      fetchBGeometrics('profit_loss'),
+      fetchBGeometrics('sth_realized_price'),
+      fetchBGeometrics('lth_realized_price'),
+      fetchISM_PMI(),
+      fetchBinanceFundingRates(fullHistory, useDerivativesCacheOnly),
+      fetchBinanceOpenInterest(useDerivativesCacheOnly),
+    ]),
+  ]);
+
+  const walcl = fredMap.get('WALCL') ?? [];
+  const tga = fredMap.get('WTREGEN') ?? [];
+  const rrp = fredMap.get('RRPONTSYD') ?? [];
+  const dxyRaw = fredMap.get('DTWEXBGS') ?? [];
+  const sahm = fredMap.get('SAHMREALTIME') ?? [];
+  const yc = fredMap.get('T10Y3M') ?? [];
+  const newOrders = fredMap.get('AMTMNO') ?? [];
+  const ecbAssets = fredMap.get('ECBASSETSW') ?? [];
+  const bojAssets = fredMap.get('JPNASSETS') ?? [];
+  const eurUsd = fredMap.get('DEXUSEU') ?? [];
+  const jpyUsd = fredMap.get('DEXJPUS') ?? [];
 
   const [
-    walcl, tga, rrp, dxyRaw, sahm, yc, newOrders,
     btcPrices, mvrv,
-    ecbAssets, bojAssets, eurUsd, jpyUsd,
     lthSopr, lthNupl, supplyInProfit, sthRealizedPrice, lthRealizedPrice,
     ismPmi, btcFundingRates, btcOpenInterest,
-  ] = await Promise.all([
-    fetchFredSeries('WALCL', fullHistory),
-    fetchFredSeries('WTREGEN', fullHistory),
-    fetchFredSeries('RRPONTSYD', fullHistory),
-    fetchFredSeries('DTWEXBGS', fullHistory),
-    fetchFredSeries('SAHMREALTIME', fullHistory),
-    fetchFredSeries('T10Y3M', fullHistory),
-    fetchFredSeries('AMTMNO', fullHistory),
-    loadMergedBtcSeries(),
-    fetchMVRVTail(fullHistory),
-    fetchFredSeries('ECBASSETSW', fullHistory),
-    fetchFredSeries('JPNASSETS', fullHistory),
-    fetchFredSeries('DEXUSEU', fullHistory),
-    fetchFredSeries('DEXJPUS', fullHistory),
-    fetchBGeometrics('lth_sopr'),
-    fetchBGeometrics('lth_nupl'),
-    fetchBGeometrics('profit_loss'),
-    fetchBGeometrics('sth_realized_price'),
-    fetchBGeometrics('lth_realized_price'),
-    fetchISM_PMI(),
-    fetchBinanceFundingRates(fullHistory),
-    fetchBinanceOpenInterest(),
-  ]);
+  ] = otherResults;
 
   const rrpM = rrp.map((o) => ({ ...o, value: o.value * 1000 }));
 
   // 2. Build daily timeline ────────────────────────────────────────────
 
-  const firstDate = cachedSignals.length > 0
-    ? cachedSignals[0].Date
-    : btcPrices.length > 0 ? btcPrices[0].date : null;
+  const firstDate = options?.windowStartDate
+    ?? (cachedSignals.length > 0 ? cachedSignals[0].Date : null)
+    ?? (btcPrices.length > 0 ? btcPrices[0].date : null);
 
   if (!firstDate) return [];
 
@@ -510,6 +519,15 @@ export async function refreshSignals(
   overlaySeries(walcl, daily, allDates, 'WALCL');
   overlaySeries(tga, daily, allDates, 'WTREGEN');
   overlaySeries(rrpM, daily, allDates, 'RRPONTSYD');
+
+  // When FRED is rate-limited, carry macro values forward so new BTC days
+  // still get liquidity / macro scores instead of leaving fields blank.
+  forwardFillFields(daily, [
+    'WALCL', 'WTREGEN', 'RRPONTSYD', 'DXY', 'SAHM', 'YC_M', 'NO', 'MVRV',
+    'LTH_SOPR', 'LTH_NUPL', 'SIP', 'STH_REALIZED_PRICE', 'LTH_REALIZED_PRICE',
+    'ECB_RAW', 'BOJ_RAW', 'EURUSD', 'JPYUSD', 'ISM_PMI',
+    'BTC_FUNDING_RATE', 'BTC_OPEN_INTEREST_USD',
+  ]);
 
   // Compute US_LIQ: fresh components take precedence, else keep cached
   for (const d of daily) {

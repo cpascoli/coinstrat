@@ -7,6 +7,15 @@
 [functions]
   included_files = ["public/data/btc_daily.json"]
 
+[functions."scheduled-newsletter"]
+  timeout = 60
+
+[functions."signal-refresh"]
+  timeout = 60
+
+[functions."scheduled-alerts"]
+  timeout = 60
+
 # Security headers (HSTS)
 [[headers]]
   for = "/*"
@@ -37,6 +46,11 @@
 [[redirects]]
   from = "/api/v1/signals/current"
   to = "/.netlify/functions/signal-current"
+  status = 200
+
+[[redirects]]
+  from = "/api/v1/signals/chart-data"
+  to = "/.netlify/functions/signal-chart-data"
   status = 200
 
 [[redirects]]

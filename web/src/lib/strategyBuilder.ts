@@ -27,6 +27,10 @@ export const STRATEGY_SERIES_CATALOG = [
   { key: 'LIQ_SCORE', label: 'Liquidity Score', kind: 'signal', group: 'scores', description: 'CoinStrat liquidity score.' },
   { key: 'DXY_SCORE', label: 'Dollar Score', kind: 'signal', group: 'scores', description: 'CoinStrat DXY score.' },
   { key: 'BIZ_CYCLE_SCORE', label: 'Business Cycle Score', kind: 'signal', group: 'scores', description: 'CoinStrat business cycle score.' },
+  { key: 'CQM_RISK', label: 'CQM Risk', kind: 'signal', group: 'cqm', description: 'Gated 2y quantile-model risk (0–1). Multiply by 100 for percent.' },
+  { key: 'CQM_SCORE', label: 'CQM Score', kind: 'signal', group: 'cqm', description: 'Quantile-model score oscillator (0–1).' },
+  { key: 'CQM_QR_MEDIAN', label: 'CQM QR Median', kind: 'raw', group: 'cqm', description: 'Asymmetric QR 50% fair-value trend (USD).' },
+  { key: 'CQM_SOLID_MEDIAN', label: 'CQM Solid Median', kind: 'raw', group: 'cqm', description: 'Solid gold median band level (USD).' },
   { key: 'CORE_ON', label: 'CORE_ON', kind: 'signal', group: 'signals', description: 'Core accumulation signal.' },
   { key: 'MACRO_ON', label: 'MACRO_ON', kind: 'signal', group: 'signals', description: 'Macro acceleration signal.' },
   { key: 'ACCUM_ON', label: 'ACCUM_ON', kind: 'signal', group: 'signals', description: 'Composite accumulation signal.' },
@@ -48,7 +52,8 @@ export const SERIES_GROUP_META: Array<{
   { group: 'macro', label: 'Business Cycle', order: 3 },
   { group: 'fx', label: 'FX', order: 4 },
   { group: 'scores', label: 'Scores', order: 5 },
-  { group: 'signals', label: 'Signals', order: 6 },
+  { group: 'cqm', label: 'Quantile Model', order: 6 },
+  { group: 'signals', label: 'Signals', order: 7 },
 ];
 
 export function getGroupedSeries() {

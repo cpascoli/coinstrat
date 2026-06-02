@@ -32,6 +32,9 @@
  *   - Frequency hard-guard prevents double trades within a cadence window —
  *     this also means a manual admin trade earlier in the day will defer
  *     the scheduled trade by a full cadence.
+ *   - An execution lease (unique per frequency + execution_date) is acquired
+ *     immediately after the frequency guard and before fitCQM(), so overlapping
+ *     Netlify invocations cannot both reach Coinbase.
  *   - All decisions are made server-side from authoritative DB state and
  *     signed Coinbase responses; nothing about this function trusts caller
  *     input.

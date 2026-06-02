@@ -342,6 +342,183 @@ def fit_quantile_regression(
     )
 
 
+QR_GENESIS_ANCHOR = pd.Timestamp("2009-01-01")
+
+
+@dataclass(frozen=True)
+class AsymmetricQuantileFit:
+    """Rearranged asymmetric quadratic quantile bands (Cowen 2026).
+
+    Model in log10-price vs centered log-time:
+        Q_tau(log10 P) = c_tau + a_tau * x + b(tau) * x**2,   x = ln(t) - mu
+    with t = days since 2009-01-01 and a *shared* curvature within each tail
+    group: b_LO for the lower quantiles, b_MED for the median, b_HI for the
+    upper quantiles. The upper tail curves down (b_HI << 0) so the speculative
+    band compresses across cycles, while the lower tail stays near-linear
+    (b_LO ~= 0) as a straight power-law support — the paper's central finding.
+
+    Non-crossing is enforced at evaluation time by the Chernozhukov–Fernández-
+    Val–Galichon (2010) rearrangement: the per-date quantile predictions are
+    sorted ascending so a higher tau never prices below a lower one.
+    """
+
+    anchor: pd.Timestamp
+    mu: float
+    quantiles: tuple[float, ...]
+    params_by_quantile: dict[float, tuple[float, float, float]]  # tau -> (c, a, b)
+    b_low: float
+    b_median: float
+    b_high: float
+    pseudo_r2: dict[float, float]
+
+
+def _qr_time_x(index: pd.DatetimeIndex, anchor: pd.Timestamp, mu: float) -> np.ndarray:
+    days = np.asarray((index.normalize() - anchor.normalize()).days, dtype=float)
+    days = np.maximum(days, 1.0)
+    return np.log(days) - mu
+
+
+def _check_loss(residual: np.ndarray, tau: float) -> float:
+    return float(np.sum(residual * (tau - (residual < 0.0).astype(float))))
+
+
+def fit_asymmetric_quantile_bands(
+    prices: pd.Series,
+    lower_taus: tuple[float, ...] = (0.001, 0.01, 0.10, 0.25),
+    median_taus: tuple[float, ...] = (0.50,),
+    upper_taus: tuple[float, ...] = (0.75, 0.95, 0.99, 0.999),
+    anchor: pd.Timestamp = QR_GENESIS_ANCHOR,
+    seed_curvature: tuple[float, float, float] = (-0.024, -0.113, -0.326),
+    max_iter: int = 4000,
+) -> AsymmetricQuantileFit:
+    """Fit the rearranged asymmetric quadratic quantile model.
+
+    Curvature is shared within each tail group and found by minimising the
+    pooled check-loss over (b_LO, b_MED, b_HI); for any fixed curvature the
+    per-quantile intercept/slope reduce to an ordinary linear quantile
+    regression of (y - b*x**2) on [1, x], which we solve with statsmodels.
+    Seeded at the paper's full-sample estimates.
+    """
+    from scipy.optimize import minimize  # local import: optional dependency path
+
+    cleaned = clean_price_series(prices, start=None)
+    x = _qr_time_x(cleaned.index, anchor, 0.0)
+    mu = float(np.mean(x))
+    x = x - mu
+    y = np.log10(cleaned.to_numpy(dtype=float))
+    x2 = x * x
+    design = sm.add_constant(x)
+
+    all_taus = tuple(sorted(set(lower_taus) | set(median_taus) | set(upper_taus)))
+    # Baseline unconditional check-loss (per tau) for pseudo-R².
+    l0 = {t: _check_loss(y - np.quantile(y, t), t) for t in all_taus}
+
+    def fit_group(taus: tuple[float, ...], b: float) -> tuple[float, dict[float, tuple[float, float, float]]]:
+        yb = y - b * x2
+        total = 0.0
+        params: dict[float, tuple[float, float, float]] = {}
+        for tau in taus:
+            res = sm.QuantReg(yb, design).fit(q=float(tau), max_iter=2000)
+            c, a = float(res.params[0]), float(res.params[1])
+            params[tau] = (c, a, b)
+            total += _check_loss(y - (c + a * x + b * x2), tau)
+        return total, params
+
+    def objective(bvec: np.ndarray) -> float:
+        return (
+            fit_group(lower_taus, float(bvec[0]))[0]
+            + fit_group(median_taus, float(bvec[1]))[0]
+            + fit_group(upper_taus, float(bvec[2]))[0]
+        )
+
+    opt = minimize(objective, np.array(seed_curvature, dtype=float),
+                   method="Nelder-Mead", options={"maxiter": max_iter, "xatol": 1e-4, "fatol": 1e-6})
+    b_low, b_med, b_high = (float(v) for v in opt.x)
+
+    params: dict[float, tuple[float, float, float]] = {}
+    for taus, b in ((lower_taus, b_low), (median_taus, b_med), (upper_taus, b_high)):
+        params.update(fit_group(taus, b)[1])
+
+    pseudo_r2 = {
+        t: (1.0 - _check_loss(y - (params[t][0] + params[t][1] * x + params[t][2] * x2), t) / l0[t])
+        if l0[t] > 0 else float("nan")
+        for t in all_taus
+    }
+
+    return AsymmetricQuantileFit(
+        anchor=anchor,
+        mu=mu,
+        quantiles=all_taus,
+        params_by_quantile=params,
+        b_low=b_low,
+        b_median=b_med,
+        b_high=b_high,
+        pseudo_r2=pseudo_r2,
+    )
+
+
+def _asym_logprice_ladder(fit: AsymmetricQuantileFit, date: pd.Timestamp) -> tuple[np.ndarray, np.ndarray]:
+    """Return (taus, sorted log10-price) ladder at a single date (rearranged)."""
+    x = float(_qr_time_x(pd.DatetimeIndex([date]), fit.anchor, fit.mu)[0])
+    taus = np.array(sorted(fit.quantiles), dtype=float)
+    logp = np.array(
+        [fit.params_by_quantile[t][0] + fit.params_by_quantile[t][1] * x + fit.params_by_quantile[t][2] * x * x
+         for t in taus],
+        dtype=float,
+    )
+    return taus, np.sort(logp)  # rearrangement keeps the ladder monotone
+
+
+def asymmetric_risk_for_price(fit: AsymmetricQuantileFit, date: pd.Timestamp, price: float) -> float:
+    """EQM Risk as the price's quantile position within the asymmetric bands.
+
+    Risk = the tau whose band equals `price` at `date`, interpolated linearly in
+    (log10 price) across the rearranged quantile ladder, clamped to [0, 1].
+    Because the bands are anchored to full-history asymmetric quantiles rather
+    than residuals of one global trend, deep cycle lows read low risk regardless
+    of which cycle they belong to.
+    """
+    if price <= 0 or pd.isna(price):
+        return float("nan")
+    taus, logp = _asym_logprice_ladder(fit, date)
+    lp = math.log10(price)
+    if lp <= logp[0]:
+        return float(taus[0])
+    if lp >= logp[-1]:
+        return float(taus[-1])
+    return float(np.interp(lp, logp, taus))
+
+
+def asymmetric_price_for_risk(fit: AsymmetricQuantileFit, date: pd.Timestamp, risk: float) -> float:
+    """Inverse of `asymmetric_risk_for_price`: band price at a given risk level."""
+    taus, logp = _asym_logprice_ladder(fit, date)
+    risk = min(max(risk, float(taus[0])), float(taus[-1]))
+    return float(10.0 ** np.interp(risk, taus, logp))
+
+
+def asymmetric_quantile_frame(
+    fit: AsymmetricQuantileFit,
+    dates: Iterable[pd.Timestamp],
+    quantiles: Iterable[float] | None = None,
+) -> pd.DataFrame:
+    """Evaluate the asymmetric bands at `dates`, rearranged to be non-crossing.
+
+    Returns a DataFrame indexed by date with one price column per quantile.
+    Rearrangement sorts each row's quantile predictions ascending (CFG 2010).
+    """
+    index = pd.DatetimeIndex(dates)
+    x = _qr_time_x(index, fit.anchor, fit.mu)
+    cols = tuple(quantiles) if quantiles is not None else fit.quantiles
+    raw = np.column_stack([
+        np.power(10.0, fit.params_by_quantile[q][0] + fit.params_by_quantile[q][1] * x
+                 + fit.params_by_quantile[q][2] * x * x)
+        for q in cols
+    ])
+    # Rearrange: sort predicted prices ascending across quantiles at each date.
+    rearranged = np.sort(raw, axis=1)
+    return pd.DataFrame(rearranged, index=index, columns=[float(q) for q in cols])
+
+
 def trend_log(fit: EQMFit, dates: Iterable[pd.Timestamp]) -> np.ndarray:
     index = pd.DatetimeIndex(dates)
     x = _time_index(index, fit.start_date, fit.time_power)
@@ -660,6 +837,82 @@ def empirical_percentile(history: pd.Series, value: float) -> float:
     return float(np.searchsorted(np.sort(hist), value, side="right") / len(hist))
 
 
+def rolling_empirical_percentiles(
+    residuals: pd.Series,
+    window_days: int,
+    min_periods: int | None = None,
+) -> pd.Series:
+    """Causal trailing-window percentile rank of each residual in [0, 1].
+
+    At date t the rank uses only residuals in [t - window + 1, t]. This
+    re-centers cycle lows relative to recent history instead of anchoring
+    against the full 2014 sample where early extremes monopolise the floor.
+    """
+    if window_days <= 0:
+        raise ValueError("window_days must be positive")
+    if min_periods is None:
+        min_periods = max(window_days // 4, 30)
+    values = residuals.to_numpy(dtype=float)
+    n = len(values)
+    out = np.full(n, np.nan)
+    for i in range(n):
+        start = max(0, i - window_days + 1)
+        window = values[start : i + 1]
+        if len(window) < min_periods:
+            continue
+        out[i] = empirical_percentile(pd.Series(window), float(values[i]))
+    return pd.Series(out, index=residuals.index, name="rolling_residual_percentile")
+
+
+def risk_from_residual_percentile(fit: EQMFit, date: pd.Timestamp, residual_percentile: float) -> float:
+    """Map a residual percentile to cycle-aware soft risk."""
+    high_quantile = risk_high_quantile_for_date(fit, pd.Timestamp(date))
+    soft_z = (residual_percentile - fit.low_quantile) / (high_quantile - fit.low_quantile)
+    soft_z = float(np.clip(soft_z, 0.0, 1.0))
+    return float(soft_z ** risk_gamma_for_date(fit, pd.Timestamp(date)))
+
+
+def rolling_risk_series(fit: EQMFit, window_days: int) -> pd.Series:
+    """Daily soft-risk series using trailing-window residual percentiles."""
+    rolling_pct = rolling_empirical_percentiles(fit.residuals, window_days)
+    risks = [
+        risk_from_residual_percentile(fit, date, float(pct)) if not pd.isna(pct) else float("nan")
+        for date, pct in rolling_pct.items()
+    ]
+    return pd.Series(risks, index=fit.residuals.index, name="risk")
+
+
+def gated_rolling_risk_series(
+    fit: EQMFit,
+    prices: pd.Series,
+    roll_window_days: int = 730,
+    near_low_window_days: int = 120,
+    near_low_buffer: float = 1.15,
+) -> pd.Series:
+    """Global risk by default; near cycle lows use min(global, rolling).
+
+    Pure trailing-window risk re-centres cycle lows but also collapses today's
+    reading (May 2026: 3.7% vs reference 26.4%) because recent history already
+    includes the recovery. Gating applies the rolling correction only when
+    price is within `near_low_buffer` of its trailing `near_low_window_days`
+    minimum — actual basing zones — so snapshot calibration is preserved while
+    bear-market lows still get aggressive buy sizing.
+    """
+    prices = clean_price_series(prices, start=None)
+    global_risks = pd.Series(
+        [risk_for_price(fit, date, float(price)) for date, price in prices.items()],
+        index=prices.index,
+        name="risk_global",
+    )
+    rolling = rolling_risk_series(fit, roll_window_days).reindex(prices.index)
+    rmin = prices.rolling(near_low_window_days, min_periods=30).min()
+    near_low = prices <= rmin * near_low_buffer
+    out = global_risks.copy()
+    mask = near_low & rolling.notna()
+    out.loc[mask] = np.minimum(global_risks.loc[mask], rolling.loc[mask])
+    return out.rename("risk")
+
+
 def risk_for_score(fit: EQMFit, score: float) -> float:
     """Map EQM score to risk using the empirical score distribution."""
     return empirical_percentile(fit.scores, score)
@@ -713,15 +966,25 @@ def risk_high_quantile_for_date(fit: EQMFit, date: pd.Timestamp) -> float:
     return float(knots[-1][1])
 
 
-def risk_for_price(fit: EQMFit, date: pd.Timestamp, price: float) -> float:
-    """Map price to cycle-aware soft risk at a date."""
+def risk_for_price(
+    fit: EQMFit,
+    date: pd.Timestamp,
+    price: float,
+    window_days: int | None = None,
+) -> float:
+    """Map price to cycle-aware soft risk at a date.
+
+    When `window_days` is set, the residual percentile is computed causally
+    within the trailing window ending at `date` instead of the full sample.
+    """
     log_trend = float(trend_log(fit, [pd.Timestamp(date)])[0])
     residual = math.log(price) - log_trend
-    residual_percentile = empirical_percentile(fit.residuals, residual)
-    high_quantile = risk_high_quantile_for_date(fit, pd.Timestamp(date))
-    soft_z = (residual_percentile - fit.low_quantile) / (high_quantile - fit.low_quantile)
-    soft_z = float(np.clip(soft_z, 0.0, 1.0))
-    return float(soft_z ** risk_gamma_for_date(fit, pd.Timestamp(date)))
+    if window_days is None:
+        residual_percentile = empirical_percentile(fit.residuals, residual)
+    else:
+        history = fit.residuals.loc[: pd.Timestamp(date)].tail(window_days)
+        residual_percentile = empirical_percentile(history, residual)
+    return risk_from_residual_percentile(fit, date, residual_percentile)
 
 
 def price_for_risk(fit: EQMFit, date: pd.Timestamp, risk: float) -> float:
@@ -737,7 +1000,36 @@ def price_for_risk(fit: EQMFit, date: pd.Timestamp, risk: float) -> float:
     return float(math.exp(log_price))
 
 
-def current_snapshot(fit: EQMFit, prices: pd.Series, date: pd.Timestamp | None = None) -> dict[str, float]:
+def risk_for_price_gated(
+    fit: EQMFit,
+    prices: pd.Series,
+    date: pd.Timestamp,
+    price: float,
+    roll_window_days: int = 730,
+    near_low_window_days: int = 120,
+    near_low_buffer: float = 1.15,
+) -> float:
+    """Pointwise gated risk: global unless price is near its recent local low."""
+    global_risk = risk_for_price(fit, date, price)
+    history = clean_price_series(prices, start=None).loc[: pd.Timestamp(date)]
+    if len(history) < 30:
+        return global_risk
+    recent = history.tail(near_low_window_days)
+    if float(price) > float(recent.min()) * near_low_buffer:
+        return global_risk
+    rolling_risk = risk_for_price(fit, date, price, window_days=roll_window_days)
+    return float(min(global_risk, rolling_risk))
+
+
+def current_snapshot(
+    fit: EQMFit,
+    prices: pd.Series,
+    date: pd.Timestamp | None = None,
+    risk_window_days: int | None = None,
+    risk_gate_roll_days: int | None = None,
+    risk_gate_near_days: int = 120,
+    risk_gate_near_buffer: float = 1.15,
+) -> dict[str, float]:
     """Return the latest visible EQM values for diagnostics."""
     prices = clean_price_series(prices, start=None)
     if date is None:
@@ -745,7 +1037,18 @@ def current_snapshot(fit: EQMFit, prices: pd.Series, date: pd.Timestamp | None =
     date = pd.Timestamp(date)
     price = float(prices.loc[:date].iloc[-1])
     score = score_for_price(fit, date, price)
-    risk = risk_for_price(fit, date, price)
+    if risk_gate_roll_days is not None:
+        risk = risk_for_price_gated(
+            fit,
+            prices,
+            date,
+            price,
+            roll_window_days=risk_gate_roll_days,
+            near_low_window_days=risk_gate_near_days,
+            near_low_buffer=risk_gate_near_buffer,
+        )
+    else:
+        risk = risk_for_price(fit, date, price, window_days=risk_window_days)
 
     return {
         "price": price,
@@ -770,6 +1073,7 @@ def expanding_eqm_signals(
     score_lower_quantile: float = 0.06,
     score_upper_quantile: float = 0.995,
     score_power: float = 1.0,
+    risk_window_days: int | None = None,
 ) -> pd.DataFrame:
     """
     Compute no-lookahead daily EQM score/risk using only history available that day.
@@ -793,13 +1097,20 @@ def expanding_eqm_signals(
         date = history.index[-1]
         price = float(history.iloc[-1])
         score = score_for_price(fit, date, price)
-        risk = risk_for_price(fit, date, price)
+        risk = risk_for_price(fit, date, price, window_days=risk_window_days)
         rows.append({"date": date, "price": price, "score": score, "risk": risk})
 
     return pd.DataFrame(rows).set_index("date")
 
 
-def full_sample_eqm_signals(fit: EQMFit, prices: pd.Series) -> pd.DataFrame:
+def full_sample_eqm_signals(
+    fit: EQMFit,
+    prices: pd.Series,
+    risk_window_days: int | None = None,
+    risk_gate_roll_days: int | None = None,
+    risk_gate_near_days: int = 120,
+    risk_gate_near_buffer: float = 1.15,
+) -> pd.DataFrame:
     """Compute full-sample EQM score/risk for chart replication."""
     prices = clean_price_series(prices, start=None)
     scores = pd.Series(
@@ -807,11 +1118,22 @@ def full_sample_eqm_signals(fit: EQMFit, prices: pd.Series) -> pd.DataFrame:
         index=prices.index,
         name="score",
     )
-    risks = pd.Series(
-        [risk_for_price(fit, date, float(price)) for date, price in prices.items()],
-        index=prices.index,
-        name="risk",
-    )
+    if risk_gate_roll_days is not None:
+        risks = gated_rolling_risk_series(
+            fit,
+            prices,
+            roll_window_days=risk_gate_roll_days,
+            near_low_window_days=risk_gate_near_days,
+            near_low_buffer=risk_gate_near_buffer,
+        )
+    elif risk_window_days is not None:
+        risks = rolling_risk_series(fit, risk_window_days).reindex(prices.index)
+    else:
+        risks = pd.Series(
+            [risk_for_price(fit, date, float(price)) for date, price in prices.items()],
+            index=prices.index,
+            name="risk",
+        )
     return pd.DataFrame({"price": prices, "score": scores, "risk": risks})
 
 

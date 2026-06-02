@@ -7,6 +7,7 @@ import {
   patchMVRVInCache,
   patchSthLthRealizedPriceInCache,
   patchBottomScoresInCache,
+  patchCqmInCache,
 } from './lib/signalRefreshRunner';
 import { refreshDerivativesCache } from './lib/derivativesCache';
 
@@ -33,6 +34,9 @@ import { refreshDerivativesCache } from './lib/derivativesCache';
  *
  *  3c. Body { "mode": "patch_bottom_scores" } → recompute the existing cache
  *      range with current logic and back-fill BOTTOM_* score fields.
+ *
+ *  3d. Body { "mode": "patch_cqm" } → run `fitCQM()` once and back-fill
+ *      CQM_RISK / CQM_SCORE / QR band fields on every cached row.
  *
  *  4. Body { "mode": "rebuild" } → full recompute.  Re-fetches all APIs
  *     with no date filter and rewrites the entire cache.  WARNING: this
@@ -96,6 +100,11 @@ export const handler: Handler = async (event) => {
 
     if (mode === 'patch_bottom_scores') {
       const result = await patchBottomScoresInCache();
+      return { statusCode: 200, body: JSON.stringify(result) };
+    }
+
+    if (mode === 'patch_cqm') {
+      const result = await patchCqmInCache(null);
       return { statusCode: 200, body: JSON.stringify(result) };
     }
 

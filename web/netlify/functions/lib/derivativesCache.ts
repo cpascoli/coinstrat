@@ -6,10 +6,10 @@ export interface DerivativesPoint {
   value: number;
 }
 
-interface OpenInterestCachePayload {
+interface DerivativesCachePayload {
   timestamp: number;
   count: number;
-  source: 'binance-futures';
+  source: string;
   data: DerivativesPoint[];
 }
 
@@ -20,6 +20,19 @@ const BINANCE_FUTURES_HOSTS = [
   'https://fapi.binance.com',
   'https://www.binance.com',
 ];
+
+/** Binance funding is geo-blocked (HTTP 451) from Netlify; use OKX → Bybit instead. */
+export async function fetchBtcFundingRateHistory(fullHistory = false): Promise<DerivativesPoint[]> {
+  try {
+    return await fetchOkxFundingRateHistory(fullHistory);
+  } catch (okxError) {
+    console.warn('[derivatives-cache] OKX funding API failed; falling back to Bybit funding API.', okxError);
+    return fetchBybitFundingRateHistory(fullHistory);
+  }
+}
+
+/** @deprecated Use fetchBtcFundingRateHistory — Binance is not reachable from Netlify. */
+export const fetchBinanceFundingRateHistory = fetchBtcFundingRateHistory;
 
 function toDate(ms: number) {
   return new Date(ms).toISOString().split('T')[0];
@@ -44,87 +57,6 @@ export async function fetchBinanceOpenInterestHistory(): Promise<DerivativesPoin
     })
     .filter((row): row is DerivativesPoint => row !== null)
     .sort((a, b) => a.date.localeCompare(b.date));
-}
-
-export async function fetchBinanceFundingRateHistory(fullHistory = false): Promise<DerivativesPoint[]> {
-  const limit = 1000;
-  const endMs = Date.now();
-  let currentStartMs = fullHistory ? Date.UTC(2019, 8, 1) : endMs - (500 * DAY_MS);
-  const daily = new Map<string, { sum: number; count: number }>();
-
-  try {
-    while (currentStartMs < endMs) {
-      const params = new URLSearchParams({
-        symbol: 'BTCUSDT',
-        startTime: currentStartMs.toString(),
-        endTime: endMs.toString(),
-        limit: limit.toString(),
-      });
-
-      const rows = await fetchBinanceJson(`/fapi/v1/fundingRate?${params}`);
-      if (!Array.isArray(rows) || rows.length === 0) break;
-
-      addFundingRowsToDailyMap(daily, rows, 'fundingTime', 'fundingRate');
-
-      const lastTs = Number(rows[rows.length - 1]?.fundingTime);
-      if (!Number.isFinite(lastTs) || lastTs <= currentStartMs) break;
-      currentStartMs = lastTs + 1;
-      if (rows.length < limit) break;
-    }
-  } catch (error) {
-    console.warn('[derivatives-cache] Binance funding GET failed; falling back to web funding API.', error);
-    try {
-      return await fetchBinanceFundingRateHistoryFromWeb(fullHistory);
-    } catch (webError) {
-      console.warn('[derivatives-cache] Binance funding web API failed; falling back to OKX funding API.', webError);
-      try {
-        return await fetchOkxFundingRateHistory(fullHistory);
-      } catch (okxError) {
-        console.warn('[derivatives-cache] OKX funding API failed; falling back to Bybit funding API.', okxError);
-        return fetchBybitFundingRateHistory(fullHistory);
-      }
-    }
-  }
-
-  return dailyMapToSeries(daily);
-}
-
-async function fetchBinanceFundingRateHistoryFromWeb(fullHistory = false): Promise<DerivativesPoint[]> {
-  const startMs = fullHistory ? Date.UTC(2019, 8, 1) : Date.now() - (500 * DAY_MS);
-  const daily = new Map<string, { sum: number; count: number }>();
-  const rowsPerPage = 1000;
-  let page = 1;
-
-  while (true) {
-    const res = await fetch('https://www.binance.com/bapi/futures/v1/public/future/common/get-funding-rate-history', {
-      method: 'POST',
-      headers: {
-        accept: 'application/json',
-        'content-type': 'application/json',
-        'user-agent': 'Mozilla/5.0',
-      },
-      body: JSON.stringify({
-        symbol: 'BTCUSDT',
-        page,
-        rows: rowsPerPage,
-      }),
-    });
-
-    if (!res.ok) throw new Error(`Binance funding web API: HTTP ${res.status}`);
-    const json = (await res.json()) as any;
-    const rows = Array.isArray(json?.data) ? json.data : [];
-    if (rows.length === 0) break;
-
-    addFundingRowsToDailyMap(daily, rows, 'calcTime', 'lastFundingRate');
-
-    const oldestTs = Math.min(
-      ...rows.map((row: any) => Number(row.calcTime)).filter((ts: number) => Number.isFinite(ts)),
-    );
-    if (!Number.isFinite(oldestTs) || oldestTs < startMs || rows.length < rowsPerPage) break;
-    page += 1;
-  }
-
-  return dailyMapToSeries(daily).filter((row) => new Date(`${row.date}T00:00:00Z`).getTime() >= startMs);
 }
 
 async function fetchOkxFundingRateHistory(fullHistory = false): Promise<DerivativesPoint[]> {
@@ -208,19 +140,22 @@ async function fetchBybitFundingRateHistory(fullHistory = false): Promise<Deriva
   return dailyMapToSeries(daily).filter((row) => new Date(`${row.date}T00:00:00Z`).getTime() >= startMs);
 }
 
-export async function loadOpenInterestCache(): Promise<OpenInterestCachePayload | null> {
+export async function loadOpenInterestCache(): Promise<DerivativesCachePayload | null> {
   const store = derivativesStore();
-  return store.get(OPEN_INTEREST_CACHE_KEY, { type: 'json' }).catch(() => null) as Promise<OpenInterestCachePayload | null>;
+  return store.get(OPEN_INTEREST_CACHE_KEY, { type: 'json' }).catch(() => null) as Promise<DerivativesCachePayload | null>;
 }
 
-export async function loadFundingRateCache(): Promise<OpenInterestCachePayload | null> {
+export async function loadFundingRateCache(): Promise<DerivativesCachePayload | null> {
   const store = derivativesStore();
-  return store.get(FUNDING_RATE_CACHE_KEY, { type: 'json' }).catch(() => null) as Promise<OpenInterestCachePayload | null>;
+  return store.get(FUNDING_RATE_CACHE_KEY, { type: 'json' }).catch(() => null) as Promise<DerivativesCachePayload | null>;
 }
 
-export async function getCachedOpenInterestSeries(): Promise<DerivativesPoint[]> {
+export async function getCachedOpenInterestSeries(options?: { cacheOnly?: boolean }): Promise<DerivativesPoint[]> {
   const cached = await loadOpenInterestCache();
   const cachedRows = Array.isArray(cached?.data) ? cached.data : [];
+  if (options?.cacheOnly) {
+    return cachedRows;
+  }
   const liveRows = await fetchBinanceOpenInterestHistory().catch((error) => {
     console.error('[derivatives-cache] Binance OI live fetch failed:', error);
     return [] as DerivativesPoint[];
@@ -237,11 +172,17 @@ export async function getCachedOpenInterestSeries(): Promise<DerivativesPoint[]>
   return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
 }
 
-export async function getCachedFundingRateSeries(fullHistory = false): Promise<DerivativesPoint[]> {
+export async function getCachedFundingRateSeries(
+  fullHistory = false,
+  options?: { cacheOnly?: boolean },
+): Promise<DerivativesPoint[]> {
   const cached = await loadFundingRateCache();
   const cachedRows = Array.isArray(cached?.data) ? cached.data : [];
-  const liveRows = await fetchBinanceFundingRateHistory(fullHistory).catch((error) => {
-    console.error('[derivatives-cache] Binance funding live fetch failed:', error);
+  if (options?.cacheOnly) {
+    return cachedRows;
+  }
+  const liveRows = await fetchBtcFundingRateHistory(fullHistory).catch((error) => {
+    console.error('[derivatives-cache] Funding rate live fetch failed:', error);
     return [] as DerivativesPoint[];
   });
 
@@ -255,7 +196,7 @@ export async function refreshOpenInterestCache() {
   const liveRows = await fetchBinanceOpenInterestHistory();
 
   const data = mergeByDate(existingRows, liveRows);
-  const payload: OpenInterestCachePayload = {
+  const payload: DerivativesCachePayload = {
     timestamp: Date.now(),
     count: data.length,
     source: 'binance-futures',
@@ -278,13 +219,13 @@ export async function refreshFundingRateCache() {
   const store = derivativesStore();
   const existing = await loadFundingRateCache();
   const existingRows = Array.isArray(existing?.data) ? existing.data : [];
-  const liveRows = await fetchBinanceFundingRateHistory(false);
+  const liveRows = await fetchBtcFundingRateHistory(false);
 
   const data = mergeByDate(existingRows, liveRows);
-  const payload: OpenInterestCachePayload = {
+  const payload: DerivativesCachePayload = {
     timestamp: Date.now(),
     count: data.length,
-    source: 'binance-futures',
+    source: 'okx-perp',
     data,
   };
 

@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { Resend } from 'resend';
 import { signalsStore } from './store';
 import { serviceSupabase } from './auth';
+import { buildCqmWeeklyBlockFromRows, type CqmWeeklyBlock } from './cqmSnapshot';
 
 export type NewsletterIssueStatus = 'draft' | 'scheduled' | 'sending' | 'sent' | 'failed';
 export type NewsletterAudienceMode = 'all' | 'newsletter_only' | 'paid_only';
@@ -102,12 +103,42 @@ export interface NewsletterSubscriptionPreference {
   subscribedAt: string | null;
 }
 
+export interface BottomAccumSnapshot {
+  score: number | null;
+  band: string | null;
+  deployment: string | null;
+  onchain: number | null;
+  capitulation: number | null;
+  liquidity: number | null;
+  macro: number | null;
+  priceSetup: number | null;
+  priceRepair: number | null;
+}
+
+export interface BottomAccumWeeklyBlock {
+  current: BottomAccumSnapshot;
+  previousWeek: BottomAccumSnapshot;
+  deltas: {
+    score: number | null;
+    onchain: number | null;
+    capitulation: number | null;
+    liquidity: number | null;
+    macro: number | null;
+    priceSetup: number | null;
+    priceRepair: number | null;
+  };
+  stateChanges: string[];
+  largestMover: { label: string; delta: number } | null;
+}
+
 export interface WeeklyContext {
   weekOf: string;
   referenceDate: string;
   current: Record<string, number | string | null>;
   previousWeek: Record<string, number | string | null>;
   deltas: Record<string, number | null>;
+  bottomAccum: BottomAccumWeeklyBlock;
+  cqm: CqmWeeklyBlock;
   stateChanges: string[];
   highlights: string[];
 }
@@ -192,6 +223,19 @@ interface SignalRow {
   SIP_EXHAUSTED?: number;
   AB_SCORE?: number;
   ABCD_SCORE?: number;
+  BOTTOM_ACCUM_SCORE?: number;
+  BOTTOM_ACCUM_BAND?: string;
+  BOTTOM_DEPLOYMENT_RANGE?: string;
+  BOTTOM_ONCHAIN_SCORE?: number;
+  BOTTOM_CAPITULATION_SCORE?: number;
+  BOTTOM_LIQUIDITY_SCORE?: number;
+  BOTTOM_MACRO_SCORE?: number;
+  BOTTOM_PRICE_SETUP_SCORE?: number;
+  BOTTOM_PRICE_REPAIR_SCORE?: number;
+  CQM_RISK?: number;
+  CQM_SCORE?: number;
+  CQM_QR_MEDIAN?: number;
+  CQM_SOLID_MEDIAN?: number;
 }
 
 function normalizeEmail(email: string): string {
@@ -322,6 +366,137 @@ function dynamicCycleSentence(value?: number | string | null): string {
     default:
       return `Business Cycle score: ${value ?? 'n/a'} — Current macro-cycle context is unavailable.`;
   }
+}
+
+function extractBottomAccumSnapshot(row: SignalRow | null | undefined): BottomAccumSnapshot {
+  return {
+    score: typeof row?.BOTTOM_ACCUM_SCORE === 'number' ? row.BOTTOM_ACCUM_SCORE : null,
+    band: typeof row?.BOTTOM_ACCUM_BAND === 'string' ? row.BOTTOM_ACCUM_BAND : null,
+    deployment: typeof row?.BOTTOM_DEPLOYMENT_RANGE === 'string' ? row.BOTTOM_DEPLOYMENT_RANGE : null,
+    onchain: typeof row?.BOTTOM_ONCHAIN_SCORE === 'number' ? row.BOTTOM_ONCHAIN_SCORE : null,
+    capitulation: typeof row?.BOTTOM_CAPITULATION_SCORE === 'number' ? row.BOTTOM_CAPITULATION_SCORE : null,
+    liquidity: typeof row?.BOTTOM_LIQUIDITY_SCORE === 'number' ? row.BOTTOM_LIQUIDITY_SCORE : null,
+    macro: typeof row?.BOTTOM_MACRO_SCORE === 'number' ? row.BOTTOM_MACRO_SCORE : null,
+    priceSetup: typeof row?.BOTTOM_PRICE_SETUP_SCORE === 'number' ? row.BOTTOM_PRICE_SETUP_SCORE : null,
+    priceRepair: typeof row?.BOTTOM_PRICE_REPAIR_SCORE === 'number' ? row.BOTTOM_PRICE_REPAIR_SCORE : null,
+  };
+}
+
+const BOTTOM_ACCUM_THRESHOLDS = [
+  { score: 85, label: 'Capitulation Opportunity' },
+  { score: 70, label: 'Strong Accumulation' },
+  { score: 50, label: 'Accumulate Slowly' },
+  { score: 25, label: 'Watch' },
+] as const;
+
+function detectBottomAccumStateChanges(
+  current: BottomAccumSnapshot,
+  previous: BottomAccumSnapshot,
+): string[] {
+  const changes: string[] = [];
+
+  if (current.band && previous.band && current.band !== previous.band) {
+    changes.push(`Bottom Accumulation band changed from ${previous.band} to ${current.band}.`);
+  }
+
+  if (typeof current.score === 'number' && typeof previous.score === 'number') {
+    for (const threshold of BOTTOM_ACCUM_THRESHOLDS) {
+      if (previous.score < threshold.score && current.score >= threshold.score) {
+        changes.push(`Bottom Accumulation Score crossed into the ${threshold.label} zone (≥${threshold.score}).`);
+      } else if (previous.score >= threshold.score && current.score < threshold.score) {
+        changes.push(`Bottom Accumulation Score dropped below the ${threshold.label} zone (<${threshold.score}).`);
+      }
+    }
+  }
+
+  if (current.deployment && previous.deployment && current.deployment !== previous.deployment) {
+    changes.push(`Suggested bottom deployment range shifted to ${current.deployment}.`);
+  }
+
+  return changes;
+}
+
+function findLargestBottomComponentMover(
+  deltas: BottomAccumWeeklyBlock['deltas'],
+): { label: string; delta: number } | null {
+  const components: Array<{ label: string; delta: number | null }> = [
+    { label: 'On-chain value', delta: deltas.onchain },
+    { label: 'Capitulation', delta: deltas.capitulation },
+    { label: 'Liquidity turn', delta: deltas.liquidity },
+    { label: 'Macro support', delta: deltas.macro },
+    { label: 'Price setup', delta: deltas.priceSetup },
+    { label: 'Price repair', delta: deltas.priceRepair },
+  ];
+
+  let largest: { label: string; delta: number } | null = null;
+  for (const component of components) {
+    if (typeof component.delta !== 'number' || component.delta === 0) continue;
+    if (!largest || Math.abs(component.delta) > Math.abs(largest.delta)) {
+      largest = { label: component.label, delta: component.delta };
+    }
+  }
+
+  return largest;
+}
+
+function buildBottomAccumWeeklyBlock(
+  currentRow: SignalRow,
+  previousRow: SignalRow | null,
+): BottomAccumWeeklyBlock {
+  const current = extractBottomAccumSnapshot(currentRow);
+  const previousWeek = extractBottomAccumSnapshot(previousRow);
+  const deltas = {
+    score: numericDelta(current.score ?? undefined, previousWeek.score ?? undefined),
+    onchain: numericDelta(current.onchain ?? undefined, previousWeek.onchain ?? undefined),
+    capitulation: numericDelta(current.capitulation ?? undefined, previousWeek.capitulation ?? undefined),
+    liquidity: numericDelta(current.liquidity ?? undefined, previousWeek.liquidity ?? undefined),
+    macro: numericDelta(current.macro ?? undefined, previousWeek.macro ?? undefined),
+    priceSetup: numericDelta(current.priceSetup ?? undefined, previousWeek.priceSetup ?? undefined),
+    priceRepair: numericDelta(current.priceRepair ?? undefined, previousWeek.priceRepair ?? undefined),
+  };
+
+  return {
+    current,
+    previousWeek,
+    deltas,
+    stateChanges: detectBottomAccumStateChanges(current, previousWeek),
+    largestMover: findLargestBottomComponentMover(deltas),
+  };
+}
+
+function dynamicBottomAccumSentence(
+  snapshot: BottomAccumSnapshot,
+  delta: number | null,
+): string {
+  if (typeof snapshot.score !== 'number') {
+    return 'Bottom Accumulation Score: unavailable this week.';
+  }
+
+  const deltaText = typeof delta === 'number' ? ` (${formatDelta(delta, 0)} vs. last week)` : '';
+  const band = snapshot.band ?? 'n/a';
+  const deployment = snapshot.deployment ?? 'n/a';
+  return `Bottom Accumulation Score: ${snapshot.score}/100${deltaText} — ${band} zone, suggested staging ${deployment} of sidelined capital. CORE_ON remains the master on/off switch.`;
+}
+
+function dynamicCqmRiskSentence(cqm: CqmWeeklyBlock): string {
+  const current = cqm.current;
+  if (!current) {
+    return 'CQM Risk: unavailable this week.';
+  }
+
+  const riskPct = current.risk * 100;
+  const riskDeltaPp = typeof cqm.deltas.risk === 'number' ? cqm.deltas.risk * 100 : null;
+  const deltaText = typeof riskDeltaPp === 'number'
+    ? ` (${formatDelta(riskDeltaPp, 1, ' pp')} vs. last week)`
+    : '';
+  const qrPosition = current.price >= current.qrDashedMedian ? 'above' : 'below';
+
+  return `CQM Risk: ${riskPct.toFixed(1)}%${deltaText} — BTC is ${qrPosition} the QR 50% fair-value trend (${formatCurrency(current.price)} vs ${formatCurrency(current.qrDashedMedian)}). Lower risk supports larger DCA buys; higher risk scales them back.`;
+}
+
+function formatGbp(value?: number | null): string {
+  if (typeof value !== 'number' || Number.isNaN(value)) return 'n/a';
+  return `£${value.toLocaleString('en-GB', { maximumFractionDigits: 0 })}`;
 }
 
 function escapeHtml(value: string): string {
@@ -1046,8 +1221,25 @@ export async function buildWeeklyContext(weekOf: string): Promise<WeeklyContext>
     stateChanges.push('Supply-in-profit exhaustion was triggered.');
   }
 
+  const bottomAccum = buildBottomAccumWeeklyBlock(current, previousRow);
+  const cqm = buildCqmWeeklyBlockFromRows(current, previousRow);
+  stateChanges.push(...bottomAccum.stateChanges, ...cqm.stateChanges);
+
+  const bottomScoreText = typeof bottomAccum.current.score === 'number'
+    ? `${bottomAccum.current.score}/100 (${bottomAccum.current.band ?? 'n/a'})`
+    : 'n/a';
+  const bottomDeltaText = formatDelta(bottomAccum.deltas.score, 0);
+  const cqmRiskText = typeof cqm.current?.risk === 'number'
+    ? formatPercent(cqm.current.risk * 100, 1)
+    : 'n/a';
+  const cqmRiskDeltaText = typeof cqm.deltas.risk === 'number'
+    ? formatDelta(cqm.deltas.risk * 100, 1, ' pp')
+    : 'n/a';
+
   const highlights = [
     `BTC closed the week at ${formatCurrency(current.BTCUSD)} (${formatDelta(numericDelta(current.BTCUSD, previousRow?.BTCUSD), 0)} vs. last week).`,
+    `Bottom Accumulation Score is ${bottomScoreText} (${bottomDeltaText} vs. last week).`,
+    `CQM Risk is ${cqmRiskText} (${cqmRiskDeltaText} vs. last week).`,
     `Liquidity score is ${current.LIQ_SCORE ?? 'n/a'} (${scoreLabel(current.LIQ_SCORE)}).`,
     `Valuation score is ${current.VAL_SCORE ?? 'n/a'} with NUPL at ${formatNumber((current as any).NUPL, 3)} (MVRV: ${formatNumber(current.MVRV)}).`,
     `Dollar regime score is ${current.DXY_SCORE ?? 'n/a'} and cycle score is ${current.BIZ_CYCLE_SCORE ?? 'n/a'}.`,
@@ -1081,6 +1273,9 @@ export async function buildWeeklyContext(weekOf: string): Promise<WeeklyContext>
       SIP: current.SIP ?? null,
       SIP_EUPHORIA_FLAG: current.SIP_EUPHORIA_FLAG ?? null,
       SIP_EXHAUSTED: current.SIP_EXHAUSTED ?? null,
+      BOTTOM_ACCUM_SCORE: current.BOTTOM_ACCUM_SCORE ?? null,
+      BOTTOM_ACCUM_BAND: current.BOTTOM_ACCUM_BAND ?? null,
+      BOTTOM_DEPLOYMENT_RANGE: current.BOTTOM_DEPLOYMENT_RANGE ?? null,
     },
     previousWeek: {
       Date: previousRow?.Date ?? null,
@@ -1099,6 +1294,9 @@ export async function buildWeeklyContext(weekOf: string): Promise<WeeklyContext>
       BTC_MA40W: previousRow?.BTC_MA40W ?? null,
       US_LIQ_YOY: previousRow?.US_LIQ_YOY ?? null,
       G3_YOY: previousRow?.G3_YOY ?? null,
+      BOTTOM_ACCUM_SCORE: previousRow?.BOTTOM_ACCUM_SCORE ?? null,
+      BOTTOM_ACCUM_BAND: previousRow?.BOTTOM_ACCUM_BAND ?? null,
+      BOTTOM_DEPLOYMENT_RANGE: previousRow?.BOTTOM_DEPLOYMENT_RANGE ?? null,
     },
     deltas: {
       BTCUSD: numericDelta(current.BTCUSD, previousRow?.BTCUSD),
@@ -1112,7 +1310,10 @@ export async function buildWeeklyContext(weekOf: string): Promise<WeeklyContext>
       BTC_MA40W: numericDelta(current.BTC_MA40W, previousRow?.BTC_MA40W),
       US_LIQ_YOY: numericDelta(current.US_LIQ_YOY, previousRow?.US_LIQ_YOY),
       G3_YOY: numericDelta(current.G3_YOY, previousRow?.G3_YOY),
+      BOTTOM_ACCUM_SCORE: numericDelta(current.BOTTOM_ACCUM_SCORE, previousRow?.BOTTOM_ACCUM_SCORE),
     },
+    bottomAccum,
+    cqm,
     stateChanges,
     highlights,
   };
@@ -1127,13 +1328,56 @@ function fallbackDraft(
 ): NewsletterDraft {
   const current = context.current;
   const coreStatus = current.CORE_ON === 1 ? 'ON' : 'OFF';
-  const macroStatus = current.MACRO_ON === 1 ? 'ON' : 'OFF';
+  const bottom = context.bottomAccum;
+  const cqm = context.cqm;
+  const bottomScore = bottom.current.score;
+  const bottomBand = bottom.current.band ?? 'n/a';
+  const cqmRiskPct = typeof cqm.current?.risk === 'number' ? cqm.current.risk * 100 : null;
+
   const changedThisWeek = [
     `MVRV: ${formatNumber(current.MVRV as number | null)} (${formatDelta(context.deltas.MVRV, 2)} vs. last week)`,
     `LTH SOPR: ${formatNumber(current.LTH_SOPR as number | null, 3)} (${formatDelta(context.deltas.LTH_SOPR, 3)} vs. last week)`,
     `Supply in Profit: ${formatPercent(current.SIP as number | null)} (${formatDelta(context.deltas.SIP, 1, ' pts')} vs. last week)`,
     `40-week SMA: ${formatCurrency(current.BTC_MA40W as number | null)} (${formatDelta(context.deltas.BTC_MA40W, 0)} vs. last week)`,
+    typeof bottomScore === 'number'
+      ? `Bottom Accumulation Score: ${bottomScore}/100 (${formatDelta(bottom.deltas.score, 0)} vs. last week) · ${bottomBand}`
+      : 'Bottom Accumulation Score: n/a',
+    typeof cqmRiskPct === 'number'
+      ? `CQM Risk: ${cqmRiskPct.toFixed(1)}% (${formatDelta((cqm.deltas.risk ?? 0) * 100, 1, ' pp')} vs. last week)`
+      : 'CQM Risk: n/a',
   ];
+
+  const bottomDeploymentBullets = [
+    typeof bottomScore === 'number'
+      ? `Score: ${bottomScore}/100 (${formatDelta(bottom.deltas.score, 0)} vs. last week) · Band: ${bottomBand}`
+      : 'Bottom Accumulation Score: unavailable this week.',
+    bottom.current.deployment
+      ? `Suggested staging: ${bottom.current.deployment} of sidelined capital`
+      : 'Suggested staging range: n/a',
+    `Components — On-chain: ${formatNumber(bottom.current.onchain, 0)}, Capitulation: ${formatNumber(bottom.current.capitulation, 0)}, Liquidity: ${formatNumber(bottom.current.liquidity, 0)}, Macro: ${formatNumber(bottom.current.macro, 0)}, Price setup: ${formatNumber(bottom.current.priceSetup, 0)}, Price repair: ${formatNumber(bottom.current.priceRepair, 0)}`,
+    ...(bottom.largestMover
+      ? [`Largest mover: ${bottom.largestMover.label} ${formatDelta(bottom.largestMover.delta, 0)} pts`]
+      : []),
+    dynamicBottomAccumSentence(bottom.current, bottom.deltas.score),
+  ];
+
+  const cqmBullets = [
+    typeof cqmRiskPct === 'number'
+      ? `CQM Risk: ${cqmRiskPct.toFixed(1)}% (${formatDelta((cqm.deltas.risk ?? 0) * 100, 1, ' pp')} vs. last week) · Score: ${formatNumber((cqm.current?.score ?? 0) * 100, 2)}%`
+      : 'CQM Risk: unavailable this week.',
+    cqm.current
+      ? `BTC ${formatCurrency(cqm.current.price)} vs QR median ${formatCurrency(cqm.current.qrDashedMedian)} (${cqm.current.price >= cqm.current.qrDashedMedian ? 'above' : 'below'} fair-value trend)`
+      : 'QR band context: n/a',
+    cqm.dcaHint
+      ? `At ${formatGbp(cqm.dcaHint.baseGbp)}/day base → ${formatGbp(cqm.dcaHint.impliedBuyGbp)}/day implied buy${
+        typeof cqm.dcaHint.previousBuyGbp === 'number'
+          ? ` (was ${formatGbp(cqm.dcaHint.previousBuyGbp)} last week)`
+          : ''
+      }`
+      : 'DCA sizing example: n/a',
+    dynamicCqmRiskSentence(cqm),
+  ];
+
   const stableState = [
     dynamicCoreSentence(current.CORE_ON),
     dynamicMacroSentence(current.MACRO_ON),
@@ -1144,25 +1388,38 @@ function fallbackDraft(
   ];
   const headlinesNarrative = fallbackHeadlinesNarrative(curatedLinks, context.referenceDate);
 
+  const subjectBottom = typeof bottomScore === 'number' ? `${bottomScore} (${bottomBand})` : 'n/a';
+  const subjectRisk = typeof cqmRiskPct === 'number' ? `${cqmRiskPct.toFixed(1)}%` : 'n/a';
+
   return {
-    subject: `CoinStrat Weekly — CORE ${coreStatus} | BTC ${formatCurrency(current.BTCUSD as number | null)}`,
-    previewText: `Weekly signal snapshot for ${context.referenceDate}: CORE ${coreStatus}, MACRO ${macroStatus}, BTC ${formatCurrency(current.BTCUSD as number | null)}.`,
-    headline: `Weekly signal check-in: CORE ${coreStatus}, MACRO ${macroStatus}`,
-    summary: `CoinStrat closes the week with BTC at ${formatCurrency(current.BTCUSD as number | null)}. The model is reading valuation as ${scoreLabel(current.VAL_SCORE as number | undefined)}, liquidity as ${scoreLabel(current.LIQ_SCORE as number | undefined)}, and the macro backdrop as ${scoreLabel(current.BIZ_CYCLE_SCORE as number | undefined)}.`,
+    subject: `CoinStrat Weekly — CORE ${coreStatus} · Bottom ${subjectBottom} · CQM Risk ${subjectRisk}`,
+    previewText: `Weekly signal snapshot for ${context.referenceDate}: CORE ${coreStatus}, Bottom ${subjectBottom}, CQM Risk ${subjectRisk}, BTC ${formatCurrency(current.BTCUSD as number | null)}.`,
+    headline: `Weekly signal check-in: CORE ${coreStatus}, Bottom ${subjectBottom}, CQM Risk ${subjectRisk}`,
+    summary: `CoinStrat closes the week with BTC at ${formatCurrency(current.BTCUSD as number | null)}. Bottom Accumulation reads ${subjectBottom}, CQM Risk is ${subjectRisk}, valuation is ${scoreLabel(current.VAL_SCORE as number | undefined)}, liquidity is ${scoreLabel(current.LIQ_SCORE as number | undefined)}, and the macro backdrop is ${scoreLabel(current.BIZ_CYCLE_SCORE as number | undefined)}.`,
     signalSections: [
       {
         title: 'What changed this week',
-        body: `BTC finished the week at ${formatCurrency(current.BTCUSD as number | null)}. The most useful week-over-week changes are in valuation, trend, and on-chain positioning rather than in the headline regime signals.`,
+        body: `BTC finished the week at ${formatCurrency(current.BTCUSD as number | null)}. The most useful week-over-week changes are in valuation, trend, on-chain positioning, bottom staging, and quantile-model risk.`,
         bullets: changedThisWeek,
       },
       {
-        title: 'What did not change',
-        body: `The model’s higher-level posture is still being driven by the same broad mix of valuation, liquidity, dollar, and business-cycle inputs.`,
+        title: 'Bottom deployment gauge',
+        body: 'The Bottom Accumulation Score estimates how attractive the current zone is for staging sidelined capital over the next weeks or months. It does not override CORE_ON — it is a sizing and context layer.',
+        bullets: bottomDeploymentBullets,
+      },
+      {
+        title: 'Quantile model & DCA sizing',
+        body: `The CoinStrat Quantile Model uses gated 2-year risk to scale daily DCA sizing. View the full chart at ${appUrl}/charts/cqm.`,
+        bullets: cqmBullets,
+      },
+      {
+        title: 'Regime posture',
+        body: 'The model’s higher-level posture is still being driven by the same broad mix of valuation, liquidity, dollar, and business-cycle inputs.',
         bullets: stableState,
       },
       {
         title: 'Why It Matters',
-        body: editorNote?.trim() || 'This week’s read is best used as a portfolio sizing and pacing signal, not a short-term price prediction. Watch for changes in valuation, LTH SOPR, supply in profit, and the 40-week trend line to see whether the regime is strengthening or deteriorating.',
+        body: editorNote?.trim() || 'This week’s read is best used as a portfolio sizing and pacing signal, not a short-term price prediction. Watch Bottom Accumulation for staged deployment, CQM Risk for DCA sizing, and CORE/MACRO for the master accumulation switches.',
         bullets: [
           ...context.highlights,
           ...(context.stateChanges.length > 0 ? context.stateChanges : []),

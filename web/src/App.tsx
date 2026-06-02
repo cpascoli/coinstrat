@@ -39,7 +39,7 @@ import Unsubscribe from './views/Unsubscribe';
 import AlertUnsubscribe from './views/AlertUnsubscribe';
 import StrategyBuilder from './views/StrategyBuilder';
 import StrategyAlertUnsubscribe from './views/StrategyAlertUnsubscribe';
-import { computeAllSignals } from './services/engine';
+import { loadChartSignals } from './services/chartData';
 import { useAuth } from './contexts/AuthContext';
 import AuthModal from './components/AuthModal';
 import {
@@ -241,7 +241,7 @@ const App: React.FC = () => {
     setLoading(true);
     setError(null);
 
-    computeAllSignals()
+    loadChartSignals()
       .then(signals => {
         if (cancelled) return;
         if (signals.length === 0) throw new Error('No data retrieved from APIs. Check CORS or API keys.');

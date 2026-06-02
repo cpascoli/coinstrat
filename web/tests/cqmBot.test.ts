@@ -32,3 +32,39 @@ describe('CQM bot frequency guard', () => {
     expect(guard.canExecute).toBe(false);
   });
 });
+
+describe('CQM bot execution lease date', () => {
+  it('uses today when there is no prior order', async () => {
+    const { computeExecutionLeaseDate } = await import('../netlify/functions/lib/cqmBot');
+    const date = computeExecutionLeaseDate('daily', null, new Date('2026-05-31T00:08:51.000Z'));
+    expect(date).toBe('2026-05-31');
+  });
+
+  it('uses the UTC date of the next cadence slot for concurrent dedupe', async () => {
+    const { computeExecutionLeaseDate } = await import('../netlify/functions/lib/cqmBot');
+    const lastOrder = { triggered_at: '2026-05-30T00:08:55.991701+00:00' } as any;
+    const date = computeExecutionLeaseDate(
+      'daily',
+      lastOrder,
+      new Date('2026-05-31T00:08:51.000Z'),
+    );
+    expect(date).toBe('2026-05-31');
+  });
+
+  it('matches the same lease date for overlapping invocations on the same slot', async () => {
+    const { computeExecutionLeaseDate } = await import('../netlify/functions/lib/cqmBot');
+    const lastOrder = { triggered_at: '2026-05-30T00:08:55.991701+00:00' } as any;
+    const first = computeExecutionLeaseDate(
+      'daily',
+      lastOrder,
+      new Date('2026-05-31T00:08:35.000Z'),
+    );
+    const second = computeExecutionLeaseDate(
+      'daily',
+      lastOrder,
+      new Date('2026-05-31T00:08:51.000Z'),
+    );
+    expect(first).toBe(second);
+    expect(first).toBe('2026-05-31');
+  });
+});

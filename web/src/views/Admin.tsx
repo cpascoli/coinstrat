@@ -51,7 +51,16 @@ function parseJsonOrApiFailure(status: number, text: string): { ok: true; data: 
   } catch {
     const t = trimmed.toLowerCase();
     if (t.startsWith('<!doctype') || t.startsWith('<html')) {
-      return { ok: false, message: `Got HTML instead of JSON (HTTP ${status}). Run \`netlify dev\` locally so /api routes reach Netlify functions.` };
+      if (status === 504 || status === 502) {
+        return {
+          ok: false,
+          message: `Refresh timed out (HTTP ${status}). The server may still be running — check Netlify function logs, then try again.`,
+        };
+      }
+      return {
+        ok: false,
+        message: `Got HTML instead of JSON (HTTP ${status}). Run \`netlify dev\` locally so /api routes reach Netlify functions.`,
+      };
     }
     return { ok: false, message: `Invalid JSON (HTTP ${status}): ${trimmed.slice(0, 200)}` };
   }
@@ -435,7 +444,20 @@ const Admin: React.FC = () => {
         method: 'POST',
         headers: authHeaders(),
       });
-      const data = await res.json();
+      const text = await res.text();
+      const parsed = parseJsonOrApiFailure(res.status, text);
+      if (!parsed.ok) {
+        setError(parsed.message);
+        return;
+      }
+      const data = parsed.data as {
+        error?: string;
+        new_rows?: number;
+        total?: number;
+        latest_date?: string;
+        cached_at?: string | null;
+        message?: string;
+      };
 
       if (!res.ok) {
         setError(data.error ?? 'Refresh failed');

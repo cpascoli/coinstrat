@@ -15,9 +15,9 @@
  * admin-gated Netlify functions, so PostgREST RLS doesn't get involved.
  */
 
-import { signalsStore } from './store';
 import { serviceSupabase } from './auth';
-import { fitCQM, type CQMFit } from '../../../src/utils/cqm';
+import { fitCQM } from '../../../src/utils/cqm';
+import { loadBtcPricePoints } from './cqmSnapshot';
 
 export type BotFrequency = 'daily' | 'weekly' | 'monthly';
 
@@ -181,6 +181,120 @@ export function computeFrequencyGuard(
 }
 
 // ---------------------------------------------------------------------------
+// Execution lease (dedupe overlapping scheduled invocations)
+// ---------------------------------------------------------------------------
+
+export type ExecutionLeaseSource = 'admin_manual' | 'scheduled';
+
+const STALE_EXECUTION_LEASE_MS = 45 * 60 * 1000;
+
+function isoDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * UTC calendar date of the cadence slot being executed. Concurrent invocations
+ * for the same slot compute the same date, so only one lease can be active.
+ */
+export function computeExecutionLeaseDate(
+  frequency: BotFrequency,
+  lastOrder: BotOrder | null,
+  now: Date = new Date(),
+): string {
+  if (!lastOrder) {
+    return isoDate(now);
+  }
+  const last = new Date(lastOrder.triggered_at).getTime();
+  const next = last + FREQUENCY_INTERVAL_MS[frequency];
+  return isoDate(new Date(next));
+}
+
+function isUniqueViolation(error: { code?: string } | null | undefined): boolean {
+  return error?.code === '23505';
+}
+
+export async function cleanupStaleExecutionLeases(
+  maxAgeMs = STALE_EXECUTION_LEASE_MS,
+): Promise<void> {
+  const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
+  const { error } = await serviceSupabase
+    .from('cqm_bot_execution_leases')
+    .update({
+      status: 'released',
+      released_at: new Date().toISOString(),
+    })
+    .eq('status', 'leased')
+    .is('order_row_id', null)
+    .lt('leased_at', cutoff);
+
+  if (error) {
+    throw new Error(`Failed to clean stale CQM execution leases: ${error.message}`);
+  }
+}
+
+export async function tryAcquireExecutionLease(input: {
+  executionDate: string;
+  frequency: BotFrequency;
+  source: ExecutionLeaseSource;
+}): Promise<{ acquired: true; leaseId: string } | { acquired: false }> {
+  await cleanupStaleExecutionLeases();
+
+  const { data, error } = await serviceSupabase
+    .from('cqm_bot_execution_leases')
+    .insert({
+      execution_date: input.executionDate,
+      frequency: input.frequency,
+      source: input.source,
+      status: 'leased',
+    })
+    .select('id')
+    .single();
+
+  if (error) {
+    if (isUniqueViolation(error)) {
+      return { acquired: false };
+    }
+    throw new Error(`Failed to acquire CQM execution lease: ${error.message}`);
+  }
+
+  return { acquired: true, leaseId: data.id as string };
+}
+
+export async function releaseExecutionLease(leaseId: string): Promise<void> {
+  const { error } = await serviceSupabase
+    .from('cqm_bot_execution_leases')
+    .update({
+      status: 'released',
+      released_at: new Date().toISOString(),
+    })
+    .eq('id', leaseId)
+    .eq('status', 'leased');
+
+  if (error) {
+    throw new Error(`Failed to release CQM execution lease: ${error.message}`);
+  }
+}
+
+export async function completeExecutionLease(
+  leaseId: string,
+  orderRowId: string,
+): Promise<void> {
+  const { error } = await serviceSupabase
+    .from('cqm_bot_execution_leases')
+    .update({
+      status: 'completed',
+      order_row_id: orderRowId,
+      released_at: null,
+    })
+    .eq('id', leaseId)
+    .eq('status', 'leased');
+
+  if (error) {
+    throw new Error(`Failed to complete CQM execution lease: ${error.message}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // CQM Risk (server-side, identical to the in-app fit)
 // ---------------------------------------------------------------------------
 
@@ -188,35 +302,17 @@ export function computeFrequencyGuard(
  * Computes the latest CQM Risk by loading the BTCUSD history from the
  * Netlify Blobs signal cache and running `fitCQM()` on it.
  *
+ * Uses the default gated 2y risk model: global risk everywhere except near
+ * cycle lows, where min(global, rolling_2y) applies so the bot buys more at
+ * bottoms without changing today's calibrated sizing.
+ *
  * Reads the same cache key (`signals_latest`) used by `signal-current.ts`
  * and `signal-history.ts`, so the bot stays in sync with whatever data the
  * scheduled signal refresh has materialized.
  */
 export async function computeLatestRisk(): Promise<RiskSnapshot> {
-  const store = signalsStore();
-  const cached = await store.get('signals_latest', { type: 'json' }).catch(() => null) as
-    | { data?: unknown[] }
-    | null;
-
-  if (!cached?.data || !Array.isArray(cached.data) || cached.data.length === 0) {
-    throw new Error('Signal cache is empty — refresh signals before running the bot.');
-  }
-
-  const points: { date: string; ts: number; price: number }[] = [];
-  for (const row of cached.data as Array<Record<string, unknown>>) {
-    const date = typeof row.Date === 'string' ? row.Date : null;
-    const price = Number(row.BTCUSD);
-    if (!date || !Number.isFinite(price) || price <= 0) continue;
-    const ts = new Date(date).getTime();
-    if (!Number.isFinite(ts)) continue;
-    points.push({ date, ts, price });
-  }
-
-  if (points.length < 365) {
-    throw new Error(`CQM fit requires ≥365 days of BTC history; got ${points.length}.`);
-  }
-
-  const fit: CQMFit = fitCQM(points);
+  const points = await loadBtcPricePoints();
+  const fit = fitCQM(points);
   const last = fit.signals[fit.signals.length - 1];
   if (!last) {
     throw new Error('CQM fit produced no signals.');

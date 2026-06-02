@@ -17,10 +17,12 @@ from matplotlib.colors import Normalize
 
 from eqm_model import (
     DEFAULT_LOCAL_JSON,
+    asymmetric_quantile_frame,
     clean_price_series,
     current_snapshot,
     expanding_eqm_signals,
     fetch_stooq_btc,
+    fit_asymmetric_quantile_bands,
     fit_eqm,
     fit_eqm_solid_bands,
     fit_quantile_regression,
@@ -261,14 +263,36 @@ def parse_float_list(value: str) -> list[float]:
     return [float(part.strip()) for part in value.split(",") if part.strip()]
 
 
-def load_prices(args: argparse.Namespace) -> pd.Series:
+def fmt_quantile(q: float) -> str:
+    """Format a quantile as a percent label: 0.001->'0.1%', 0.5->'50%', 0.999->'99.9%'."""
+    pct_value = q * 100.0
+    if abs(pct_value - round(pct_value)) < 1e-9:
+        return f"{pct_value:.0f}%"
+    return f"{pct_value:.1f}%"
+
+
+def _raw_prices(args: argparse.Namespace) -> pd.Series:
     if args.csv:
-        return clean_price_series(load_csv(Path(args.csv), args.date_col, args.price_col), start=args.start_history)
+        return load_csv(Path(args.csv), args.date_col, args.price_col)
     if args.fetch_stooq:
-        return clean_price_series(fetch_stooq_btc(), start=args.start_history)
+        return fetch_stooq_btc()
     if args.fetch_binance_tail:
-        return clean_price_series(load_local_plus_binance_tail(Path(args.local_json)), start=args.start_history)
-    return clean_price_series(load_local_json(Path(args.local_json)), start=args.start_history)
+        return load_local_plus_binance_tail(Path(args.local_json))
+    return load_local_json(Path(args.local_json))
+
+
+def load_prices(args: argparse.Namespace) -> pd.Series:
+    return clean_price_series(_raw_prices(args), start=args.start_history)
+
+
+def load_prices_full(args: argparse.Namespace) -> pd.Series:
+    """Full-history series (no start clip) used to fit the asymmetric QR bands.
+
+    The compressing-upper / linear-lower tail curvature is driven by Bitcoin's
+    explosive 2011-2013 phase, so the asymmetric fit must see the whole record
+    even when the chart itself starts in 2014.
+    """
+    return clean_price_series(_raw_prices(args), start=None)
 
 
 def print_snapshot(snapshot: dict[str, float], date: pd.Timestamp) -> None:
@@ -297,6 +321,8 @@ def plot_eqm(
     snapshot_date: pd.Timestamp | None = None,
     solid_fit=None,
     band_smooth_window: int = 21,
+    asym_fit=None,
+    asym_quantiles: list[float] | None = None,
 ) -> None:
     dates = prices.index
     last_date = pd.Timestamp(snapshot_date) if snapshot_date is not None else dates[-1]
@@ -346,11 +372,31 @@ def plot_eqm(
             solid_band_values[label] = band
 
     # Dashed quantile-regression trendlines (the smooth parabolic "QR" fan).
-    # The yellow median QR trendline is the one called out in the reference
-    # legend; render it as a distinct dotted goldenrod so it reads separately
-    # from the solid gold EQM-50% band that it crosses.
+    # Preferred source is the asymmetric quadratic model (Cowen 2026): the
+    # upper tail curves down so the speculative band compresses across cycles
+    # while the lower tail stays near-linear as a straight power-law support —
+    # exactly the shape of the reference fan. The median is drawn as a distinct
+    # dotted goldenrod so it reads separately from the solid gold EQM-50% band.
     qr_band_values: dict[float, pd.Series] = {}
-    if qr_fit is not None:
+    asym_colors = {0.001: "#2ca02c", 0.5: "#e0a81f", 0.999: "#b2182b"}
+    if asym_fit is not None:
+        fan_quantiles = asym_quantiles or [0.001, 0.5, 0.999]
+        frame = asymmetric_quantile_frame(asym_fit, dates, fan_quantiles)
+        for quantile in fan_quantiles:
+            series = frame[float(quantile)]
+            is_median = abs(quantile - 0.5) < 1e-9
+            ax.plot(
+                series.index,
+                series,
+                color=asym_colors.get(round(quantile, 3), "#888888"),
+                lw=1.3 if is_median else 1.0,
+                ls=(0, (1, 1.6)),
+                alpha=0.95 if is_median else 0.85,
+                zorder=5 if is_median else 4,
+                label=f"QR {fmt_quantile(quantile)}",
+            )
+            qr_band_values[quantile] = series
+    elif qr_fit is not None:
         qr_colors = {0.001: "#2ca02c", 0.5: "#e0a81f", 0.999: "#b2182b"}
         for quantile in qr_quantiles:
             color = qr_colors.get(quantile, "#888888")
@@ -377,10 +423,10 @@ def plot_eqm(
         if key in solid_band_values:
             value = float(solid_band_values[key].loc[last_date])
             snap_lines.append((label, money(value)))
-    for quantile in [0.5, 0.001, 0.999]:
-        if quantile in qr_band_values:
-            value = float(qr_band_values[quantile].loc[last_date])
-            snap_lines.append((f"EQM QR {quantile:.1%}", money(value)))
+    median_first = sorted(qr_band_values, key=lambda q: abs(q - 0.5))
+    for quantile in median_first:
+        value = float(qr_band_values[quantile].loc[last_date])
+        snap_lines.append((f"EQM QR {fmt_quantile(quantile)}", money(value)))
     snapshot_box(ax, snap_lines)
 
     # --- Panel 2: EQM Trend-Risk Composite ---
@@ -397,7 +443,13 @@ def plot_eqm(
         label="60d trend-risk envelope",
     )
     ax.plot(trend_band.index, trend_band["median"], color="#3a6ea0", lw=1.0, zorder=4, label="60d trend-risk median")
-    if qr_fit is not None:
+    if asym_fit is not None:
+        fan_quantiles = asym_quantiles or [0.001, 0.5, 0.999]
+        frame = asymmetric_quantile_frame(asym_fit, dates, fan_quantiles)
+        for quantile in fan_quantiles:
+            color = asym_colors.get(round(quantile, 3), "#888888")
+            ax.plot(frame.index, frame[float(quantile)], color=color, lw=0.9, ls=(0, (4, 3)), alpha=0.7, zorder=4)
+    elif qr_fit is not None:
         for quantile in qr_quantiles:
             color = {0.001: "#2ca02c", 0.5: "#d9c95b", 0.999: "#b2182b"}.get(quantile, "#888888")
             band = quantile_regression_series(qr_fit, dates, quantile)
@@ -482,6 +534,29 @@ def plot_eqm(
     plt.close(fig)
 
 
+def risk_signal_kwargs(args: argparse.Namespace) -> dict[str, int | float | None]:
+    if args.risk_mode == "global":
+        return {
+            "risk_window_days": None,
+            "risk_gate_roll_days": None,
+            "risk_gate_near_days": args.risk_gate_near_days,
+            "risk_gate_near_buffer": args.risk_gate_near_buffer,
+        }
+    if args.risk_mode == "rolling":
+        return {
+            "risk_window_days": args.risk_roll_days,
+            "risk_gate_roll_days": None,
+            "risk_gate_near_days": args.risk_gate_near_days,
+            "risk_gate_near_buffer": args.risk_gate_near_buffer,
+        }
+    return {
+        "risk_window_days": None,
+        "risk_gate_roll_days": args.risk_roll_days,
+        "risk_gate_near_days": args.risk_gate_near_days,
+        "risk_gate_near_buffer": args.risk_gate_near_buffer,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Reverse-engineered Bitcoin EQM prototype")
     parser.add_argument("--local-json", default=str(DEFAULT_LOCAL_JSON), help="Path to local btc_daily.json")
@@ -503,6 +578,35 @@ def main() -> None:
     )
     parser.add_argument("--signals-mode", choices=["full-sample", "expanding"], default="full-sample")
     parser.add_argument("--min-history-days", type=int, default=1095, help="Minimum history for expanding signals")
+    parser.add_argument(
+        "--risk-mode",
+        choices=["global", "rolling", "gated"],
+        default="gated",
+        help=(
+            "How to map residuals to EQM risk. 'global' uses the full sample; "
+            "'rolling' uses a trailing window (breaks snapshot calibration); "
+            "'gated' keeps global risk except near cycle lows where rolling "
+            "applies (A/B winner: 2y roll + 120d near-low gate)."
+        ),
+    )
+    parser.add_argument(
+        "--risk-roll-days",
+        type=int,
+        default=730,
+        help="Trailing window for rolling/gated risk (730=2y, 1095=3y, 1460=4y)",
+    )
+    parser.add_argument(
+        "--risk-gate-near-days",
+        type=int,
+        default=120,
+        help="Near-local-low lookback for gated risk (days)",
+    )
+    parser.add_argument(
+        "--risk-gate-near-buffer",
+        type=float,
+        default=1.15,
+        help="Price must be within this multiple of the near-low minimum to apply rolling risk",
+    )
     # Defaults below are the grid-search optimum (calibrate_eqm.py) against the
     # May 28, 2026 BTCAnalytica risk-price knots: log-RMSE 0.024 / MAPE ~1.9%,
     # vs 0.045 / 3.8% for the previous (0.60 / 0.06 / 0.68) values.
@@ -542,6 +646,26 @@ def main() -> None:
         help="Dashed quantile-regression bands to fit/plot, comma-separated",
     )
     parser.add_argument("--no-qr", action="store_true", help="Disable quantile-regression fitting")
+    parser.add_argument(
+        "--asymmetric-qr",
+        action="store_true",
+        default=True,
+        help=(
+            "Draw the dashed QR fan from the asymmetric quadratic quantile model "
+            "(Cowen 2026): compressing upper tail, near-linear lower tail."
+        ),
+    )
+    parser.add_argument(
+        "--no-asymmetric-qr",
+        dest="asymmetric_qr",
+        action="store_false",
+        help="Use the legacy linear quantile-regression bands for the dashed QR fan instead",
+    )
+    parser.add_argument(
+        "--asymmetric-qr-quantiles",
+        default="0.001,0.5,0.999",
+        help="Asymmetric QR fan quantiles to draw (green/gold/red), comma-separated",
+    )
     parser.add_argument(
         "--band-smooth-window",
         type=int,
@@ -670,6 +794,15 @@ def main() -> None:
     if not args.no_qr:
         print("\nFitting quantile regression bands...")
         qr_fit = fit_quantile_regression(prices, quantiles=qr_quantiles, time_power=args.time_power)
+    asym_fit = None
+    asym_quantiles = parse_float_list(args.asymmetric_qr_quantiles)
+    if args.asymmetric_qr:
+        print("Fitting asymmetric quadratic quantile bands (shared tail curvature + rearrangement)...")
+        asym_fit = fit_asymmetric_quantile_bands(load_prices_full(args))
+        print(
+            f"  curvature  b_LO={asym_fit.b_low:+.4f}  b_MED={asym_fit.b_median:+.4f}  "
+            f"b_HI={asym_fit.b_high:+.4f}"
+        )
     solid_fit = None
     if args.solid_bands:
         print(
@@ -690,7 +823,8 @@ def main() -> None:
             green_floor_buffer=args.solid_green_floor_buffer,
         )
     snapshot_date = pd.Timestamp(args.snapshot_date) if args.snapshot_date else prices.index.max()
-    snapshot = current_snapshot(fit, prices, snapshot_date)
+    risk_kw = risk_signal_kwargs(args)
+    snapshot = current_snapshot(fit, prices, snapshot_date, **risk_kw)
     print_snapshot(snapshot, snapshot_date)
 
     if args.signals_mode == "expanding":
@@ -704,10 +838,11 @@ def main() -> None:
             score_lower_quantile=args.score_lower_quantile,
             score_upper_quantile=args.score_upper_quantile,
             score_power=args.score_power,
+            risk_window_days=args.risk_roll_days if args.risk_mode == "rolling" else None,
         )
         title_suffix = "(expanding-history signals)"
     else:
-        signals = full_sample_eqm_signals(fit, prices)
+        signals = full_sample_eqm_signals(fit, prices, **risk_kw)
         title_suffix = "(full-sample chart fit)"
 
     plot_eqm(
@@ -722,6 +857,8 @@ def main() -> None:
         snapshot_date=snapshot_date,
         solid_fit=solid_fit,
         band_smooth_window=args.band_smooth_window,
+        asym_fit=asym_fit,
+        asym_quantiles=asym_quantiles,
     )
     print(f"\nSaved chart: {args.plot}")
 

@@ -1,5 +1,5 @@
 import { Handler } from '@netlify/functions';
-import fetch from 'node-fetch';
+import { fetchFredJsonBody } from './lib/fredClient';
 
 /**
  * Netlify Function to proxy FRED API requests.
@@ -20,7 +20,6 @@ export const handler: Handler = async (event) => {
   })();
 
   const seriesId = seriesIdFromQuery || seriesIdFromPath;
-  const apiKey = process.env.FRED_API_KEY;
 
   if (!seriesId) {
     return {
@@ -29,35 +28,19 @@ export const handler: Handler = async (event) => {
     };
   }
 
-  if (!apiKey) {
+  if (!process.env.FRED_API_KEY) {
     return {
       statusCode: 500,
       body: JSON.stringify({ error: 'FRED_API_KEY environment variable not set on Netlify' }),
     };
   }
 
-  const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${apiKey}&file_type=json`;
-
   try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      return {
-        statusCode: response.status,
-        body: await response.text(),
-      };
-    }
-
-    const data = await response.json();
-    
+    const body = await fetchFredJsonBody(seriesId);
     return {
       statusCode: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        // Enable CORS for development if needed, 
-        // though Netlify Functions on the same domain don't strictly need it.
-        'Access-Control-Allow-Origin': '*', 
-      },
-      body: JSON.stringify(data),
+      headers: fredResponseHeaders(),
+      body,
     };
   } catch (error) {
     console.error('Error fetching from FRED:', error);
@@ -68,3 +51,12 @@ export const handler: Handler = async (event) => {
   }
 };
 
+function fredResponseHeaders(stale = false) {
+  return {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Cache-Control': stale
+      ? 'public, max-age=60, stale-while-revalidate=3600'
+      : 'public, max-age=3600, s-maxage=3600',
+  };
+}

@@ -57,7 +57,7 @@ export const endpointGroups: EndpointGroup[] = [
         path: '/api/v1/signals/history',
         summary: 'Full signal history',
         description:
-          'Returns the complete daily signal history. Optionally filter by date range using the "from" and "to" query parameters (YYYY-MM-DD format). Includes all scores, signals, BTC price, and diagnostic fields for every day, and returns X-RateLimit-* headers so clients can track remaining quota.',
+          'Returns the complete daily signal history. Optionally filter by date range using the "from" and "to" query parameters (YYYY-MM-DD format). Includes CQM_RISK, CQM_SCORE, Bottom Accumulation fields, all scores, signals, BTC price, and diagnostic fields. Use "fields" to limit columns (comma-separated). Returns X-RateLimit-* headers.',
         auth: 'api_key',
         params: [
           {
@@ -76,6 +76,14 @@ export const endpointGroups: EndpointGroup[] = [
             description: 'End date (inclusive)',
             placeholder: '2026-01-01',
           },
+          {
+            name: 'fields',
+            in: 'query',
+            type: 'string',
+            required: false,
+            description: 'Comma-separated column list (Date always included), e.g. Date,CQM_RISK,CQM_SCORE',
+            placeholder: 'Date,CQM_RISK,BTCUSD',
+          },
         ],
       },
       {
@@ -84,7 +92,7 @@ export const endpointGroups: EndpointGroup[] = [
         path: '/api/pro/series-detail',
         summary: 'Single series history',
         description:
-          'Returns the full historical time series for a single catalog series key (e.g. BTCUSD, MVRV, DXY_SCORE). Includes the latest value and all daily data points.',
+          'Returns the full historical time series for a single catalog series key (e.g. BTCUSD, MVRV, CQM_RISK, DXY_SCORE). Includes the latest value and all daily data points.',
         auth: 'api_key',
         params: [
           {
@@ -92,8 +100,8 @@ export const endpointGroups: EndpointGroup[] = [
             in: 'query',
             type: 'string',
             required: true,
-            description: 'Series key from the catalog (e.g. BTCUSD, MVRV, US_LIQ)',
-            placeholder: 'BTCUSD',
+            description: 'Series key from the catalog (e.g. BTCUSD, CQM_RISK, MVRV)',
+            placeholder: 'CQM_RISK',
           },
         ],
       },
