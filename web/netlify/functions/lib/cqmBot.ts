@@ -5,9 +5,8 @@
  *  - Settings I/O against `public.cqm_bot_settings`.
  *  - Last-order lookup against `public.cqm_bot_orders` (for the frequency
  *    hard-guard).
- *  - Server-side CQM Risk calculation: reads the signal-cache BTCUSD history
- *    and feeds it to `fitCQM()` (the same TS used by the in-app charts), so
- *    the bot will use the exact same Risk the rest of the app shows.
+ *  - Server-side CQM Risk: `fitCQM()` on signal-cache BTCUSD (global fair-value
+ *    risk vs tail-scaled QR 50% — same model as the in-app charts).
  *  - Computing the target_trade_gbp from the strategy formula and the
  *    next-allowed-slot timestamp from the configured frequency.
  *
@@ -302,9 +301,9 @@ export async function completeExecutionLease(
  * Computes the latest CQM Risk by loading the BTCUSD history from the
  * Netlify Blobs signal cache and running `fitCQM()` on it.
  *
- * Uses the default gated 2y risk model: global risk everywhere except near
- * cycle lows, where risk blends smoothly toward min(global, rolling) so the
- * bot buys more at bottoms without a hard cliff on zone entry.
+ * Uses the fair-value QR model (scaled asymmetric QR 50% + soft gate): global
+ * risk from log(price/QR50%) residuals except near cycle lows, where a
+ * softened blend toward min(global, rolling) applies with a global-risk floor.
  *
  * Reads the same cache key (`signals_latest`) used by `signal-current.ts`
  * and `signal-history.ts`, so the bot stays in sync with whatever data the

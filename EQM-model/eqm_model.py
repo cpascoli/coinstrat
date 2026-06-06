@@ -2,14 +2,20 @@
 """
 Reverse-engineered Bitcoin Empirical Quantile Model (EQM) prototype.
 
-This is a falsifiable replica of the visible BTCAnalytica EQM mechanics, not an
-official implementation. It uses only daily BTC price, a nonlinear time trend,
-and empirical quantiles of the price residual around that trend.
+Falsifiable replica of BTCAnalytica's visible EQM mechanics (not official).
+Production v1b uses:
+
+  - Asymmetric quadratic QR fan (log10 price vs log-days since 2009)
+  - Uniform tail scale (2022 → calibration date) on all QR quantiles
+  - QR 50% as risk fair value; global full-sample empirical risk (no soft gate)
+  - Solid display bands: tail-scaled QR 0.1% / 99.9%, gold = SMA(log-blend)
+
+No early-era $220 anchor boost. OLS log-trend is fit for reference only.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 import io
 import json
@@ -52,6 +58,17 @@ CQM_DEFAULTS: dict[str, float | int | str] = {
     "risk_roll_days": 730,
     "risk_gate_near_days": 120,
     "risk_gate_near_buffer": 1.15,
+    "risk_gate_weight_power": 2.0,
+    "risk_gate_global_floor": 0.75,
+    # Scaled asymmetric QR 50% fair-value model (v1b production defaults).
+    # Tail ramp only — no early-era $220 anchor boost.
+    "qr_calibration_date": "2026-05-28",
+    "qr_calibration_median_usd": 100_800.0,
+    "qr_scale_ramp_start_date": "2022-01-01",
+    "qr_scale_ramp_power": 1.0,
+    "fair_blend_price_weight": 0.5,
+    "fair_gold_sma_weeks": 20,
+    "risk_fair_driver": "qr50",
 }
 
 
@@ -253,16 +270,10 @@ def fit_eqm(
     risk_high_quantile_2022: float = float(CQM_DEFAULTS["risk_high_quantile_2022"]),
 ) -> EQMFit:
     """
-    Fit the EQM proxy.
+    Fit the legacy OLS log-trend (reference / base_fit for fair-value residuals).
 
-    Model:
-      log(price) = intercept + slope * days_since_start**time_power + residual
-
-    Risk is the empirical percentile of the residual mapped to [0, 1] via the
-    low/high quantile anchors and cycle-aware soft exponent. Score is
-    ``risk ** score_power`` (mirrors web/src/utils/cqm.ts).
-
-    Defaults match CQM_DEFAULTS / the TypeScript port (May 22, 2026 snapshot).
+    Production risk uses fair residuals vs tail-scaled QR 50%, not this OLS line.
+    Score is ``risk ** score_power`` on the fair-value risk path.
     """
     del score_lower_quantile, score_upper_quantile  # kept for call-site compatibility
     prices = clean_price_series(prices, start=None)
@@ -919,6 +930,33 @@ def blend_gated_risk(global_risk: float, rolling_risk: float, weight: float) -> 
     return global_risk - w * (global_risk - target)
 
 
+def soften_gate_blend_weight(weight: float, power: float) -> float:
+    """Slow the linear gate weight so rolling correction engages gradually."""
+    w = float(np.clip(weight, 0.0, 1.0))
+    if not math.isfinite(power) or power <= 0:
+        return 0.0
+    if power == 1.0:
+        return w
+    return float(w**power)
+
+
+def apply_soft_gated_risk(
+    global_risk: float,
+    rolling_risk: float,
+    gate_weight: float,
+    *,
+    weight_power: float = float(CQM_DEFAULTS["risk_gate_weight_power"]),
+    global_floor: float = float(CQM_DEFAULTS["risk_gate_global_floor"]),
+) -> float:
+    """Gated blend with softened weight and a global-risk floor."""
+    if gate_weight <= 0:
+        return global_risk
+    w = soften_gate_blend_weight(gate_weight, weight_power)
+    blended = blend_gated_risk(global_risk, rolling_risk, w)
+    floor = global_floor * global_risk
+    return float(max(blended, floor))
+
+
 def empirical_percentile(history: pd.Series, value: float) -> float:
     """Percentile rank in [0, 1] using empirical CDF."""
     hist = history.dropna().to_numpy(dtype=float)
@@ -978,11 +1016,14 @@ def gated_rolling_risk_series(
     roll_window_days: int = int(CQM_DEFAULTS["risk_roll_days"]),
     near_low_window_days: int = int(CQM_DEFAULTS["risk_gate_near_days"]),
     near_low_buffer: float = float(CQM_DEFAULTS["risk_gate_near_buffer"]),
+    weight_power: float = float(CQM_DEFAULTS["risk_gate_weight_power"]),
+    global_floor: float = float(CQM_DEFAULTS["risk_gate_global_floor"]),
 ) -> pd.Series:
-    """Global risk by default; near cycle lows blend smoothly toward min(global, rolling).
+    """Global risk by default; near lows use softened gated blend + global floor.
 
-    Mirrors web/src/utils/cqm.ts riskMode='gated': weight ramps linearly from
-    1 at the trailing near-low minimum to 0 at near_low_buffer × that minimum.
+    Mirrors web/src/utils/cqm.ts: linear gate weight is raised to
+    ``risk_gate_weight_power`` (default 2) before blending, then the result is
+    floored at ``risk_gate_global_floor × global`` (default 0.75).
     """
     prices = clean_price_series(prices, start=None)
     global_risks = pd.Series(
@@ -1003,10 +1044,12 @@ def gated_rolling_risk_series(
             near_low_buffer=near_low_buffer,
         )
         if weight > 0:
-            out.loc[date] = blend_gated_risk(
+            out.loc[date] = apply_soft_gated_risk(
                 float(global_risks.loc[date]),
                 float(rolling_risk),
                 weight,
+                weight_power=weight_power,
+                global_floor=global_floor,
             )
     return out.rename("risk")
 
@@ -1109,8 +1152,10 @@ def risk_for_price_gated(
     roll_window_days: int = int(CQM_DEFAULTS["risk_roll_days"]),
     near_low_window_days: int = int(CQM_DEFAULTS["risk_gate_near_days"]),
     near_low_buffer: float = float(CQM_DEFAULTS["risk_gate_near_buffer"]),
+    weight_power: float = float(CQM_DEFAULTS["risk_gate_weight_power"]),
+    global_floor: float = float(CQM_DEFAULTS["risk_gate_global_floor"]),
 ) -> float:
-    """Pointwise smooth gated risk (mirrors computeGateBlendWeight / blendGatedRisk)."""
+    """Pointwise softened gated risk (mirrors applySoftGatedRisk in cqm.ts)."""
     global_risk = risk_for_price(fit, date, price)
     history = clean_price_series(prices, start=None).loc[: pd.Timestamp(date)]
     if len(history) < 30:
@@ -1118,9 +1163,13 @@ def risk_for_price_gated(
     near_low_min = float(history.tail(near_low_window_days).min())
     rolling_risk = risk_for_price(fit, date, price, window_days=roll_window_days)
     weight = compute_gate_blend_weight(float(price), near_low_min, near_low_buffer=near_low_buffer)
-    if weight <= 0:
-        return global_risk
-    return blend_gated_risk(global_risk, rolling_risk, weight)
+    return apply_soft_gated_risk(
+        global_risk,
+        rolling_risk,
+        weight,
+        weight_power=weight_power,
+        global_floor=global_floor,
+    )
 
 
 def current_snapshot(
@@ -1163,6 +1212,318 @@ def current_snapshot(
         "eqm_75_pct": price_for_risk(fit, date, 0.75),
         "eqm_90_pct": price_for_risk(fit, date, 0.90),
         "eqm_99_9_pct": price_for_risk(fit, date, 1.0),
+    }
+
+
+def _lerp(a: float, b: float, t: float) -> float:
+    return a + float(np.clip(t, 0.0, 1.0)) * (b - a)
+
+
+def resolve_qr_end_scale(
+    asym_median: pd.Series,
+    dates: pd.DatetimeIndex,
+    calibration_date: str = str(CQM_DEFAULTS["qr_calibration_date"]),
+    calibration_median_usd: float = float(CQM_DEFAULTS["qr_calibration_median_usd"]),
+) -> float:
+    """Terminal QR median scale at the calibration date (e.g. ~0.84 on 2026-05-28)."""
+    cal = pd.Timestamp(calibration_date)
+    if cal not in dates:
+        cal = dates[dates <= cal][-1]
+    raw = float(asym_median.loc[cal])
+    return calibration_median_usd / raw
+
+
+def qr_tail_ramp_factor(
+    d: pd.Timestamp,
+    end_scale: float,
+    ramp_start_date: str = str(CQM_DEFAULTS["qr_scale_ramp_start_date"]),
+    calibration_date: str = str(CQM_DEFAULTS["qr_calibration_date"]),
+    ramp_power: float = float(CQM_DEFAULTS["qr_scale_ramp_power"]),
+) -> float:
+    ramp_start = pd.Timestamp(ramp_start_date)
+    cal = pd.Timestamp(calibration_date)
+    if d < ramp_start:
+        return 1.0
+    if d >= cal:
+        return float(end_scale)
+    span = max((cal - ramp_start).days, 1)
+    progress = ((d - ramp_start).days / span) ** ramp_power
+    return _lerp(1.0, float(end_scale), progress)
+
+
+def qr_tail_scale_series(
+    dates: pd.DatetimeIndex,
+    end_scale: float,
+    ramp_start_date: str = str(CQM_DEFAULTS["qr_scale_ramp_start_date"]),
+    calibration_date: str = str(CQM_DEFAULTS["qr_calibration_date"]),
+    ramp_power: float = float(CQM_DEFAULTS["qr_scale_ramp_power"]),
+) -> pd.Series:
+    return pd.Series(
+        [
+            qr_tail_ramp_factor(
+                pd.Timestamp(date),
+                end_scale,
+                ramp_start_date=ramp_start_date,
+                calibration_date=calibration_date,
+                ramp_power=ramp_power,
+            )
+            for date in dates
+        ],
+        index=dates,
+        name="qr_tail_scale",
+    )
+
+
+def qr_anchor_scale_series(
+    dates: pd.DatetimeIndex,
+    raw_median: pd.Series | None = None,
+    **_: object,
+) -> pd.Series:
+    """Legacy no-op kept for experiment scripts; production uses tail scale only."""
+    return pd.Series(1.0, index=dates, name="qr_anchor_scale")
+
+
+def scale_qr_frame(frame: pd.DataFrame, scale: float | pd.Series) -> pd.DataFrame:
+    if np.isscalar(scale):
+        return frame.astype(float) * float(scale)
+    aligned = scale.reindex(frame.index).ffill().bfill()
+    return frame.astype(float).multiply(aligned, axis=0)
+
+
+def build_qr_scaled_frame(
+    asym_frame: pd.DataFrame,
+    end_scale: float | None = None,
+    *,
+    calibration_date: str = str(CQM_DEFAULTS["qr_calibration_date"]),
+    calibration_median_usd: float = float(CQM_DEFAULTS["qr_calibration_median_usd"]),
+    ramp_start_date: str = str(CQM_DEFAULTS["qr_scale_ramp_start_date"]),
+    ramp_power: float = float(CQM_DEFAULTS["qr_scale_ramp_power"]),
+) -> tuple[pd.DataFrame, pd.Series]:
+    """Tail-scaled asymmetric QR fan (uniform scale on all quantile lines)."""
+    dates = asym_frame.index
+    if end_scale is None:
+        end_scale = resolve_qr_end_scale(
+            asym_frame[0.5],
+            dates,
+            calibration_date=calibration_date,
+            calibration_median_usd=calibration_median_usd,
+        )
+    tail_scale = qr_tail_scale_series(
+        dates,
+        end_scale,
+        ramp_start_date=ramp_start_date,
+        calibration_date=calibration_date,
+        ramp_power=ramp_power,
+    )
+    qr_scaled = scale_qr_frame(asym_frame, tail_scale)
+    return qr_scaled, tail_scale
+
+
+def build_fair_value_gold(
+    prices: pd.Series,
+    qr_fair: pd.Series,
+    blend_price_weight: float = float(CQM_DEFAULTS["fair_blend_price_weight"]),
+    gold_sma_weeks: int = int(CQM_DEFAULTS["fair_gold_sma_weeks"]),
+) -> pd.Series:
+    """Log-blend BTC with scaled QR 50%, then causal trailing SMA."""
+    w = float(np.clip(blend_price_weight, 0.0, 1.0))
+    log_blend = w * np.log(prices.astype(float)) + (1.0 - w) * np.log(qr_fair.astype(float))
+    raw = np.exp(log_blend)
+    sma_days = max(gold_sma_weeks * 7, 1)
+    min_periods = max(sma_days // 4, 30)
+    return raw.rolling(sma_days, min_periods=min_periods).mean().rename("fair_gold")
+
+
+def fair_residuals(prices: pd.Series, fair: pd.Series) -> pd.Series:
+    aligned = pd.concat([prices, fair], axis=1, keys=["price", "fair"]).dropna()
+    out = np.log(aligned["price"]) - np.log(aligned["fair"])
+    out.name = "fair_residual"
+    return out
+
+
+def make_fair_fit(base_fit: EQMFit, residuals: pd.Series) -> EQMFit:
+    return replace(base_fit, residuals=residuals.reindex(base_fit.residuals.index))
+
+
+def risk_fair_series(
+    qr_scaled: pd.DataFrame,
+    gold: pd.Series,
+    driver: str = str(CQM_DEFAULTS["risk_fair_driver"]),
+) -> pd.Series:
+    if driver == "gold":
+        return gold
+    return qr_scaled[0.5]
+
+
+def risk_for_price_fair(
+    fit: EQMFit,
+    fair: pd.Series,
+    date: pd.Timestamp,
+    price: float,
+    window_days: int | None = None,
+) -> float:
+    date = pd.Timestamp(date)
+    fair_level = float(fair.loc[date])
+    if not math.isfinite(fair_level) or fair_level <= 0:
+        return float("nan")
+    residual = math.log(price) - math.log(fair_level)
+    if window_days is None:
+        hist = fit.residuals.dropna()
+        residual_pct = empirical_percentile(hist, residual)
+    else:
+        hist = fit.residuals.loc[:date].tail(window_days).dropna()
+        residual_pct = empirical_percentile(hist, residual)
+    return risk_from_residual_percentile(fit, date, residual_pct)
+
+
+def price_for_risk_fair(
+    fit: EQMFit,
+    fair: pd.Series,
+    date: pd.Timestamp,
+    risk: float,
+) -> float:
+    date = pd.Timestamp(date)
+    risk = float(np.clip(risk, 0.0, 1.0))
+    fair_level = float(fair.loc[date])
+    gamma = risk_gamma_for_date(fit, date)
+    high_q = risk_high_quantile_for_date(fit, date)
+    residual_q = fit.low_quantile + (risk ** (1.0 / gamma)) * (high_q - fit.low_quantile)
+    residual = float(fit.residuals.quantile(residual_q))
+    return float(math.exp(math.log(fair_level) + residual))
+
+
+def global_fair_risk_series(
+    fit: EQMFit,
+    prices: pd.Series,
+    fair: pd.Series,
+) -> pd.Series:
+    return pd.Series(
+        [risk_for_price_fair(fit, fair, date, float(price)) for date, price in prices.items()],
+        index=prices.index,
+        name="risk_global",
+    )
+
+
+def gated_fair_risk_series(
+    fit: EQMFit,
+    prices: pd.Series,
+    fair: pd.Series,
+    global_risks: pd.Series | None = None,
+    roll_window_days: int = int(CQM_DEFAULTS["risk_roll_days"]),
+    near_low_window_days: int = int(CQM_DEFAULTS["risk_gate_near_days"]),
+    near_low_buffer: float = float(CQM_DEFAULTS["risk_gate_near_buffer"]),
+    weight_power: float = float(CQM_DEFAULTS["risk_gate_weight_power"]),
+    global_floor: float = float(CQM_DEFAULTS["risk_gate_global_floor"]),
+    use_soft_gate: bool = False,
+) -> pd.Series:
+    """Return global fair-value risk; optional soft gate is legacy diagnostics only."""
+    if global_risks is None:
+        global_risks = global_fair_risk_series(fit, prices, fair)
+    if not use_soft_gate:
+        return global_risks.rename("risk")
+
+    rolling_pct = rolling_empirical_percentiles(fit.residuals, roll_window_days)
+    near_low_min = prices.rolling(near_low_window_days, min_periods=30).min()
+    out = global_risks.copy()
+    for date in prices.index:
+        pct_val = rolling_pct.loc[date]
+        if pd.isna(pct_val):
+            continue
+        rolling_risk = risk_from_residual_percentile(fit, date, float(pct_val))
+        weight = compute_gate_blend_weight(
+            float(prices.loc[date]),
+            float(near_low_min.loc[date]),
+            near_low_buffer=near_low_buffer,
+        )
+        if weight > 0:
+            out.loc[date] = apply_soft_gated_risk(
+                float(global_risks.loc[date]),
+                float(rolling_risk),
+                weight,
+                weight_power=weight_power,
+                global_floor=global_floor,
+            )
+    return out.rename("risk")
+
+
+def build_fair_value_signals(
+    prices: pd.Series,
+    qr_scaled: pd.DataFrame,
+    base_fit: EQMFit,
+    *,
+    blend_price_weight: float = float(CQM_DEFAULTS["fair_blend_price_weight"]),
+    gold_sma_weeks: int = int(CQM_DEFAULTS["fair_gold_sma_weeks"]),
+    risk_fair_driver: str = str(CQM_DEFAULTS["risk_fair_driver"]),
+    use_soft_gate: bool = False,
+    roll_window_days: int = int(CQM_DEFAULTS["risk_roll_days"]),
+    near_low_window_days: int = int(CQM_DEFAULTS["risk_gate_near_days"]),
+    near_low_buffer: float = float(CQM_DEFAULTS["risk_gate_near_buffer"]),
+    weight_power: float = float(CQM_DEFAULTS["risk_gate_weight_power"]),
+    global_floor: float = float(CQM_DEFAULTS["risk_gate_global_floor"]),
+) -> tuple[pd.Series, pd.Series, EQMFit, pd.DataFrame]:
+    """Build gold SMA, QR-50% fair value, and global risk signals (production path)."""
+    gold = build_fair_value_gold(prices, qr_scaled[0.5], blend_price_weight, gold_sma_weeks)
+    fair = risk_fair_series(qr_scaled, gold, risk_fair_driver)
+    risk_fit = make_fair_fit(base_fit, fair_residuals(prices, fair))
+    risk_global = global_fair_risk_series(risk_fit, prices, fair)
+    risk_gated = gated_fair_risk_series(
+        risk_fit,
+        prices,
+        fair,
+        global_risks=risk_global,
+        roll_window_days=roll_window_days,
+        near_low_window_days=near_low_window_days,
+        near_low_buffer=near_low_buffer,
+        weight_power=weight_power,
+        global_floor=global_floor,
+        use_soft_gate=use_soft_gate,
+    )
+    signals = pd.DataFrame(
+        {
+            "price": prices,
+            "gold": gold,
+            "fair": fair,
+            "risk_global": risk_global,
+            "risk": risk_gated,
+        }
+    )
+    signals["score"] = [score_for_risk(float(r), base_fit.score_power) for r in signals["risk"]]
+    return gold, fair, risk_fit, signals
+
+
+def full_sample_fair_value_signals(
+    prices: pd.Series,
+    qr_scaled: pd.DataFrame,
+    base_fit: EQMFit,
+    **kwargs: object,
+) -> pd.DataFrame:
+    """Full-sample fair-value EQM score/risk for charts and snapshots."""
+    _, _, _, signals = build_fair_value_signals(prices, qr_scaled, base_fit, **kwargs)
+    return signals
+
+
+def fair_value_snapshot(
+    risk_fit: EQMFit,
+    fair: pd.Series,
+    prices: pd.Series,
+    date: pd.Timestamp,
+    **kwargs: object,
+) -> dict[str, float]:
+    date = pd.Timestamp(date)
+    price = float(prices.loc[date])
+    risk = float(gated_fair_risk_series(risk_fit, prices, fair, **kwargs).loc[date])
+    return {
+        "price": price,
+        "fair": float(fair.loc[date]),
+        "risk": risk,
+        "score": score_for_risk(risk, risk_fit.score_power),
+        "eqm_0_1_pct": price_for_risk_fair(risk_fit, fair, date, 0.0),
+        "eqm_10_pct": price_for_risk_fair(risk_fit, fair, date, 0.10),
+        "eqm_25_pct": price_for_risk_fair(risk_fit, fair, date, 0.25),
+        "eqm_50_pct": price_for_risk_fair(risk_fit, fair, date, 0.50),
+        "eqm_75_pct": price_for_risk_fair(risk_fit, fair, date, 0.75),
+        "eqm_90_pct": price_for_risk_fair(risk_fit, fair, date, 0.90),
+        "eqm_99_9_pct": price_for_risk_fair(risk_fit, fair, date, 1.0),
     }
 
 

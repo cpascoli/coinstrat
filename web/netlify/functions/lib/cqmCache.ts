@@ -1,7 +1,7 @@
 /**
  * Persist CQM model outputs in the Netlify Blobs signal cache.
  *
- * Runs `fitCQM()` once per refresh and writes gated 2y risk + QR band levels
+ * Runs `fitCQM()` once per refresh and writes global fair-value risk + QR band levels
  * onto each signal row so newsletter compose and API consumers avoid an inline
  * refit (which exceeds Netlify's function timeout).
  */

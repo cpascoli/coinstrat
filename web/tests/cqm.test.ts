@@ -2,7 +2,17 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { fitCQM, snapshotAt, computeGateBlendWeight, blendGatedRisk } from '../src/utils/cqm';
+import {
+  fitCQM,
+  snapshotAt,
+  buildRiskPriceCurve,
+  riskForPriceFair,
+  priceForRiskFair,
+  computeGateBlendWeight,
+  blendGatedRisk,
+  softenGateBlendWeight,
+  applySoftGatedRisk,
+} from '../src/utils/cqm';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -17,6 +27,30 @@ function loadBtcPoints(): { date: string; ts: number; price: number }[] {
   return raw
     .filter((r) => Number.isFinite(r.close) && r.close > 0)
     .map((r) => ({ date: r.date, ts: new Date(r.date).getTime(), price: r.close }));
+}
+
+/** Binance daily tail through 2026-06-06 (not always present in the static JSON). */
+const BTC_TAIL_EXTENSION = [
+  { date: '2026-05-24', price: 77001 },
+  { date: '2026-05-25', price: 77273.26 },
+  { date: '2026-05-26', price: 75842.51 },
+  { date: '2026-05-27', price: 74348.55 },
+  { date: '2026-05-28', price: 73531.95 },
+  { date: '2026-05-29', price: 73384.46 },
+  { date: '2026-05-30', price: 73794.27 },
+  { date: '2026-05-31', price: 73601.92 },
+  { date: '2026-06-01', price: 71329.41 },
+  { date: '2026-06-02', price: 67587.2 },
+  { date: '2026-06-03', price: 68962.85 },
+  { date: '2026-06-04', price: 67074.14 },
+  { date: '2026-06-05', price: 63710.54 },
+  { date: '2026-06-06', price: 60600.46 },
+].map((r) => ({ ...r, ts: new Date(r.date).getTime() }));
+
+function withTail(points: { date: string; ts: number; price: number }[]) {
+  const seen = new Set(points.map((p) => p.date));
+  const extra = BTC_TAIL_EXTENSION.filter((p) => !seen.has(p.date));
+  return [...points, ...extra];
 }
 
 describe('CoinStrat Quantile Model', () => {
@@ -59,9 +93,8 @@ describe('CoinStrat Quantile Model', () => {
     // Sanity-check ranges for an end-of-2025 / 2026 snapshot
     expect(snapshot.solidLower).toBeGreaterThan(0);
     expect(snapshot.solidLower).toBeLessThan(snapshot.solidMedian);
-    // Upper is max(rolling_ATH * upper_ath_factor, QR median). When the QR
-    // median has caught up to the ATH-anchored ceiling the band collapses
-    // and median == upper, which is fine; we only require >=.
+    // v1b solids: upper is tail-scaled QR 99.9%. When it converges with the
+    // gold SMA median the band can collapse (median == upper); we only require >=.
     expect(snapshot.solidUpper).toBeGreaterThanOrEqual(snapshot.solidMedian);
     expect(snapshot.risk).toBeGreaterThanOrEqual(0);
     expect(snapshot.risk).toBeLessThanOrEqual(1);
@@ -71,46 +104,19 @@ describe('CoinStrat Quantile Model', () => {
     expect(snapshot.score).toBeLessThanOrEqual(snapshot.risk + 1e-9);
   });
 
-  it('matches the BTCAnalytica chart at 2026-05-22', () => {
-    const fit = fitCQM(points);
-    const ts = new Date('2026-05-22').getTime();
+  it('matches the fair-value QR calibration at 2026-05-28', () => {
+    const fit = fitCQM(withTail(points));
+    const ts = new Date('2026-05-28').getTime();
     const snapshot = snapshotAt(fit, ts);
     expect(snapshot).not.toBeNull();
     if (!snapshot) return;
-    // Reference values for 2026-05-22:
-    //   - Price / Risk / QR median: from the Python replica (matches the
-    //     statsmodels QR fit at q=0.5).
-    //   - Solid bands: from the BTCAnalytica chart's snapshot box.
-    //
-    //   Price       $75.5K  (BTC close)
-    //   EQM Risk    28.6%   (replica, OLS-residual percentile)
-    //   QR 50%      $125.3K (replica QR median)
-    //   EQM 50%     $108.4K (BTCAnalytica solid gold)
-    //   EQM 99.9%   $159.4K (BTCAnalytica solid red)
-    //   EQM 0.1%    $45.4K  (BTCAnalytica solid green)
-    //
-    // The TS port targets the BTCAnalytica solid bands (NOT the Python
-    // replica's QR-median-based solid bands, which produced parabolic
-    // gold and green lines).
-    expect(snapshot.price).toBeCloseTo(75466.52, 0);
-    expect(snapshot.risk * 100).toBeCloseTo(28.6, 0); // ±0.5%
-    // Solid red: rolling_ATH × 1.28; matches chart within 0.2%.
-    expect(snapshot.solidUpper / 1000).toBeCloseTo(159.6, 0);
-    // Solid gold: rolling-730d Q0.5 of (price/ATH) × ATH(t), running-max.
-    // Fits chart's $108.4K within ~3.5% (predicted $111.9K).
-    expect(snapshot.solidMedian / 1000).toBeGreaterThan(105);
-    expect(snapshot.solidMedian / 1000).toBeLessThan(115);
-    // Solid green: time-decayed weighted Q0.05 of (price/ATH) × ATH(t),
-    // running-max, then clipped from above by 0.95 × rolling-min(price, 30d)
-    // so it acts as a true floor at cycle bottoms. Fits chart's $45.4K
-    // within ~6% (predicted $47.8K) — the price-floor constraint doesn't
-    // bind here because BTC is well above the shelved level.
-    expect(snapshot.solidLower / 1000).toBeGreaterThan(44);
-    expect(snapshot.solidLower / 1000).toBeLessThan(50);
-    expect(snapshot.solidLower).toBeLessThan(snapshot.solidMedian);
-    // Green should be below price by a meaningful margin
+    expect(snapshot.price).toBeCloseTo(73531.95, -1);
+    expect(snapshot.risk * 100).toBeGreaterThan(28);
+    expect(snapshot.risk * 100).toBeLessThan(42);
+    expect(snapshot.qrDashedMedian / 1000).toBeCloseTo(100.8, 0);
+    expect(snapshot.solidMedian).toBeGreaterThan(snapshot.solidLower);
+    expect(snapshot.solidUpper).toBeGreaterThan(snapshot.solidMedian);
     expect(snapshot.solidLower).toBeLessThan(snapshot.price);
-    // Score = risk^score_power, with score_power=1.5
     const expectedScore = Math.pow(snapshot.risk, 1.5);
     expect(snapshot.score).toBeCloseTo(expectedScore, 6);
   });
@@ -145,10 +151,8 @@ describe('CoinStrat Quantile Model', () => {
     }
   });
 
-  it('GREEN band acts as a true price floor at every cycle bottom', () => {
+  it('QR 0.1% band stays below price at major cycle bottoms', () => {
     const fit = fitCQM(points);
-    // The price-floor constraint should keep the green band below BTC at
-    // each major cycle bottom (within the 5% safety buffer).
     const cycleBottoms = [
       { date: '2015-01-15', desc: 'cycle 1' },
       { date: '2018-12-15', desc: 'cycle 2' },
@@ -160,45 +164,38 @@ describe('CoinStrat Quantile Model', () => {
       const snapshot = snapshotAt(fit, ts);
       expect(snapshot, `snapshot at ${date} (${desc})`).not.toBeNull();
       if (!snapshot) continue;
-      // Green must be strictly below price at the bottom — confirms the
-      // floor constraint is working. The 0.95 buffer means the worst-case
-      // ratio is ~0.95.
       expect(
         snapshot.solidLower,
-        `green should be below BTC at ${date} (${desc})`,
+        `QR 0.1% should be below BTC at ${date} (${desc})`,
       ).toBeLessThan(snapshot.price);
-      expect(
-        snapshot.solidLower / snapshot.price,
-        `green/price ratio at ${date} (${desc})`,
-      ).toBeLessThanOrEqual(0.96);
     }
   });
 
-  it('RED band matches BTCAnalytica chart at 2026-05-22 within 0.5%', () => {
-    const fit = fitCQM(points);
-    const ts = new Date('2026-05-22').getTime();
+  it('scaled QR 99.9% band is ordered above gold at 2026-05-28', () => {
+    const fit = fitCQM(withTail(points));
+    const ts = new Date('2026-05-28').getTime();
     const snapshot = snapshotAt(fit, ts);
     expect(snapshot).not.toBeNull();
     if (!snapshot) return;
-    const chartRed = 159_400;
-    const err = Math.abs(snapshot.solidUpper - chartRed) / chartRed;
-    expect(err).toBeLessThan(0.005);
+    expect(snapshot.solidUpper).toBeGreaterThan(snapshot.solidMedian);
+    expect(snapshot.qrDashedHigh).toBeCloseTo(snapshot.solidUpper, -1);
   });
 
-  it('gated 2y risk preserves today calibration and lowers cycle-bottom risk', () => {
-    const globalFit = fitCQM(points, { riskMode: 'global' });
-    const gatedFit = fitCQM(points, { riskMode: 'gated' });
+  it('gated 2y risk preserves May-28 calibration and lowers cycle-bottom risk', () => {
+    const extended = withTail(points);
+    const globalFit = fitCQM(extended, { riskMode: 'global' });
+    const gatedFit = fitCQM(extended, { riskMode: 'gated' });
 
-    const snapshotTs = new Date('2026-05-22').getTime();
+    const snapshotTs = new Date('2026-05-28').getTime();
     const globalSnap = snapshotAt(globalFit, snapshotTs);
     const gatedSnap = snapshotAt(gatedFit, snapshotTs);
     expect(globalSnap).not.toBeNull();
     expect(gatedSnap).not.toBeNull();
     if (!globalSnap || !gatedSnap) return;
 
-    // Gated mode must not change today's risk vs global (reference ~28.6%).
     expect(gatedSnap.risk).toBeCloseTo(globalSnap.risk, 6);
-    expect(gatedSnap.risk * 100).toBeCloseTo(28.6, 0);
+    expect(gatedSnap.risk * 100).toBeGreaterThan(28);
+    expect(gatedSnap.risk * 100).toBeLessThan(42);
 
     const bottoms = ['2015-01-15', '2018-12-15', '2020-03-15', '2022-11-21'];
     for (const date of bottoms) {
@@ -209,14 +206,15 @@ describe('CoinStrat Quantile Model', () => {
       expect(gated, date).not.toBeNull();
       if (!g || !gated) continue;
       expect(gated.risk).toBeLessThanOrEqual(g.risk + 1e-9);
-      expect(gated.risk).toBeLessThanOrEqual(0.15);
+      expect(gated.risk).toBeLessThanOrEqual(0.20);
     }
   });
 
   it('pure rolling risk would over-buy today (sanity check)', () => {
-    const rollingFit = fitCQM(points, { riskMode: 'rolling' });
-    const gatedFit = fitCQM(points, { riskMode: 'gated' });
-    const ts = new Date('2026-05-22').getTime();
+    const extended = withTail(points);
+    const rollingFit = fitCQM(extended, { riskMode: 'rolling' });
+    const gatedFit = fitCQM(extended, { riskMode: 'gated' });
+    const ts = new Date('2026-05-28').getTime();
     const rollingSnap = snapshotAt(rollingFit, ts);
     const gatedSnap = snapshotAt(gatedFit, ts);
     expect(rollingSnap).not.toBeNull();
@@ -241,20 +239,24 @@ describe('CoinStrat Quantile Model', () => {
     expect(blendGatedRisk(0.20, 0.30, 1)).toBeCloseTo(0.20, 6);
   });
 
+  it('softenGateBlendWeight slows linear gate engagement', () => {
+    expect(softenGateBlendWeight(0.5, 2)).toBeCloseTo(0.25, 6);
+    expect(softenGateBlendWeight(1, 2)).toBeCloseTo(1, 6);
+    expect(softenGateBlendWeight(0, 2)).toBeCloseTo(0, 6);
+  });
+
+  it('applySoftGatedRisk floors gated risk as a fraction of global', () => {
+    const cfg = { riskGateWeightPower: 2, riskGateGlobalFloor: 0.75 };
+    // weight 0 → global only
+    expect(applySoftGatedRisk(0.128, 0, 0, cfg)).toBeCloseTo(0.128, 6);
+    // full gate, rolling 0, global 12.8% → floor 9.6%
+    expect(applySoftGatedRisk(0.128, 0, 1, cfg)).toBeCloseTo(0.096, 6);
+    // partial gate: softer than hard blend, above floor
+    expect(applySoftGatedRisk(0.223, 0, 0.09, cfg)).toBeCloseTo(0.221, 2);
+  });
+
   it('gated blend softens near-low entry without a single-day cliff to zero', () => {
-    const extension = [
-      { date: '2026-05-24', ts: new Date('2026-05-24').getTime(), price: 77001 },
-      { date: '2026-05-25', ts: new Date('2026-05-25').getTime(), price: 77273.26 },
-      { date: '2026-05-26', ts: new Date('2026-05-26').getTime(), price: 75842.51 },
-      { date: '2026-05-27', ts: new Date('2026-05-27').getTime(), price: 74348.55 },
-      { date: '2026-05-28', ts: new Date('2026-05-28').getTime(), price: 73531.95 },
-      { date: '2026-05-29', ts: new Date('2026-05-29').getTime(), price: 73384.46 },
-      { date: '2026-05-30', ts: new Date('2026-05-30').getTime(), price: 73794.27 },
-      { date: '2026-05-31', ts: new Date('2026-05-31').getTime(), price: 73601.92 },
-      { date: '2026-06-01', ts: new Date('2026-06-01').getTime(), price: 71329.41 },
-      { date: '2026-06-02', ts: new Date('2026-06-02').getTime(), price: 67587.2 },
-    ];
-    const extended = [...points, ...extension];
+    const extended = withTail(points);
     const fit = fitCQM(extended, { riskMode: 'gated' });
     const may31 = fit.signals.find((s) => s.date === '2026-05-31');
     const jun1 = fit.signals.find((s) => s.date === '2026-06-01');
@@ -265,23 +267,47 @@ describe('CoinStrat Quantile Model', () => {
     if (!may31 || !jun1 || !jun2) return;
 
     const oneDayDrop = may31.risk - jun1.risk;
-    expect(oneDayDrop).toBeGreaterThan(0.02);
-    expect(oneDayDrop).toBeLessThan(0.20);
-    expect(jun1.risk).toBeGreaterThan(0.03);
+    // Soft gate: gradual transition, not a cliff to zero.
+    expect(oneDayDrop).toBeGreaterThan(0);
+    expect(oneDayDrop).toBeLessThan(0.10);
+    expect(jun1.risk).toBeGreaterThan(0.15);
     expect(jun2.risk).toBeLessThanOrEqual(jun1.risk + 1e-9);
+    expect(jun2.risk).toBeGreaterThan(0.10);
   });
 
-  it('exposes asymmetric QR fan values at the snapshot date', () => {
-    const fit = fitCQM(points);
-    const ts = new Date('2026-05-22').getTime();
+  it('exposes scaled asymmetric QR fan values at the snapshot date', () => {
+    const fit = fitCQM(withTail(points));
+    const ts = new Date('2026-05-28').getTime();
     const snapshot = snapshotAt(fit, ts);
     expect(snapshot).not.toBeNull();
     if (!snapshot) return;
     expect(snapshot.qrDashedLow).toBeGreaterThan(0);
     expect(snapshot.qrDashedMedian).toBeGreaterThan(snapshot.qrDashedLow);
     expect(snapshot.qrDashedHigh).toBeGreaterThan(snapshot.qrDashedMedian);
-    // Upper QR tail should bend (compress) — at snapshot median below old OLS fan
-    expect(snapshot.qrDashedMedian / 1000).toBeGreaterThan(100);
-    expect(snapshot.qrDashedMedian / 1000).toBeLessThan(140);
+    expect(snapshot.qrDashedMedian / 1000).toBeCloseTo(100.8, 0);
+  });
+
+  it('builds a monotonic risk-vs-price curve with invertible knot prices', () => {
+    const fit = fitCQM(withTail(points));
+    const ts = new Date('2026-06-06').getTime();
+    const snapshot = snapshotAt(fit, ts);
+    expect(snapshot).not.toBeNull();
+    if (!snapshot) return;
+
+    const curve = buildRiskPriceCurve(fit, ts, 120);
+    expect(curve.length).toBe(120);
+    for (let i = 1; i < curve.length; i++) {
+      expect(curve[i].riskPct).toBeGreaterThanOrEqual(curve[i - 1].riskPct - 1e-9);
+    }
+
+    for (const risk of [0, 0.25, 0.5, 0.75, 1]) {
+      const price = priceForRiskFair(fit, ts, risk);
+      expect(price).toBeGreaterThan(0);
+      expect(riskForPriceFair(fit, ts, price)).toBeCloseTo(risk, 2);
+    }
+
+    const atSpot = riskForPriceFair(fit, ts, snapshot.price);
+    expect(atSpot).toBeGreaterThan(0);
+    expect(atSpot).toBeLessThanOrEqual(1);
   });
 });

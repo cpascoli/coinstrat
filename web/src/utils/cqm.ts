@@ -1,73 +1,37 @@
 /**
  * CoinStrat Quantile Model (CQM) — TypeScript port of the Python EQM replica
- * developed in EQM-model/. Default parameters live in DEFAULT_CONFIG below and
- * must stay in sync with eqm_model.CQM_DEFAULTS. The model is a reverse-engineered approximation of
- * BTCAnalytica's "Empirical Quantile Model" (EQM) chart.
+ * in EQM-model/. Defaults in DEFAULT_CONFIG must stay in sync with
+ * eqm_model.CQM_DEFAULTS. Reverse-engineered approximation of BTCAnalytica's
+ * Empirical Quantile Model (EQM).
  *
- * Two trends are computed:
- *   - OLS trend on log(price) ~ days_since_start ** time_power (used for the
- *     EQM Risk and EQM Score signals)
- *   - QR median trend, fit by IRLS for the LAD problem (used as a warm-up
- *     fallback for the very first days before the rolling/decayed quantile
- *     bands have enough history)
+ * Production v1b fair-value model
+ * --------------------------------
+ * Scaled asymmetric QR fan (Cowen 2026 parabola in log10 price vs log-days
+ * since 2009), uniform tail scale from 2022 → qrCalibrationDate (~$100.8K
+ * QR 50% on 2026-05-28). No early-era $220 anchor boost.
  *
- * Solid bands at any date t:
- *   r(s)               = price(s) / rolling_ATH(s)         for s ≤ t
+ * Solid chart bands at date t:
+ *   solid_0.1%(t)  = tail-scaled asymmetric QR 0.1%
+ *   solid_50%(t)   = SMA( log-blend(price, QR 50%) ) over fairGoldSmaWeeks
+ *   solid_99.9%(t) = tail-scaled asymmetric QR 99.9%
  *
- *   gold_shelved(t)    = running_max( ATH(t) × Q_0.5( r over last 730 days ) )
- *   gold_ceiling(t)    = rolling_min(price, 30 days) × 2.0
- *   solid_50%(t)       = min( gold_shelved(t), gold_ceiling(t) )
+ * Dotted QR lines use the same scaled fan. Risk fair value = QR 50% dashed.
  *
- *   green_shelved(t)   = running_max( ATH(t) × weighted_Q_0.05( r,
- *                          weights = exp(-λ × age_in_years), λ = ln 2 / 1y ) )
- *   green_floor(t)     = rolling_min(price, 30 days) × 0.95
- *   solid_0.1%(t)      = min( green_shelved(t), green_floor(t) )
+ * EQM Risk (default riskMode='global'):
+ *   residual(t) = log(price) - log(QR_50%(t))
+ *   risk(t)     = soft_map( empirical_percentile(residual, full_sample) )
  *
- *   solid_99.9%(t)     = max( rolling_ATH(t) × upper_ath_factor, solid_50%(t) )
+ * Score = risk^score_power (computed but not shown on the charts page).
+ * OLS log-trend is fit for reference only; it does not drive risk or bands.
  *
- * Both GOLD and GREEN are shelved (running-max) and then clipped from above
- * by a multiple of the recent rolling-min price. The clip:
- *   - Pulls GOLD down during deep bear bottoms (2015, 2018, 2022) so it
- *     stays *between red and green* on the chart instead of plateauing at
- *     the previous-cycle's bull peak level. Buffer 2.0× rolling-min keeps
- *     gold visually in the middle band area.
- *   - Pushes GREEN below BTC at every cycle bottom so it visually acts as
- *     a true "deep value floor". Buffer 0.95× rolling-min leaves a 5%
- *     safety margin between the floor and the actual cycle low.
- * In both cases the constraint doesn't bind during bull markets / corrections
- * from peak, so the BTCAnalytica snapshot match is preserved.
- *
- * The time-decay weighting (1-year half-life) biases the low quantile
- * toward recent observations so as BTC has matured the implied green/ATH
- * multiplier drifts upward (≈0.27 in 2018, ≈0.37 in 2026).
- *
- * Verified against the BTCAnalytica May 22, 2026 snapshot:
- *   EQM 0.1%   $45.4K  → predicted $47.8K  (+5.2%)
- *   EQM 50%    $108.4K → predicted $111.9K (+3.2%)
- *   EQM 99.9%  $159.4K → predicted $159.6K (+0.1%)
- *
- * EQM Risk (default riskMode='gated'):
- *   global_risk(t) = soft_map( percentile(residual_ols, full_sample) )
- *   rolling_risk(t)= soft_map( percentile(residual_ols, last 730 days) )
- *   risk(t)        = global_risk(t)  when price is far above the local low
- *   near_low(t)    = min(price, last riskGateNearDays)
- *   w(t)           = 0                               if price ≥ riskGateNearBuffer × near_low
- *                  = 1                               if price ≤ near_low
- *                  = linear ramp between those bands otherwise
- *   target(t)      = min(global, rolling)
- *   risk(t)        = global − w × (global − target)  (smooth gated blend near lows)
- *
- * Dashed QR fan (asymmetric quadratic quantile model, Cowen 2026):
- *   log10(price) = c_tau + a_tau * x + b(tau) * x^2,  x = ln(days since 2009) - mu
- *   Upper tail compresses (b_HI < 0); lower tail stays near-linear. Bands are
- *   rearranged at each date so quantile lines never cross.
+ * riskMode='gated' | 'rolling' remain for diagnostics/backtests only.
  */
 
 export interface CQMPoint {
   date: string;             // YYYY-MM-DD
   ts: number;               // epoch ms
   price: number;
-  trendOls: number;         // OLS trend (risk-model fair value)
+  trendOls: number;         // legacy OLS log-trend (display/reference only)
   qrMedian: number;         // QR median trend
   solidLower: number;
   solidMedian: number;
@@ -126,15 +90,16 @@ export interface CQMFit {
   // Sorted residual arrays for empirical quantile lookups
   sortedOlsResiduals: Float64Array;
   sortedQrResiduals: Float64Array;
-  // Solid-band parameters
-  solidGoldWindow: number;            // GOLD: rolling-window for ATH-relative Q0.5 fit
-  solidGoldFloorWindow: number;       // GOLD: rolling-min price window (days)
-  solidGoldFloorBuffer: number;       // GOLD: rolling-min × this caps gold from above
-  solidGreenHalfLifeYears: number;    // GREEN: half-life of time-decay weighting
-  solidGreenQuantile: number;         // GREEN: quantile q in weighted Q_q(price/ATH)
-  solidGreenFloorWindow: number;      // GREEN: rolling-min price window (days)
-  solidGreenFloorBuffer: number;      // GREEN: rolling-min × this gives the price floor
-  upperAthFactor: number;             // RED: multiplier on rolling ATH
+  sortedFairResiduals: Float64Array;
+  // Legacy ATH-shelved band params (retained on CQMFit; v1b solids use scaled QR)
+  solidGoldWindow: number;
+  solidGoldFloorWindow: number;
+  solidGoldFloorBuffer: number;
+  solidGreenHalfLifeYears: number;
+  solidGreenQuantile: number;
+  solidGreenFloorWindow: number;
+  solidGreenFloorBuffer: number;
+  upperAthFactor: number;
   // Fallback for the warm-up window where the green band has too little
   // history; used to avoid plotting NaNs at the start of the chart.
   solidGreenWarmupOffset: number;     // log offset = empirical_quantile(0.001, qrResiduals)
@@ -168,81 +133,48 @@ export interface CQMConfig {
   riskHighQuantileStart?: number;
   riskHighQuantile2018?: number;
   riskHighQuantile2022?: number;
-  /**
-   * Multiplier applied to the rolling all-time-high to produce the solid
-   * upper (red) band. Verified at 1.28 against the BTCAnalytica snapshot.
-   */
+  /** Legacy ATH-shelved band params (retained for API compat; v1b solids use scaled QR). */
   upperAthFactor?: number;
-  /**
-   * Window (in calendar days) used by the ATH-relative solid GOLD band.
-   * The band at time t is `running_max(ATH(t) × Q_0.5(price/ATH over last
-   * solidGoldWindow days))`. 730 was the closest fit to the May 22, 2026
-   * BTCAnalytica snapshot value of $108.4K (predicted $111.9K, +3.2%).
-   */
   solidGoldWindow?: number;
-  /**
-   * Rolling-window length (days) for the gold-band price-relative ceiling.
-   * The ceiling clips gold to be ≤ rolling_min(price, this window) ×
-   * solidGoldFloorBuffer. 30d matches the typical duration of a cycle-low
-   * basing pattern so gold gets pulled down during the deepest bear
-   * bottoms toward the realistic fair-value range.
-   */
   solidGoldFloorWindow?: number;
-  /**
-   * Multiplier on rolling-min price for the gold-band price-relative
-   * ceiling. 2.0 means gold is clipped at 2× the recent rolling-min during
-   * deep bears (so it stays approximately between red and green), but the
-   * constraint does NOT bind in bull markets or corrections from peak (so
-   * the BTCAnalytica snapshot match is preserved).
-   */
   solidGoldFloorBuffer?: number;
-  /**
-   * Half-life in YEARS for the time-decayed weighted quantile that drives
-   * the shelved-green band. 1.0 was the closest fit to the BTCAnalytica
-   * May 22, 2026 snapshot ($45.4K → predicted $47.8K, +5.2%).
-   */
   solidGreenHalfLifeYears?: number;
-  /**
-   * Quantile q for the time-decayed weighted Q_q(price/ATH) used by the
-   * shelved-green band. Default 0.05 mirrors the empirical lower envelope
-   * of recent BTC drawdown ratios.
-   */
   solidGreenQuantile?: number;
-  /**
-   * Maximum lookback (in days) for the green band's weighted quantile.
-   * With a 1-year half-life, weights beyond 5 years are <3% so this
-   * truncation is a speed optimization with negligible effect on values.
-   */
   solidGreenMaxLookbackDays?: number;
-  /**
-   * Rolling-window length (days) for the green-band price-floor constraint.
-   * The constraint clips green to be ≤ rolling_min(price, this window) ×
-   * solidGreenFloorBuffer. 30d matches the typical duration of a
-   * cycle-low basing pattern.
-   */
   solidGreenFloorWindow?: number;
-  /**
-   * Multiplier on rolling-min price for the green-band price-floor
-   * constraint. 0.95 leaves a 5% safety margin between the floor and the
-   * actual cycle low while preserving the snapshot match.
-   */
   solidGreenFloorBuffer?: number;
   trendRiskWindow?: number;     // calendar days (default 60)
   trendRiskLowQ?: number;       // default 0.10
   trendRiskHighQ?: number;      // default 0.90
   /**
-   * EQM risk mapping mode. 'gated' (default) keeps the global full-sample risk
-   * except near cycle lows, where a smooth blend toward min(global, rolling)
-   * applies so the DCA bot buys more aggressively at bottoms without a hard
-   * cliff when price enters the near-low zone.
+   * EQM risk mapping mode. Production default is 'global' (full-sample
+   * empirical percentile). 'gated' and 'rolling' are legacy diagnostics only.
    */
   riskMode?: 'global' | 'rolling' | 'gated';
-  /** Trailing window for rolling/gated risk (730 = 2 years). */
+  /** Trailing window for legacy rolling/gated risk (730 = 2 years). */
   riskRollDays?: number;
-  /** Near-local-low lookback for gated risk (days). */
+  /** Near-local-low lookback for legacy gated risk (days). */
   riskGateNearDays?: number;
   /** Price at or above this × near-low min uses global risk only (weight = 0). */
   riskGateNearBuffer?: number;
+  /**
+   * Exponent applied to the gate blend weight before mixing toward rolling risk.
+   * Values > 1 slow engagement (e.g. 2.0 → at linear weight 0.5 only 25% rolling pull).
+   */
+  riskGateWeightPower?: number;
+  /** Legacy gated risk: floor as a fraction of global risk when gate is active. */
+  riskGateGlobalFloor?: number;
+  /** Tail-ramp endpoint: QR 50% is calibrated to this USD level on this date. */
+  qrCalibrationDate?: string;
+  qrCalibrationMedianUsd?: number;
+  /** Tail scale is 1.0 before this date, then ramps to the calibration endpoint. */
+  qrScaleRampStartDate?: string;
+  qrScaleRampPower?: number;
+  /** Log-blend weight on BTC price when building the gold SMA band. */
+  fairBlendPriceWeight?: number;
+  fairGoldSmaWeeks?: number;
+  /** Fair-value driver for risk: 'qr50' (default) or 'gold'. */
+  riskFairDriver?: 'qr50' | 'gold';
 }
 
 const DEFAULT_CONFIG: Required<CQMConfig> = {
@@ -269,10 +201,19 @@ const DEFAULT_CONFIG: Required<CQMConfig> = {
   trendRiskWindow: 60,
   trendRiskLowQ: 0.10,
   trendRiskHighQ: 0.90,
-  riskMode: 'gated',
+  riskMode: 'global',
   riskRollDays: 730,
   riskGateNearDays: 120,
   riskGateNearBuffer: 1.15,
+  riskGateWeightPower: 2.0,
+  riskGateGlobalFloor: 0.75,
+  qrCalibrationDate: '2026-05-28',
+  qrCalibrationMedianUsd: 100_800,
+  qrScaleRampStartDate: '2022-01-01',
+  qrScaleRampPower: 1.0,
+  fairBlendPriceWeight: 0.5,
+  fairGoldSmaWeeks: 20,
+  riskFairDriver: 'qr50',
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -480,6 +421,31 @@ export function blendGatedRisk(
   return globalRisk - w * (globalRisk - target);
 }
 
+/** Slow the linear gate weight so rolling correction engages gradually. */
+export function softenGateBlendWeight(weight: number, power: number): number {
+  const w = clamp(weight, 0, 1);
+  if (!Number.isFinite(power) || power <= 0) return 0;
+  if (power === 1) return w;
+  return Math.pow(w, power);
+}
+
+/**
+ * Gated blend with softened weight and a global-risk floor (prototype soft gate).
+ * When gateWeight is 0, returns globalRisk unchanged.
+ */
+export function applySoftGatedRisk(
+  globalRisk: number,
+  rollingRisk: number,
+  gateWeight: number,
+  cfg: Pick<Required<CQMConfig>, 'riskGateWeightPower' | 'riskGateGlobalFloor'>,
+): number {
+  if (gateWeight <= 0) return globalRisk;
+  const w = softenGateBlendWeight(gateWeight, cfg.riskGateWeightPower);
+  const blended = blendGatedRisk(globalRisk, rollingRisk, w);
+  const floor = cfg.riskGateGlobalFloor * globalRisk;
+  return Math.max(blended, floor);
+}
+
 // --- asymmetric quadratic QR fan (Cowen 2026) ------------------------------
 
 const QR_GENESIS_MS = new Date('2009-01-01').getTime();
@@ -632,6 +598,100 @@ function asymmetricPricesAt(
   const out = new Map<number, number>();
   quantiles.forEach((q, i) => out.set(q, sorted[i]));
   return out;
+}
+
+function lerp(a: number, b: number, t: number): number {
+  const w = clamp(t, 0, 1);
+  return a + w * (b - a);
+}
+
+function qrTailRampFactor(
+  ts: number,
+  endScale: number,
+  cfg: Required<CQMConfig>,
+): number {
+  const rampStart = new Date(cfg.qrScaleRampStartDate).getTime();
+  const cal = new Date(cfg.qrCalibrationDate).getTime();
+  if (ts < rampStart) return 1;
+  if (ts >= cal) return endScale;
+  const span = Math.max(cal - rampStart, DAY_MS);
+  const progress = ((ts - rampStart) / span) ** cfg.qrScaleRampPower;
+  return lerp(1, endScale, progress);
+}
+
+function rollingMean(values: Float64Array, window: number, minPeriods: number): Float64Array {
+  const n = values.length;
+  const out = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const start = Math.max(0, i - window + 1);
+    const count = i - start + 1;
+    if (count < minPeriods) {
+      out[i] = NaN;
+      continue;
+    }
+    let sum = 0;
+    for (let j = start; j <= i; j++) sum += values[j];
+    out[i] = sum / count;
+  }
+  return out;
+}
+
+/** Tail-scaled asymmetric QR 0.1% / 50% / 99.9% (uniform scale on all quantiles). */
+function buildScaledQrBands(
+  asymFit: AsymmetricQuantileFit,
+  cleaned: PricePoint[],
+  cfg: Required<CQMConfig>,
+): { qrLow: Float64Array; qrMed: Float64Array; qrHigh: Float64Array } {
+  const n = cleaned.length;
+  const rawLow = new Float64Array(n);
+  const rawMed = new Float64Array(n);
+  const rawHigh = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const bands = asymmetricPricesAt(asymFit, cleaned[i].ts, QR_FAN_QUANTILES);
+    rawLow[i] = bands.get(0.001) ?? NaN;
+    rawMed[i] = bands.get(0.5) ?? NaN;
+    rawHigh[i] = bands.get(0.999) ?? NaN;
+  }
+
+  const calTs = new Date(cfg.qrCalibrationDate).getTime();
+  let calIdx = n - 1;
+  for (let i = 0; i < n; i++) {
+    if (cleaned[i].ts <= calTs) calIdx = i;
+  }
+  const endScale = cfg.qrCalibrationMedianUsd / rawMed[calIdx];
+
+  const qrLow = new Float64Array(n);
+  const qrMed = new Float64Array(n);
+  const qrHigh = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const ts = cleaned[i].ts;
+    const tailScale = qrTailRampFactor(ts, endScale, cfg);
+    qrLow[i] = rawLow[i] * tailScale;
+    qrMed[i] = rawMed[i] * tailScale;
+    qrHigh[i] = rawHigh[i] * tailScale;
+  }
+  return { qrLow, qrMed, qrHigh };
+}
+
+function buildFairValueGold(
+  logPrice: Float64Array,
+  qrMed: Float64Array,
+  blendWeight: number,
+  smaWeeks: number,
+): Float64Array {
+  const n = logPrice.length;
+  const w = clamp(blendWeight, 0, 1);
+  const raw = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    if (!Number.isFinite(qrMed[i]) || qrMed[i] <= 0) {
+      raw[i] = NaN;
+      continue;
+    }
+    raw[i] = Math.exp(w * logPrice[i] + (1 - w) * Math.log(qrMed[i]));
+  }
+  const smaDays = Math.max(smaWeeks * 7, 1);
+  const minPeriods = Math.max(Math.floor(smaDays / 4), 30);
+  return rollingMean(raw, smaDays, minPeriods);
 }
 
 function nelderMeadSimplex(
@@ -909,7 +969,6 @@ export function fitCQM(prices: PricePoint[], config: CQMConfig = {}): CQMFit {
   const sortedOls = sortedCopy(olsResiduals);
   const sortedQr = sortedCopy(qrResiduals);
 
-  // Rolling all-time-high (expanding maximum)
   const rollingAth = new Float64Array(n);
   let runningMax = -Infinity;
   for (let i = 0; i < n; i++) {
@@ -917,7 +976,6 @@ export function fitCQM(prices: PricePoint[], config: CQMConfig = {}): CQMFit {
     rollingAth[i] = runningMax;
   }
 
-  // 60-day rolling quantile envelope on raw price (Trend-Risk Composite).
   const priceArr = new Float64Array(n);
   for (let i = 0; i < n; i++) priceArr[i] = cleaned[i].price;
   const minPeriods = Math.max(Math.floor(cfg.trendRiskWindow / 4), 10);
@@ -925,69 +983,52 @@ export function fitCQM(prices: PricePoint[], config: CQMConfig = {}): CQMFit {
   const trMedian = rollingQuantile(priceArr, cfg.trendRiskWindow, 0.5, minPeriods);
   const trUpper = rollingQuantile(priceArr, cfg.trendRiskWindow, cfg.trendRiskHighQ, minPeriods);
 
-  // GOLD band: rolling Q0.5 of (price/ATH) over a multi-year window,
-  // multiplied by the current ATH, then running-max so the band shelves.
-  const ratios = new Float64Array(n);
-  for (let i = 0; i < n; i++) ratios[i] = cleaned[i].price / rollingAth[i];
-
-  const goldMinPeriods = Math.max(Math.floor(cfg.solidGoldWindow / 4), 30);
-  const goldRatioMedian = rollingQuantile(
-    ratios,
-    cfg.solidGoldWindow,
-    0.5,
-    goldMinPeriods,
-  );
-  const goldShelved = new Float64Array(n);
-  let goldRunMax = -Infinity;
-  for (let i = 0; i < n; i++) {
-    const q = goldRatioMedian[i];
-    const raw = q === null ? NaN : rollingAth[i] * q;
-    if (Number.isFinite(raw)) {
-      if (raw > goldRunMax) goldRunMax = raw;
-      goldShelved[i] = goldRunMax;
-    } else {
-      goldShelved[i] = NaN;
+  let scaledQrLow = new Float64Array(n);
+  let scaledQrMed = new Float64Array(n);
+  let scaledQrHigh = new Float64Array(n);
+  if (asymFit) {
+    const scaled = buildScaledQrBands(asymFit, cleaned, cfg);
+    scaledQrLow.set(scaled.qrLow);
+    scaledQrMed.set(scaled.qrMed);
+    scaledQrHigh.set(scaled.qrHigh);
+  } else {
+    for (let i = 0; i < n; i++) {
+      const med = Math.exp(qr.intercept + qr.slope * x[i]);
+      scaledQrMed[i] = med;
+      scaledQrLow[i] = med;
+      scaledQrHigh[i] = med;
     }
   }
 
-  // GREEN band: time-decayed weighted Q0.05 of (price/ATH), multiplied by
-  // the current ATH, then running-max so the band shelves. The weighting
-  // gives recent observations more influence so the implied ATH multiplier
-  // drifts upward as BTC's drawdowns have grown shallower over time —
-  // matching the chart's non-stationary green/ATH ratio.
-  const greenRatioQ = timeDecayedWeightedQuantile(
-    ratios,
-    cfg.solidGreenHalfLifeYears,
-    cfg.solidGreenQuantile,
-    /* minHistoryDays */ 365,
-    cfg.solidGreenMaxLookbackDays,
+  const fairGold = buildFairValueGold(
+    logPrice,
+    scaledQrMed,
+    cfg.fairBlendPriceWeight,
+    cfg.fairGoldSmaWeeks,
   );
-  const greenShelved = new Float64Array(n);
-  let greenRunMax = -Infinity;
-  for (let i = 0; i < n; i++) {
-    const q = greenRatioQ[i];
-    const raw = q === null ? NaN : rollingAth[i] * q;
-    if (Number.isFinite(raw)) {
-      if (raw > greenRunMax) greenRunMax = raw;
-      greenShelved[i] = greenRunMax;
-    } else {
-      greenShelved[i] = NaN;
-    }
-  }
 
-  // Price-relative ceilings for gold and green: clip each shelved series to
-  // be at most `floor_buffer × rolling_min(price, floor_window)`. The
-  // green ceiling (~0.95×) forces the band below BTC at cycle bottoms so it
-  // visually acts as a deep-value floor. The gold ceiling (~2.0×) pulls
-  // gold down during bear bottoms toward the realistic fair-value range so
-  // it stays "approximately between red and green" instead of plateauing
-  // at the previous-cycle's bull peak. Neither constraint binds during
-  // bull markets / corrections from peak, so the snapshot match is
-  // preserved.
+  const fairResiduals = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const fairLevel = cfg.riskFairDriver === 'gold'
+      ? fairGold[i]
+      : scaledQrMed[i];
+    if (!Number.isFinite(fairLevel) || fairLevel <= 0) {
+      fairResiduals[i] = NaN;
+      continue;
+    }
+    fairResiduals[i] = logPrice[i] - Math.log(fairLevel);
+  }
+  const fairValid: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (Number.isFinite(fairResiduals[i])) fairValid.push(fairResiduals[i]);
+  }
+  fairValid.sort((a, b) => a - b);
+  const sortedFairResiduals = new Float64Array(fairValid);
+
   const computeRollingMin = (window: number): Float64Array => {
     const W = Math.max(1, window);
     const out = new Float64Array(n);
-    const deque: number[] = []; // indices; values monotonically increasing
+    const deque: number[] = [];
     for (let i = 0; i < n; i++) {
       while (deque.length > 0 && deque[0] <= i - W) deque.shift();
       while (
@@ -1001,27 +1042,20 @@ export function fitCQM(prices: PricePoint[], config: CQMConfig = {}): CQMFit {
     }
     return out;
   };
-  const greenRollingPriceMin = computeRollingMin(cfg.solidGreenFloorWindow);
-  const goldRollingPriceMin =
-    cfg.solidGoldFloorWindow === cfg.solidGreenFloorWindow
-      ? greenRollingPriceMin
-      : computeRollingMin(cfg.solidGoldFloorWindow);
 
   const rollMinPeriods = Math.max(Math.floor(cfg.riskRollDays / 4), 30);
   const rollingPct =
     cfg.riskMode === 'global'
       ? null
-      : rollingEmpiricalPercentile(olsResiduals, cfg.riskRollDays, rollMinPeriods);
+      : rollingEmpiricalPercentile(fairResiduals, cfg.riskRollDays, rollMinPeriods);
   const nearLowMin =
     cfg.riskMode === 'gated'
       ? computeRollingMin(cfg.riskGateNearDays)
       : null;
 
-  // Warm-up fallback for the first ~365 days where the time-decayed quantile
-  // is not yet defined: use QR_median × exp(0.001 quantile of residuals).
   const solidGreenWarmupOffset = empiricalQuantile(sortedQr, 0.001);
   const endTs = cleaned[n - 1].ts;
-  const latestPct = empiricalPercentile(sortedOls, olsResiduals[n - 1]);
+  const latestPct = empiricalPercentile(sortedFairResiduals, fairResiduals[n - 1]);
   const latestLinearRisk = clamp(
     (latestPct - cfg.lowQ) / (cfg.highQ - cfg.lowQ),
     0,
@@ -1044,52 +1078,17 @@ export function fitCQM(prices: PricePoint[], config: CQMConfig = {}): CQMFit {
   const signals: CQMPoint[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const trendOls = Math.exp(ols.intercept + ols.slope * x[i]);
-    const qrMedian = Math.exp(qr.intercept + qr.slope * x[i]);
-    // GOLD: shelved rolling Q0.5 of (price/ATH) × ATH(t), then clipped from
-    // above by `solidGoldFloorBuffer × rolling_min(price)` so during deep
-    // bear bottoms gold gets pulled down from the previous-cycle's shelved
-    // level toward the realistic fair-value range. Falls back to QR median
-    // during the first ~goldMinPeriods days.
-    const goldShelvedI = Number.isFinite(goldShelved[i])
-      ? goldShelved[i]
-      : qrMedian;
-    const goldCeiling = goldRollingPriceMin[i] * cfg.solidGoldFloorBuffer;
-    const solidMedian = Math.min(goldShelvedI, goldCeiling);
-    // GREEN: shelved time-decayed weighted Q0.05 of (price/ATH) × ATH(t),
-    // clipped from above by `solidGreenFloorBuffer × rolling_min(price)` so
-    // the band is always a true floor below BTC at cycle bottoms.
-    // Falls back to QR_median × exp(low residual quantile) during warm-up.
-    const greenShelvedI = Number.isFinite(greenShelved[i])
-      ? greenShelved[i]
-      : qrMedian * Math.exp(solidGreenWarmupOffset);
-    const greenPriceFloor = greenRollingPriceMin[i] * cfg.solidGreenFloorBuffer;
-    const solidLower = Math.min(greenShelvedI, greenPriceFloor);
-    // RED: rolling ATH × factor, floored by the GOLD line.
-    const solidUpper = Math.max(
-      rollingAth[i] * cfg.upperAthFactor,
-      solidMedian,
-    );
+    const qrMedian = scaledQrMed[i];
+    const solidLower = scaledQrLow[i];
+    const solidMedian = Number.isFinite(fairGold[i]) ? fairGold[i] : qrMedian;
+    const solidUpper = scaledQrHigh[i];
+    const qrDashedLow = scaledQrLow[i];
+    const qrDashedMedian = scaledQrMed[i];
+    const qrDashedHigh = scaledQrHigh[i];
 
-    // Asymmetric quadratic QR fan (0.1% / 50% / 99.9%), rearranged per date.
-    let qrDashedLow = trendOls * Math.exp(empiricalQuantile(sortedOls, 0.001));
-    let qrDashedMedian = qrMedian;
-    let qrDashedHigh = trendOls * Math.exp(empiricalQuantile(sortedOls, 0.999));
-    if (asymFit) {
-      const bands = asymmetricPricesAt(asymFit, cleaned[i].ts, QR_FAN_QUANTILES);
-      const low = bands.get(0.001);
-      const med = bands.get(0.5);
-      const high = bands.get(0.999);
-      if (low !== undefined && Number.isFinite(low)) qrDashedLow = low;
-      if (med !== undefined && Number.isFinite(med)) qrDashedMedian = med;
-      if (high !== undefined && Number.isFinite(high)) qrDashedHigh = high;
-    }
-
-    // Risk: cycle-aware percentile mapping. Older cycles use a higher upper
-    // anchor to account for BTC's diminishing return profile; the latest
-    // endpoint decays back to cfg.highQ, preserving the current calibration.
-    // With riskMode='gated', blend toward min(global, rolling) between the near-low
-    // min (weight 1) and riskGateNearBuffer × near-low (weight 0).
-    const pct = empiricalPercentile(sortedOls, olsResiduals[i]);
+    const pct = Number.isFinite(fairResiduals[i])
+      ? empiricalPercentile(sortedFairResiduals, fairResiduals[i])
+      : 0.5;
     let risk = riskFromPercentile(pct, cleaned[i].ts, endTs, cfg, riskGammaCurrent);
 
     if (rollingPct !== null && Number.isFinite(rollingPct[i])) {
@@ -1105,7 +1104,7 @@ export function fitCQM(prices: PricePoint[], config: CQMConfig = {}): CQMFit {
       } else if (cfg.riskMode === 'gated' && nearLowMin !== null) {
         const gateWeight = computeGateBlendWeight(cleaned[i].price, nearLowMin[i], cfg);
         if (gateWeight > 0) {
-          risk = blendGatedRisk(risk, rollingRisk, gateWeight);
+          risk = applySoftGatedRisk(risk, rollingRisk, gateWeight, cfg);
         }
       }
     }
@@ -1152,6 +1151,7 @@ export function fitCQM(prices: PricePoint[], config: CQMConfig = {}): CQMFit {
     riskHighQuantile2022: cfg.riskHighQuantile2022,
     sortedOlsResiduals: sortedOls,
     sortedQrResiduals: sortedQr,
+    sortedFairResiduals,
     solidGoldWindow: cfg.solidGoldWindow,
     solidGoldFloorWindow: cfg.solidGoldFloorWindow,
     solidGoldFloorBuffer: cfg.solidGoldFloorBuffer,
@@ -1165,6 +1165,92 @@ export function fitCQM(prices: PricePoint[], config: CQMConfig = {}): CQMFit {
     pricesTimestamps: ts,
     signals,
   };
+}
+
+function riskMappingCfg(fit: CQMFit): Required<CQMConfig> {
+  return {
+    ...DEFAULT_CONFIG,
+    lowQ: fit.lowQ,
+    highQ: fit.highQ,
+    scorePower: fit.scorePower,
+    riskGammaStart: fit.riskGammaStart,
+    riskGamma2018: fit.riskGamma2018,
+    riskGamma2022: fit.riskGamma2022,
+    riskHighQuantileStart: fit.riskHighQuantileStart,
+    riskHighQuantile2018: fit.riskHighQuantile2018,
+    riskHighQuantile2022: fit.riskHighQuantile2022,
+  };
+}
+
+/** Global (ungated) fair-value risk for a hypothetical price at snapshot date. */
+export function riskForPriceFair(fit: CQMFit, ts: number, price: number): number {
+  const snap = snapshotAt(fit, ts);
+  if (!snap || !Number.isFinite(price) || price <= 0) return NaN;
+  const fair = snap.qrDashedMedian;
+  if (!Number.isFinite(fair) || fair <= 0) return NaN;
+  const residual = Math.log(price) - Math.log(fair);
+  const pct = empiricalPercentile(fit.sortedFairResiduals, residual);
+  const endTs = fit.signals[fit.signals.length - 1]?.ts ?? ts;
+  return riskFromPercentile(pct, ts, endTs, riskMappingCfg(fit), fit.riskGammaCurrent);
+}
+
+/** Inverse mapping: price that would produce the given global fair-value risk. */
+export function priceForRiskFair(fit: CQMFit, ts: number, risk: number): number {
+  const snap = snapshotAt(fit, ts);
+  if (!snap) return NaN;
+  const fair = snap.qrDashedMedian;
+  if (!Number.isFinite(fair) || fair <= 0) return NaN;
+  const clamped = clamp(risk, 0, 1);
+  const cfg = riskMappingCfg(fit);
+  const endTs = fit.signals[fit.signals.length - 1]?.ts ?? ts;
+  const riskHighQ = interpolateCycleKnot(
+    ts,
+    endTs,
+    cfg.riskHighQuantileStart,
+    cfg.riskHighQuantile2018,
+    cfg.riskHighQuantile2022,
+    cfg.highQ,
+  );
+  const riskGamma = interpolateCycleKnot(
+    ts,
+    endTs,
+    cfg.riskGammaStart,
+    cfg.riskGamma2018,
+    cfg.riskGamma2022,
+    fit.riskGammaCurrent,
+  );
+  const residualQ = cfg.lowQ + Math.pow(clamped, 1 / riskGamma) * (riskHighQ - cfg.lowQ);
+  const residual = empiricalQuantile(fit.sortedFairResiduals, residualQ);
+  return Math.exp(Math.log(fair) + residual);
+}
+
+export interface RiskPricePoint {
+  price: number;
+  riskPct: number;
+}
+
+/** Risk-vs-price curve at a snapshot date (matches Python `run_eqm.py` panel 5). */
+export function buildRiskPriceCurve(
+  fit: CQMFit,
+  ts?: number,
+  numPoints = 600,
+): RiskPricePoint[] {
+  const targetTs = ts ?? fit.signals[fit.signals.length - 1]?.ts;
+  if (!targetTs) return [];
+  const snap = snapshotAt(fit, targetTs);
+  if (!snap) return [];
+  const pLo = priceForRiskFair(fit, targetTs, 0);
+  const pHi = priceForRiskFair(fit, targetTs, 1);
+  const lo = Math.max(pLo * 0.5, 1);
+  const hi = pHi * 1.1;
+  const out: RiskPricePoint[] = [];
+  for (let i = 0; i < numPoints; i++) {
+    const t = numPoints <= 1 ? 0 : i / (numPoints - 1);
+    const price = lo + t * (hi - lo);
+    const risk = riskForPriceFair(fit, targetTs, price);
+    out.push({ price, riskPct: risk * 100 });
+  }
+  return out;
 }
 
 export function snapshotAt(fit: CQMFit, ts?: number): CQMSnapshot | null {

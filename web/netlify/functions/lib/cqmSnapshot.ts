@@ -2,7 +2,7 @@
  * Shared CQM snapshot helpers for the DCA bot and weekly newsletter.
  *
  * Loads BTCUSD history from the Netlify Blobs signal cache, runs `fitCQM()`
- * (gated 2y risk + asymmetric QR fan — same as in-app charts), and exposes
+ * (global fair-value risk + asymmetric QR fan — same as in-app charts), and exposes
  * point-in-time snapshots for week-over-week comparisons.
  */
 

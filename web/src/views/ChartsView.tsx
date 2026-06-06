@@ -1,14 +1,22 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-  AreaChart, Area, Brush, ReferenceArea, ReferenceLine 
+  AreaChart, Area, Brush, ReferenceArea, ReferenceLine, ComposedChart, Scatter,
 } from 'recharts';
 import { SignalData } from '../App';
 import { format } from 'date-fns';
 import { Activity } from 'lucide-react';
 import { Box, Chip, Paper, Stack, Tab, Tabs, ToggleButton, ToggleButtonGroup, Typography } from '@mui/material';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { fitCQM, type CQMFit, type CQMPoint, snapshotAt } from '../utils/cqm';
+import {
+  fitCQM,
+  buildRiskPriceCurve,
+  priceForRiskFair,
+  riskForPriceFair,
+  type CQMFit,
+  type CQMPoint,
+  snapshotAt,
+} from '../utils/cqm';
 
 interface Props {
   data: SignalData[];
@@ -237,6 +245,23 @@ function cqmRiskBucket(riskPct: number): CqmRiskBucket | null {
   if (riskPct < 50) return 'WARM';
   if (riskPct < 75) return 'HOT';
   return 'EUPHORIC';
+}
+
+function lookupRiskPctAtPrice(
+  curve: Array<{ price: number; riskPct: number }>,
+  price: number,
+): number | null {
+  if (!curve.length || !Number.isFinite(price)) return null;
+  let best = curve[0];
+  let bestDist = Math.abs(best.price - price);
+  for (let i = 1; i < curve.length; i++) {
+    const dist = Math.abs(curve[i].price - price);
+    if (dist < bestDist) {
+      best = curve[i];
+      bestDist = dist;
+    }
+  }
+  return Number.isFinite(best.riskPct) ? best.riskPct : null;
 }
 
 const ChartsView: React.FC<Props> = ({ data }) => {
@@ -565,16 +590,11 @@ const ChartsView: React.FC<Props> = ({ data }) => {
         CQM_QR_LOW: cqm.qrDashedLow,
         CQM_QR_MEDIAN: cqm.qrDashedMedian,
         CQM_QR_HIGH: cqm.qrDashedHigh,
-        CQM_SCORE: cqm.score,
         CQM_RISK_PCT: riskPct,
         CQM_RISK_COOL: inBucket('COOL') ? riskPct : null,
         CQM_RISK_WARM: inBucket('WARM') ? riskPct : null,
         CQM_RISK_HOT: inBucket('HOT') ? riskPct : null,
         CQM_RISK_EUPHORIC: inBucket('EUPHORIC') ? riskPct : null,
-        CQM_SCORE_COOL: inBucket('COOL') ? cqm.score : null,
-        CQM_SCORE_WARM: inBucket('WARM') ? cqm.score : null,
-        CQM_SCORE_HOT: inBucket('HOT') ? cqm.score : null,
-        CQM_SCORE_EUPHORIC: inBucket('EUPHORIC') ? cqm.score : null,
         CQM_TR_LOWER: cqm.trendRiskLower,
         CQM_TR_MEDIAN: cqm.trendRiskMedian,
         CQM_TR_UPPER: cqm.trendRiskUpper,
@@ -586,6 +606,43 @@ const ChartsView: React.FC<Props> = ({ data }) => {
     if (!cqmFit) return null;
     return snapshotAt(cqmFit);
   }, [cqmFit]);
+
+  const cqmRiskPriceCurve = useMemo(() => {
+    if (!cqmFit || !cqmSnapshot) return [];
+    const raw = buildRiskPriceCurve(cqmFit, cqmSnapshot.ts);
+    return raw.map((p, i, arr) => {
+      const bucket = cqmRiskBucket(p.riskPct);
+      const prevBucket = i > 0 ? cqmRiskBucket(arr[i - 1].riskPct) : null;
+      const nextBucket = i < arr.length - 1 ? cqmRiskBucket(arr[i + 1].riskPct) : null;
+      const inBucket = (target: CqmRiskBucket) => (
+        bucket === target || prevBucket === target || nextBucket === target
+      );
+      return {
+        price: p.price,
+        riskPct: p.riskPct,
+        CURVE_COOL: inBucket('COOL') ? p.riskPct : null,
+        CURVE_WARM: inBucket('WARM') ? p.riskPct : null,
+        CURVE_HOT: inBucket('HOT') ? p.riskPct : null,
+        CURVE_EUPHORIC: inBucket('EUPHORIC') ? p.riskPct : null,
+      };
+    });
+  }, [cqmFit, cqmSnapshot]);
+
+  const cqmRiskPriceXMax = useMemo(() => {
+    if (!cqmSnapshot || cqmRiskPriceCurve.length === 0) return undefined;
+    const hi = cqmRiskPriceCurve[cqmRiskPriceCurve.length - 1]?.price ?? 0;
+    return Math.max(hi, cqmSnapshot.price * 1.2);
+  }, [cqmRiskPriceCurve, cqmSnapshot]);
+
+  const cqmRiskAtPrice = useMemo(() => {
+    if (!cqmFit || !cqmSnapshot) return null;
+    return riskForPriceFair(cqmFit, cqmSnapshot.ts, cqmSnapshot.price) * 100;
+  }, [cqmFit, cqmSnapshot]);
+
+  const cqmRiskPriceMarker = useMemo(() => {
+    if (!cqmSnapshot || cqmRiskAtPrice === null) return [];
+    return [{ price: cqmSnapshot.price, riskPct: cqmRiskAtPrice }];
+  }, [cqmSnapshot, cqmRiskAtPrice]);
 
   const tickCount = range === 'all' ? 10 : range === '10y' ? 10 : range === '5y' ? 8 : range === '2y' ? 8 : 6;
 
@@ -1893,9 +1950,9 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             CoinStrat Quantile Model — Price Bands
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            Inspired by BTCAnalytica&apos;s Empirical Quantile Model. Three <b>solid</b> bands (green floor, gold fair value, red ceiling) shelf upward at new highs and are clipped near cycle lows so gold stays between red and green.
-            Three <b>dotted</b> lines are an asymmetric quantile fan in log-price vs time: the upper tail compresses across cycles while the lower tail stays near-linear (Cowen 2026).
-            Fit from 2014 onward for bands and risk; the QR fan also uses pre-2014 history for tail curvature. See <code>EQM-model/</code> for the Python reference.
+            Inspired by BTCAnalytica&apos;s Empirical Quantile Model. Three <b>solid</b> bands come from the tail-scaled asymmetric QR fan: green = 0.1% floor, gold = 20-week SMA of a price / QR-50% log-blend, red = 99.9% ceiling.
+            Three <b>dotted</b> lines plot the same scaled QR quantiles directly. Tail scale ramps from 2022 to pin QR 50% near $100.8K on 2026-05-28.
+            Risk uses QR 50% as fair value. History from 2014 for bands/risk; the QR parabola fit uses full BTC history since 2009. See <code>EQM-model/</code> for the Python reference.
           </Typography>
         </Box>
 
@@ -1957,7 +2014,6 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             <Chip size="small" label={`QR 0.1% $${Math.round(cqmSnapshot.qrDashedLow).toLocaleString()}`} sx={{ bgcolor: 'rgba(34,197,94,0.12)', color: '#bbf7d0' }} />
             <Chip size="small" label={`QR 99.9% $${Math.round(cqmSnapshot.qrDashedHigh).toLocaleString()}`} sx={{ bgcolor: 'rgba(239,68,68,0.12)', color: '#fecaca' }} />
             <Chip size="small" label={`Risk ${(cqmSnapshot.risk * 100).toFixed(1)}%`} sx={{ bgcolor: 'rgba(96,165,250,0.18)', color: '#bfdbfe' }} />
-            <Chip size="small" label={`Score ${cqmSnapshot.score.toFixed(3)}`} sx={{ bgcolor: 'rgba(167,139,250,0.18)', color: '#ddd6fe' }} />
           </Box>
         )}
       </Paper>
@@ -2037,7 +2093,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             CQM Risk
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            CQM Risk maps price vs the long-run OLS trend through cycle-aware percentile anchors. Near cycle lows, a <b>gated 2-year</b> trailing window lowers risk so the DCA bot sizes up at bottoms without changing today&apos;s reading.
+            CQM Risk maps log(price / QR 50% fair value) through the full-sample empirical residual distribution, with cycle-aware γ and upper-percentile knots.
             <br />
             DCA rule: <code>daily_usd = base × (1 − 2 × Risk)</code>. Risk ≤ 0% → buy +base, Risk = 50% → flat, Risk ≥ 100% → sell base.
           </Typography>
@@ -2075,47 +2131,104 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       </Paper>
       )}
 
-      {/* CoinStrat Quantile Model — Score */}
-      {section === 'cqm' && (
+      {/* CoinStrat Quantile Model — Risk vs Price */}
+      {section === 'cqm' && cqmFit && cqmSnapshot && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
-            CQM Score
+            CQM Risk as a Function of Price
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            Pointier valuation oscillator: <code>score = risk<sup>score_power</sup></code> with score_power = {cqmFit ? cqmFit.scorePower.toFixed(2) : '1.50'}. The line is colored by CQM Risk heat, matching the BTCAnalytica-style score panel.
-            <br />
-            Raising risk to a power &gt; 1 sharpens the peaks during euphoria and softens the floor — closer to BTCAnalytica's reference oscillator than raw risk.
+            Global fair-value risk curve at the latest snapshot date, holding QR 50% fair value fixed while sweeping hypothetical BTC prices. The dot marks today&apos;s BTC price on the curve.
           </Typography>
         </Box>
 
         <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
-          <Chip size="small" variant="outlined" label="0.0–0.25 Cool" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
-          <Chip size="small" variant="outlined" label="0.25–0.50 Neutral" sx={{ borderColor: '#84cc16', color: '#d9f99d' }} />
-          <Chip size="small" variant="outlined" label="0.50–0.75 Hot" sx={{ borderColor: '#f59e0b', color: '#fde68a' }} />
-          <Chip size="small" variant="outlined" label="0.75–1.00 Euphoric" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
+          <Chip size="small" variant="outlined" label="0–25% Buy zone" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="25–50% Accumulate" sx={{ borderColor: '#84cc16', color: '#d9f99d' }} />
+          <Chip size="small" variant="outlined" label="50–75% Trim" sx={{ borderColor: '#f59e0b', color: '#fde68a' }} />
+          <Chip size="small" variant="outlined" label="75–100% Sell zone" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
         </Stack>
 
         <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart key={`cqm-score-${range}`} data={cqmChartData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
-              <ReferenceArea yAxisId="score" y1={0} y2={0.25} fill="#22c55e" fillOpacity={0.16} strokeOpacity={0} />
-              <ReferenceArea yAxisId="score" y1={0.25} y2={0.50} fill="#84cc16" fillOpacity={0.14} strokeOpacity={0} />
-              <ReferenceArea yAxisId="score" y1={0.50} y2={0.75} fill="#f59e0b" fillOpacity={0.14} strokeOpacity={0} />
-              <ReferenceArea yAxisId="score" y1={0.75} y2={1.0} fill="#ef4444" fillOpacity={0.16} strokeOpacity={0} />
+            <ComposedChart data={cqmRiskPriceCurve} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
+              <ReferenceArea y1={0} y2={25} fill="#22c55e" fillOpacity={0.16} strokeOpacity={0} />
+              <ReferenceArea y1={25} y2={50} fill="#84cc16" fillOpacity={0.14} strokeOpacity={0} />
+              <ReferenceArea y1={50} y2={75} fill="#f59e0b" fillOpacity={0.14} strokeOpacity={0} />
+              <ReferenceArea y1={75} y2={100} fill="#ef4444" fillOpacity={0.16} strokeOpacity={0} />
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
-              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-              <YAxis yAxisId="score" domain={[0, 1]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => (typeof v === 'number' ? `${(v * 100).toFixed(0)}%` : '')} />
-              <YAxis yAxisId="btc" orientation="right" scale="log" domain={[btcDomain.y1, btcDomain.y2]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
-              <Tooltip content={<CustomTooltip />} />
-              {renderChartBrush()}
-              <Line yAxisId="score" type="monotone" dataKey="CQM_SCORE_COOL" name="CQM Score" stroke="#22c55e" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
-              <Line yAxisId="score" type="monotone" dataKey="CQM_SCORE_WARM" name="CQM Score" stroke="#84cc16" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
-              <Line yAxisId="score" type="monotone" dataKey="CQM_SCORE_HOT" name="CQM Score" stroke="#f59e0b" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
-              <Line yAxisId="score" type="monotone" dataKey="CQM_SCORE_EUPHORIC" name="CQM Score" stroke="#ef4444" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
-              <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.4} dot={false} isAnimationActive={false} opacity={0.45} />
-            </LineChart>
+              <XAxis
+                dataKey="price"
+                type="number"
+                domain={[0, cqmRiskPriceXMax ?? 'auto']}
+                tick={{ fontSize: 10, fill: '#94a3b8' }}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(v) => (typeof v === 'number' ? `$${Math.round(v / 1000)}k` : '')}
+              />
+              <YAxis
+                domain={[-2, 102]}
+                tick={{ fontSize: 10, fill: '#94a3b8' }}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(v) => (typeof v === 'number' ? `${v.toFixed(0)}%` : '')}
+              />
+              <ReferenceLine y={50} stroke="#94a3b8" strokeDasharray="6 3" strokeWidth={1.2} />
+              <Tooltip
+                shared={false}
+                content={({ active, payload, label }) => {
+                  if (!active || !payload?.length) return null;
+                  const row = payload[0]?.payload as { price?: number } | undefined;
+                  const price = Number(
+                    typeof label === 'number' ? label : row?.price,
+                  );
+                  const riskPct = lookupRiskPctAtPrice(cqmRiskPriceCurve, price);
+                  if (!Number.isFinite(price) || riskPct === null) return null;
+                  return (
+                    <div className="rounded-lg border border-slate-700/60 bg-slate-950/90 p-4 shadow-xl">
+                      <p className="mb-2 font-bold text-slate-100">As of {cqmSnapshot.date}</p>
+                      <div className="space-y-1 text-sm text-slate-200">
+                        <div>Price: ${Math.round(price).toLocaleString()}</div>
+                        <div>Risk: {riskPct.toFixed(1)}%</div>
+                      </div>
+                    </div>
+                  );
+                }}
+              />
+              <Line type="linear" dataKey="riskPct" stroke="transparent" strokeWidth={0} dot={false} isAnimationActive={false} legendType="none" />
+              <Line type="linear" dataKey="CURVE_COOL" name="CQM Risk %" stroke="#22c55e" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} legendType="none" />
+              <Line type="linear" dataKey="CURVE_WARM" name="CQM Risk %" stroke="#84cc16" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} legendType="none" />
+              <Line type="linear" dataKey="CURVE_HOT" name="CQM Risk %" stroke="#f59e0b" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} legendType="none" />
+              <Line type="linear" dataKey="CURVE_EUPHORIC" name="CQM Risk %" stroke="#ef4444" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} legendType="none" />
+              <Scatter
+                data={cqmRiskPriceMarker}
+                dataKey="riskPct"
+                name="Current"
+                fill="#1e293b"
+                stroke="#f8fafc"
+                strokeWidth={2}
+                r={7}
+                isAnimationActive={false}
+                tooltipType="none"
+              />
+            </ComposedChart>
           </ResponsiveContainer>
+        </Box>
+
+        <Box sx={{ mt: 2, display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
+          <Chip size="small" label={`As of ${cqmSnapshot.date}`} sx={{ bgcolor: 'rgba(148,163,184,0.18)', color: '#cbd5e1' }} />
+          <Chip size="small" label={`Price $${Math.round(cqmSnapshot.price).toLocaleString()}`} sx={{ bgcolor: 'rgba(229,231,235,0.18)', color: '#e5e7eb' }} />
+          <Chip size="small" label={`Risk ${(cqmSnapshot.risk * 100).toFixed(1)}%`} sx={{ bgcolor: 'rgba(96,165,250,0.18)', color: '#bfdbfe' }} />
+          <Chip size="small" label={`QR 50% $${Math.round(cqmSnapshot.qrDashedMedian).toLocaleString()}`} sx={{ bgcolor: 'rgba(224,168,31,0.18)', color: '#fde68a' }} />
+          {[0, 0.25, 0.5, 0.75, 1].map((r) => (
+            <Chip
+              key={r}
+              size="small"
+              label={`${(r * 100).toFixed(0)}% risk $${Math.round(priceForRiskFair(cqmFit, cqmSnapshot.ts, r)).toLocaleString()}`}
+              sx={{ bgcolor: 'rgba(51,65,85,0.35)', color: '#94a3b8' }}
+            />
+          ))}
         </Box>
       </Paper>
       )}

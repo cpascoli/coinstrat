@@ -1409,7 +1409,7 @@ function fallbackDraft(
       },
       {
         title: 'Quantile model & DCA sizing',
-        body: `The CoinStrat Quantile Model uses gated 2-year risk to scale daily DCA sizing. View the full chart at ${appUrl}/charts/cqm.`,
+        body: `The CoinStrat Quantile Model uses fair-value risk to scale daily DCA sizing. View the full chart at ${appUrl}/charts/cqm.`,
         bullets: cqmBullets,
       },
       {

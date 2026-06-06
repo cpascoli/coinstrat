@@ -29,13 +29,15 @@ EQM risk  = soft_map(empirical percentile of residual; cycle-aware γ)
 EQM score = risk ** score_power
 ```
 
-Gated risk (default, mirrors `web/src/utils/cqm.ts`):
+Soft-gated risk (default, mirrors `web/src/utils/cqm.ts`):
 
 ```text
 global_risk  = soft_map(percentile(residual, full sample))
 rolling_risk = soft_map(percentile(residual, last 730 days))
 weight       = 0 when price ≥ 1.15 × trailing 120d low; ramps to 1 at the low
-risk         = global − weight × (global − min(global, rolling))
+w_soft       = weight ** risk_gate_weight_power   (default power = 2)
+blended      = global − w_soft × (global − min(global, rolling))
+risk         = max(blended, risk_gate_global_floor × global)   (default floor = 0.75)
 ```
 
 The defaults are calibrated against the May 22, 2026 screenshot:

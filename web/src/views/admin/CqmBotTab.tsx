@@ -116,6 +116,19 @@ const STATUS_COLORS: Record<string, string> = {
   cancelled: '#94a3b8',
 };
 
+/** Fixed GBP→USD rate for displaying execution prices in the order table. */
+const GBP_TO_USD = 1.33;
+
+/** Effective BTC/GBP from fill amounts, converted to USD at 1 GBP = 1.33 USD. */
+function orderExecutionBtcUsd(order: OrdersResponse['orders'][number]): number | null {
+  const base = order.base_filled != null ? Number(order.base_filled) : 0;
+  const quote = order.quote_filled != null ? Number(order.quote_filled) : 0;
+  if (base > 0 && quote > 0) {
+    return (quote / base) * GBP_TO_USD;
+  }
+  return null;
+}
+
 const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [orders, setOrders] = useState<OrdersResponse | null>(null);
@@ -518,6 +531,7 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
                 <TableCell align="right" sx={{ fontWeight: 700 }}>Target £</TableCell>
                 <TableCell align="right" sx={{ fontWeight: 700 }}>BTC filled</TableCell>
                 <TableCell align="right" sx={{ fontWeight: 700 }}>GBP filled</TableCell>
+                <TableCell align="right" sx={{ fontWeight: 700 }}>BTC USD</TableCell>
                 <TableCell align="right" sx={{ fontWeight: 700 }}>Fees £</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Coinbase id</TableCell>
@@ -526,12 +540,14 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
             <TableBody>
               {(orders?.orders ?? []).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} align="center" sx={{ color: 'text.secondary', py: 3 }}>
+                  <TableCell colSpan={10} align="center" sx={{ color: 'text.secondary', py: 3 }}>
                     No orders yet. Execute a trade to populate this table.
                   </TableCell>
                 </TableRow>
               ) : (
-                orders!.orders.map((o) => (
+                orders!.orders.map((o) => {
+                  const execBtcUsd = orderExecutionBtcUsd(o);
+                  return (
                   <TableRow key={o.id} hover>
                     <TableCell>
                       <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>
@@ -562,6 +578,11 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
                       {o.quote_filled != null ? `£${Number(o.quote_filled).toFixed(2)}` : '—'}
                     </TableCell>
                     <TableCell align="right" sx={{ fontFamily: 'monospace' }}>
+                      {execBtcUsd != null
+                        ? `$${execBtcUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                        : '—'}
+                    </TableCell>
+                    <TableCell align="right" sx={{ fontFamily: 'monospace' }}>
                       {o.fees_gbp != null ? `£${Number(o.fees_gbp).toFixed(2)}` : '—'}
                     </TableCell>
                     <TableCell>
@@ -583,7 +604,8 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
                       </Typography>
                     </TableCell>
                   </TableRow>
-                ))
+                  );
+                })
               )}
             </TableBody>
           </Table>

@@ -170,7 +170,7 @@ export function runCqmBotAnchorBacktest() {
     cqmRiskByDate: riskByDate,
   };
 
-  console.log('CQM bot backtest — current gated blend');
+  console.log('CQM bot backtest — global fair-value risk');
   console.log(`Data through ${latest} | $${sharedConfig.dcaAmount}/day | frequency: daily`);
   console.log(`CQM at latest: risk ${((fit.signals[fit.signals.length - 1]?.risk ?? 0) * 100).toFixed(1)}%`);
   console.log('');
