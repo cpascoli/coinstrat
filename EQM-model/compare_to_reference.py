@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from eqm_model import (
+    CQM_DEFAULTS,
     DEFAULT_LOCAL_JSON,
     clean_price_series,
     current_snapshot,
@@ -31,13 +32,6 @@ from eqm_model import (
     quantile_regression_series,
     solid_band_series,
 )
-
-# Calibrated risk-curve params (see calibrate_eqm.py) — keep in sync with run_eqm.py.
-CALIB_TIME_POWER = 0.70
-CALIB_LOW_QUANTILE = 0.005
-CALIB_HIGH_QUANTILE = 0.61
-CALIB_SCORE_LOWER = 0.06
-CALIB_SCORE_UPPER = 0.86
 
 REFERENCE_IMAGE = Path(__file__).resolve().parents[1] / "EQM" / "btcanalytica_model_20250528.jpeg"
 DEFAULT_REPLICA_IMAGE = Path(__file__).resolve().parent / "output" / "eqm_replica.png"
@@ -242,18 +236,19 @@ def main() -> None:
         )
 
     prices = clean_price_series(load_local_plus_binance_tail(DEFAULT_LOCAL_JSON), start=args.start_history)
-    fit = fit_eqm(
-        prices,
-        low_quantile=CALIB_LOW_QUANTILE,
-        high_quantile=CALIB_HIGH_QUANTILE,
-        time_power=CALIB_TIME_POWER,
-        score_lower_quantile=CALIB_SCORE_LOWER,
-        score_upper_quantile=CALIB_SCORE_UPPER,
-    )
-    qr_fit = fit_quantile_regression(prices, quantiles=(0.001, 0.5, 0.999), time_power=CALIB_TIME_POWER)
-    solid_fit = fit_eqm_solid_bands(prices, time_power=CALIB_TIME_POWER)
+    fit = fit_eqm(prices)
+    time_power = float(CQM_DEFAULTS["time_power"])
+    qr_fit = fit_quantile_regression(prices, quantiles=(0.001, 0.5, 0.999), time_power=time_power)
+    solid_fit = fit_eqm_solid_bands(prices, time_power=time_power)
     snapshot_date = pd.Timestamp(args.snapshot_date)
-    snapshot = current_snapshot(fit, prices, snapshot_date)
+    snapshot = current_snapshot(
+        fit,
+        prices,
+        snapshot_date,
+        risk_gate_roll_days=int(CQM_DEFAULTS["risk_roll_days"]),
+        risk_gate_near_days=int(CQM_DEFAULTS["risk_gate_near_days"]),
+        risk_gate_near_buffer=float(CQM_DEFAULTS["risk_gate_near_buffer"]),
+    )
 
     snapshot["solid_lower"] = float(solid_band_series(solid_fit, [snapshot_date], "lower").iloc[0])
     snapshot["solid_median"] = float(solid_band_series(solid_fit, [snapshot_date], "median").iloc[0])

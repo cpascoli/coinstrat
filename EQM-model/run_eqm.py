@@ -16,6 +16,7 @@ from matplotlib.collections import LineCollection
 from matplotlib.colors import Normalize
 
 from eqm_model import (
+    CQM_DEFAULTS,
     DEFAULT_LOCAL_JSON,
     asymmetric_quantile_frame,
     clean_price_series,
@@ -592,48 +593,48 @@ def main() -> None:
     parser.add_argument(
         "--risk-roll-days",
         type=int,
-        default=730,
+        default=int(CQM_DEFAULTS["risk_roll_days"]),
         help="Trailing window for rolling/gated risk (730=2y, 1095=3y, 1460=4y)",
     )
     parser.add_argument(
         "--risk-gate-near-days",
         type=int,
-        default=120,
+        default=int(CQM_DEFAULTS["risk_gate_near_days"]),
         help="Near-local-low lookback for gated risk (days)",
     )
     parser.add_argument(
         "--risk-gate-near-buffer",
         type=float,
-        default=1.15,
-        help="Price must be within this multiple of the near-low minimum to apply rolling risk",
+        default=float(CQM_DEFAULTS["risk_gate_near_buffer"]),
+        help=(
+            "Smooth gate: weight=0 at or above this × trailing near-low min; "
+            "weight=1 at the raw near-low (mirrors web/src/utils/cqm.ts)"
+        ),
     )
-    # Defaults below are the grid-search optimum (calibrate_eqm.py) against the
-    # May 28, 2026 BTCAnalytica risk-price knots: log-RMSE 0.024 / MAPE ~1.9%,
-    # vs 0.045 / 3.8% for the previous (0.60 / 0.06 / 0.68) values.
-    parser.add_argument("--time-power", type=float, default=0.70, help="Power transform for days_since_start")
-    parser.add_argument("--low-quantile", type=float, default=0.005, help="Lower residual anchor")
-    parser.add_argument("--high-quantile", type=float, default=0.61, help="Upper residual anchor")
+    # Defaults mirror web/src/utils/cqm.ts DEFAULT_CONFIG (keep in sync).
+    parser.add_argument(
+        "--time-power",
+        type=float,
+        default=float(CQM_DEFAULTS["time_power"]),
+        help="Power transform for days_since_start",
+    )
+    parser.add_argument(
+        "--low-quantile",
+        type=float,
+        default=float(CQM_DEFAULTS["low_quantile"]),
+        help="Lower residual anchor for EQM risk",
+    )
+    parser.add_argument(
+        "--high-quantile",
+        type=float,
+        default=float(CQM_DEFAULTS["high_quantile"]),
+        help="Upper residual anchor for EQM risk (today's calibration endpoint)",
+    )
     parser.add_argument(
         "--score-power",
         type=float,
-        default=1.0,
-        help="Power transform applied to the independent pointy score oscillator",
-    )
-    parser.add_argument(
-        "--score-lower-quantile",
-        type=float,
-        default=0.06,
-        help="Lower residual anchor for the pointy EQM score",
-    )
-    parser.add_argument(
-        "--score-upper-quantile",
-        type=float,
-        default=0.86,
-        help=(
-            "Upper residual anchor for the pointy EQM score. Re-tuned to 0.86 "
-            "alongside time_power=0.70 so the snapshot score (~0.137) re-matches "
-            "the reference 0.138 while keeping 2017/2021 peaks at 1.0."
-        ),
+        default=float(CQM_DEFAULTS["score_power"]),
+        help="EQM score = risk ** score_power",
     )
     parser.add_argument(
         "--price-band-risks",
@@ -784,8 +785,6 @@ def main() -> None:
         low_quantile=args.low_quantile,
         high_quantile=args.high_quantile,
         time_power=args.time_power,
-        score_lower_quantile=args.score_lower_quantile,
-        score_upper_quantile=args.score_upper_quantile,
         score_power=args.score_power,
     )
     price_band_risks = parse_float_list(args.price_band_risks)
@@ -835,8 +834,6 @@ def main() -> None:
             low_quantile=args.low_quantile,
             high_quantile=args.high_quantile,
             time_power=args.time_power,
-            score_lower_quantile=args.score_lower_quantile,
-            score_upper_quantile=args.score_upper_quantile,
             score_power=args.score_power,
             risk_window_days=args.risk_roll_days if args.risk_mode == "rolling" else None,
         )

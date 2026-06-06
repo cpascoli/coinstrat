@@ -24,6 +24,36 @@ import statsmodels.api as sm  # type: ignore[import-untyped]
 
 DEFAULT_LOCAL_JSON = Path(__file__).resolve().parents[1] / "web" / "public" / "data" / "btc_daily.json"
 
+# Mirrors web/src/utils/cqm.ts DEFAULT_CONFIG — keep these in sync.
+CQM_DEFAULTS: dict[str, float | int | str] = {
+    "start_date": "2014-01-01",
+    "time_power": 0.6,
+    "low_quantile": 0.06,
+    "high_quantile": 0.68,
+    "score_power": 1.5,
+    "risk_gamma_start": 1.35,
+    "risk_gamma_2018": 1.20,
+    "risk_gamma_2022": 1.08,
+    "risk_high_quantile_start": 0.999,
+    "risk_high_quantile_2018": 0.990,
+    "risk_high_quantile_2022": 0.950,
+    "upper_ath_factor": 1.28,
+    "solid_gold_window": 730,
+    "solid_gold_floor_window": 30,
+    "solid_gold_floor_buffer": 2.0,
+    "solid_green_half_life_years": 1.0,
+    "solid_green_quantile": 0.05,
+    "solid_green_max_lookback_days": 1825,
+    "solid_green_floor_window": 30,
+    "solid_green_floor_buffer": 0.95,
+    "trend_risk_window": 60,
+    "trend_risk_low_q": 0.10,
+    "trend_risk_high_q": 0.90,
+    "risk_roll_days": 730,
+    "risk_gate_near_days": 120,
+    "risk_gate_near_buffer": 1.15,
+}
+
 
 @dataclass(frozen=True)
 class EQMFit:
@@ -38,13 +68,13 @@ class EQMFit:
     start_date: pd.Timestamp
     low_quantile: float
     high_quantile: float
-    score_lower_quantile: float = 0.06
-    score_upper_quantile: float = 0.995
-    score_power: float = 1.0
-    risk_gamma_start: float = 1.30
-    risk_gamma_2018: float = 1.10
-    risk_gamma_2022: float = 0.90
-    risk_gamma_current: float = 0.75
+    score_lower_quantile: float = 0.06  # legacy; score is risk**score_power
+    score_upper_quantile: float = 0.995  # legacy; unused
+    score_power: float = 1.5
+    risk_gamma_start: float = 1.35
+    risk_gamma_2018: float = 1.20
+    risk_gamma_2022: float = 1.08
+    risk_gamma_current: float = 1.0
     risk_high_quantile_start: float = 0.999
     risk_high_quantile_2018: float = 0.990
     risk_high_quantile_2022: float = 0.950
@@ -209,18 +239,18 @@ def _time_index(index: pd.DatetimeIndex, start_date: pd.Timestamp, time_power: f
 
 def fit_eqm(
     prices: pd.Series,
-    low_quantile: float = 0.06,
-    high_quantile: float = 0.68,
-    time_power: float = 0.60,
-    score_lower_quantile: float = 0.06,
-    score_upper_quantile: float = 0.995,
-    score_power: float = 1.0,
-    risk_gamma_start: float = 1.35,
-    risk_gamma_2018: float = 1.20,
-    risk_gamma_2022: float = 1.08,
-    risk_high_quantile_start: float = 0.999,
-    risk_high_quantile_2018: float = 0.990,
-    risk_high_quantile_2022: float = 0.950,
+    low_quantile: float = float(CQM_DEFAULTS["low_quantile"]),
+    high_quantile: float = float(CQM_DEFAULTS["high_quantile"]),
+    time_power: float = float(CQM_DEFAULTS["time_power"]),
+    score_lower_quantile: float = 0.06,  # deprecated; ignored
+    score_upper_quantile: float = 0.995,  # deprecated; ignored
+    score_power: float = float(CQM_DEFAULTS["score_power"]),
+    risk_gamma_start: float = float(CQM_DEFAULTS["risk_gamma_start"]),
+    risk_gamma_2018: float = float(CQM_DEFAULTS["risk_gamma_2018"]),
+    risk_gamma_2022: float = float(CQM_DEFAULTS["risk_gamma_2022"]),
+    risk_high_quantile_start: float = float(CQM_DEFAULTS["risk_high_quantile_start"]),
+    risk_high_quantile_2018: float = float(CQM_DEFAULTS["risk_high_quantile_2018"]),
+    risk_high_quantile_2022: float = float(CQM_DEFAULTS["risk_high_quantile_2022"]),
 ) -> EQMFit:
     """
     Fit the EQM proxy.
@@ -228,18 +258,16 @@ def fit_eqm(
     Model:
       log(price) = intercept + slope * days_since_start**time_power + residual
 
-    The risk is the empirical percentile of the residual mapped to [0, 1] via
-    the low/high quantile anchors. The score uses a separate lower-to-upper-tail
-    residual range so that it behaves like a pointier valuation oscillator
-    instead of saturating through most of a bull market.
+    Risk is the empirical percentile of the residual mapped to [0, 1] via the
+    low/high quantile anchors and cycle-aware soft exponent. Score is
+    ``risk ** score_power`` (mirrors web/src/utils/cqm.ts).
 
-    Defaults are calibrated against the May 22, 2026 reference snapshot.
+    Defaults match CQM_DEFAULTS / the TypeScript port (May 22, 2026 snapshot).
     """
+    del score_lower_quantile, score_upper_quantile  # kept for call-site compatibility
     prices = clean_price_series(prices, start=None)
     if len(prices) < 100:
         raise ValueError("Need at least 100 daily prices to fit EQM.")
-    if not 0 <= score_lower_quantile < score_upper_quantile <= 1:
-        raise ValueError("score_lower_quantile must be lower than score_upper_quantile within [0, 1]")
     if score_power <= 0:
         raise ValueError("score_power must be positive")
 
@@ -258,13 +286,6 @@ def fit_eqm(
     if math.isclose(residual_low, residual_high):
         raise ValueError("Residual quantile span is zero; cannot score EQM.")
 
-    score_low = float(residuals.quantile(score_lower_quantile))
-    score_high = float(residuals.quantile(score_upper_quantile))
-    if math.isclose(score_low, score_high):
-        raise ValueError("Score residual quantile span is zero; cannot score EQM.")
-
-    score_raw = ((residuals - score_low) / (score_high - score_low)).clip(0.0, 1.0)
-    scores = pd.Series(np.power(score_raw, score_power), index=residuals.index, name="eqm_score")
     end_date = pd.Timestamp(prices.index.max())
 
     latest_residual_percentile = empirical_percentile(residuals, float(residuals.iloc[-1]))
@@ -278,6 +299,40 @@ def fit_eqm(
         # Degenerate endpoints cannot solve a unique exponent; keep continuity.
         risk_gamma_current = 1.0
 
+    fit_stub = EQMFit(
+        intercept=float(intercept),
+        slope=float(slope),
+        time_power=float(time_power),
+        residual_low=residual_low,
+        residual_high=residual_high,
+        residual_median=residual_median,
+        residuals=residuals,
+        scores=pd.Series(0.0, index=residuals.index, name="eqm_score"),
+        start_date=start_date,
+        low_quantile=low_quantile,
+        high_quantile=high_quantile,
+        score_lower_quantile=0.06,
+        score_upper_quantile=0.995,
+        score_power=float(score_power),
+        risk_gamma_start=float(risk_gamma_start),
+        risk_gamma_2018=float(risk_gamma_2018),
+        risk_gamma_2022=float(risk_gamma_2022),
+        risk_gamma_current=float(risk_gamma_current),
+        risk_high_quantile_start=float(risk_high_quantile_start),
+        risk_high_quantile_2018=float(risk_high_quantile_2018),
+        risk_high_quantile_2022=float(risk_high_quantile_2022),
+        end_date=end_date,
+    )
+    global_risks = [
+        risk_from_residual_percentile(fit_stub, date, empirical_percentile(residuals, float(res)))
+        for date, res in residuals.items()
+    ]
+    scores = pd.Series(
+        [score_for_risk(r, score_power) for r in global_risks],
+        index=residuals.index,
+        name="eqm_score",
+    )
+
     return EQMFit(
         intercept=float(intercept),
         slope=float(slope),
@@ -290,8 +345,8 @@ def fit_eqm(
         start_date=start_date,
         low_quantile=low_quantile,
         high_quantile=high_quantile,
-        score_lower_quantile=float(score_lower_quantile),
-        score_upper_quantile=float(score_upper_quantile),
+        score_lower_quantile=0.06,
+        score_upper_quantile=0.995,
         score_power=float(score_power),
         risk_gamma_start=float(risk_gamma_start),
         risk_gamma_2018=float(risk_gamma_2018),
@@ -819,14 +874,49 @@ def band_series(fit: EQMFit, dates: Iterable[pd.Timestamp], residual_quantile: f
     return pd.Series(values, index=index, name=f"band_{residual_quantile:g}")
 
 
-def score_for_price(fit: EQMFit, date: pd.Timestamp, price: float) -> float:
-    """Map price to a pointier EQM score using separate tail anchors."""
-    log_trend = float(trend_log(fit, [pd.Timestamp(date)])[0])
-    residual = math.log(price) - log_trend
-    score_low = float(fit.residuals.quantile(fit.score_lower_quantile))
-    score_high = float(fit.residuals.quantile(fit.score_upper_quantile))
-    score_raw = (residual - score_low) / (score_high - score_low)
-    return float(np.clip(score_raw, 0.0, 1.0) ** fit.score_power)
+def score_for_risk(risk: float, score_power: float = float(CQM_DEFAULTS["score_power"])) -> float:
+    """EQM score = risk ** score_power (mirrors web/src/utils/cqm.ts)."""
+    return float(np.clip(risk, 0.0, 1.0) ** score_power)
+
+
+def score_for_price(
+    fit: EQMFit,
+    date: pd.Timestamp,
+    price: float,
+    *,
+    risk: float | None = None,
+) -> float:
+    """Map price to EQM score via the fitted risk curve."""
+    if risk is None:
+        risk = risk_for_price(fit, date, price)
+    return score_for_risk(risk, fit.score_power)
+
+
+def compute_gate_blend_weight(
+    price: float,
+    near_low_min: float,
+    *,
+    near_low_buffer: float = float(CQM_DEFAULTS["risk_gate_near_buffer"]),
+) -> float:
+    """Blend weight 0 = global only; 1 = full min(global, rolling) target."""
+    if not math.isfinite(price) or not math.isfinite(near_low_min) or near_low_min <= 0:
+        return 0.0
+    enter = near_low_min * near_low_buffer
+    full = near_low_min
+    if enter <= full:
+        return 1.0 if price <= full else 0.0
+    if price >= enter:
+        return 0.0
+    if price <= full:
+        return 1.0
+    return float(np.clip((enter - price) / (enter - full), 0.0, 1.0))
+
+
+def blend_gated_risk(global_risk: float, rolling_risk: float, weight: float) -> float:
+    """Smooth gated blend toward min(global, rolling)."""
+    w = float(np.clip(weight, 0.0, 1.0))
+    target = min(global_risk, rolling_risk)
+    return global_risk - w * (global_risk - target)
 
 
 def empirical_percentile(history: pd.Series, value: float) -> float:
@@ -885,18 +975,14 @@ def rolling_risk_series(fit: EQMFit, window_days: int) -> pd.Series:
 def gated_rolling_risk_series(
     fit: EQMFit,
     prices: pd.Series,
-    roll_window_days: int = 730,
-    near_low_window_days: int = 120,
-    near_low_buffer: float = 1.15,
+    roll_window_days: int = int(CQM_DEFAULTS["risk_roll_days"]),
+    near_low_window_days: int = int(CQM_DEFAULTS["risk_gate_near_days"]),
+    near_low_buffer: float = float(CQM_DEFAULTS["risk_gate_near_buffer"]),
 ) -> pd.Series:
-    """Global risk by default; near cycle lows use min(global, rolling).
+    """Global risk by default; near cycle lows blend smoothly toward min(global, rolling).
 
-    Pure trailing-window risk re-centres cycle lows but also collapses today's
-    reading (May 2026: 3.7% vs reference 26.4%) because recent history already
-    includes the recovery. Gating applies the rolling correction only when
-    price is within `near_low_buffer` of its trailing `near_low_window_days`
-    minimum — actual basing zones — so snapshot calibration is preserved while
-    bear-market lows still get aggressive buy sizing.
+    Mirrors web/src/utils/cqm.ts riskMode='gated': weight ramps linearly from
+    1 at the trailing near-low minimum to 0 at near_low_buffer × that minimum.
     """
     prices = clean_price_series(prices, start=None)
     global_risks = pd.Series(
@@ -905,17 +991,32 @@ def gated_rolling_risk_series(
         name="risk_global",
     )
     rolling = rolling_risk_series(fit, roll_window_days).reindex(prices.index)
-    rmin = prices.rolling(near_low_window_days, min_periods=30).min()
-    near_low = prices <= rmin * near_low_buffer
+    near_low_min = prices.rolling(near_low_window_days, min_periods=30).min()
     out = global_risks.copy()
-    mask = near_low & rolling.notna()
-    out.loc[mask] = np.minimum(global_risks.loc[mask], rolling.loc[mask])
+    for date in prices.index:
+        rolling_risk = rolling.loc[date]
+        if pd.isna(rolling_risk):
+            continue
+        weight = compute_gate_blend_weight(
+            float(prices.loc[date]),
+            float(near_low_min.loc[date]),
+            near_low_buffer=near_low_buffer,
+        )
+        if weight > 0:
+            out.loc[date] = blend_gated_risk(
+                float(global_risks.loc[date]),
+                float(rolling_risk),
+                weight,
+            )
     return out.rename("risk")
 
 
 def risk_for_score(fit: EQMFit, score: float) -> float:
-    """Map EQM score to risk using the empirical score distribution."""
-    return empirical_percentile(fit.scores, score)
+    """Invert score = risk ** score_power."""
+    s = float(np.clip(score, 0.0, 1.0))
+    if fit.score_power <= 0:
+        raise ValueError("score_power must be positive")
+    return float(s ** (1.0 / fit.score_power))
 
 
 def risk_gamma_for_date(fit: EQMFit, date: pd.Timestamp) -> float:
@@ -1005,20 +1106,21 @@ def risk_for_price_gated(
     prices: pd.Series,
     date: pd.Timestamp,
     price: float,
-    roll_window_days: int = 730,
-    near_low_window_days: int = 120,
-    near_low_buffer: float = 1.15,
+    roll_window_days: int = int(CQM_DEFAULTS["risk_roll_days"]),
+    near_low_window_days: int = int(CQM_DEFAULTS["risk_gate_near_days"]),
+    near_low_buffer: float = float(CQM_DEFAULTS["risk_gate_near_buffer"]),
 ) -> float:
-    """Pointwise gated risk: global unless price is near its recent local low."""
+    """Pointwise smooth gated risk (mirrors computeGateBlendWeight / blendGatedRisk)."""
     global_risk = risk_for_price(fit, date, price)
     history = clean_price_series(prices, start=None).loc[: pd.Timestamp(date)]
     if len(history) < 30:
         return global_risk
-    recent = history.tail(near_low_window_days)
-    if float(price) > float(recent.min()) * near_low_buffer:
-        return global_risk
+    near_low_min = float(history.tail(near_low_window_days).min())
     rolling_risk = risk_for_price(fit, date, price, window_days=roll_window_days)
-    return float(min(global_risk, rolling_risk))
+    weight = compute_gate_blend_weight(float(price), near_low_min, near_low_buffer=near_low_buffer)
+    if weight <= 0:
+        return global_risk
+    return blend_gated_risk(global_risk, rolling_risk, weight)
 
 
 def current_snapshot(
@@ -1036,7 +1138,6 @@ def current_snapshot(
         date = prices.index.max()
     date = pd.Timestamp(date)
     price = float(prices.loc[:date].iloc[-1])
-    score = score_for_price(fit, date, price)
     if risk_gate_roll_days is not None:
         risk = risk_for_price_gated(
             fit,
@@ -1049,6 +1150,7 @@ def current_snapshot(
         )
     else:
         risk = risk_for_price(fit, date, price, window_days=risk_window_days)
+    score = score_for_risk(risk, fit.score_power)
 
     return {
         "price": price,
@@ -1067,12 +1169,12 @@ def current_snapshot(
 def expanding_eqm_signals(
     prices: pd.Series,
     min_history_days: int = 1095,
-    low_quantile: float = 0.06,
-    high_quantile: float = 0.68,
-    time_power: float = 0.60,
-    score_lower_quantile: float = 0.06,
-    score_upper_quantile: float = 0.995,
-    score_power: float = 1.0,
+    low_quantile: float = float(CQM_DEFAULTS["low_quantile"]),
+    high_quantile: float = float(CQM_DEFAULTS["high_quantile"]),
+    time_power: float = float(CQM_DEFAULTS["time_power"]),
+    score_lower_quantile: float = 0.06,  # deprecated; ignored
+    score_upper_quantile: float = 0.995,  # deprecated; ignored
+    score_power: float = float(CQM_DEFAULTS["score_power"]),
     risk_window_days: int | None = None,
 ) -> pd.DataFrame:
     """
@@ -1080,6 +1182,7 @@ def expanding_eqm_signals(
 
     This is slower than full-sample scoring but is the right default for backtests.
     """
+    del score_lower_quantile, score_upper_quantile
     prices = clean_price_series(prices, start=None)
     rows: list[dict[str, float | pd.Timestamp]] = []
 
@@ -1090,14 +1193,12 @@ def expanding_eqm_signals(
             low_quantile=low_quantile,
             high_quantile=high_quantile,
             time_power=time_power,
-            score_lower_quantile=score_lower_quantile,
-            score_upper_quantile=score_upper_quantile,
             score_power=score_power,
         )
         date = history.index[-1]
         price = float(history.iloc[-1])
-        score = score_for_price(fit, date, price)
         risk = risk_for_price(fit, date, price, window_days=risk_window_days)
+        score = score_for_risk(risk, score_power)
         rows.append({"date": date, "price": price, "score": score, "risk": risk})
 
     return pd.DataFrame(rows).set_index("date")
@@ -1107,17 +1208,12 @@ def full_sample_eqm_signals(
     fit: EQMFit,
     prices: pd.Series,
     risk_window_days: int | None = None,
-    risk_gate_roll_days: int | None = None,
-    risk_gate_near_days: int = 120,
-    risk_gate_near_buffer: float = 1.15,
+    risk_gate_roll_days: int | None = int(CQM_DEFAULTS["risk_roll_days"]),
+    risk_gate_near_days: int = int(CQM_DEFAULTS["risk_gate_near_days"]),
+    risk_gate_near_buffer: float = float(CQM_DEFAULTS["risk_gate_near_buffer"]),
 ) -> pd.DataFrame:
     """Compute full-sample EQM score/risk for chart replication."""
     prices = clean_price_series(prices, start=None)
-    scores = pd.Series(
-        [score_for_price(fit, date, float(price)) for date, price in prices.items()],
-        index=prices.index,
-        name="score",
-    )
     if risk_gate_roll_days is not None:
         risks = gated_rolling_risk_series(
             fit,
@@ -1134,6 +1230,11 @@ def full_sample_eqm_signals(
             index=prices.index,
             name="risk",
         )
+    scores = pd.Series(
+        [score_for_risk(float(r), fit.score_power) for r in risks],
+        index=prices.index,
+        name="score",
+    )
     return pd.DataFrame({"price": prices, "score": scores, "risk": risks})
 
 

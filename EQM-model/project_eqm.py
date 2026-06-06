@@ -34,6 +34,7 @@ import numpy as np
 import pandas as pd
 
 from eqm_model import (
+    CQM_DEFAULTS,
     DEFAULT_LOCAL_JSON,
     clean_price_series,
     fit_eqm,
@@ -222,7 +223,12 @@ def main() -> None:
     parser.add_argument("--time-power", type=float, default=0.60, help="time^p exponent for QR and OLS trends")
     parser.add_argument("--low-quantile", type=float, default=0.06, help="EQM Risk lower-anchor residual quantile")
     parser.add_argument("--high-quantile", type=float, default=0.68, help="EQM Risk upper-anchor residual quantile")
-    parser.add_argument("--score-power", type=float, default=1.0, help="EQM score exponent")
+    parser.add_argument(
+        "--score-power",
+        type=float,
+        default=float(CQM_DEFAULTS["score_power"]),
+        help="EQM score = risk ** score_power",
+    )
     parser.add_argument("--plot", default=str(DEFAULT_OUTPUT), help="Output projection chart path")
     parser.add_argument("--no-plot", action="store_true", help="Skip the projection chart")
     args = parser.parse_args()

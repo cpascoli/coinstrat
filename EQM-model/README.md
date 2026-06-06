@@ -25,27 +25,30 @@ log(price) = intercept + slope * days_since_start ** time_power + residual
 Then:
 
 ```text
-EQM risk  = clip((empirical percentile of residual - low_q) / (high_q - low_q), 0, 1)
-EQM score = clip((residual - residual_score_low) / (residual_score_high - residual_score_low), 0, 1) ** score_power
+EQM risk  = soft_map(empirical percentile of residual; cycle-aware γ)
+EQM score = risk ** score_power
 ```
 
-This two-layer design explains why the screenshot can show an `EQM score` near
-`0.145` and an `EQM risk` near `28.5%` at the same time. The risk is the
-historical percentile of the residual mapped through the calibration window;
-the score uses a much wider upper-tail residual anchor so it behaves like a
-pointier cycle oscillator instead of flattening at `1.0` through most of a bull
-market.
+Gated risk (default, mirrors `web/src/utils/cqm.ts`):
+
+```text
+global_risk  = soft_map(percentile(residual, full sample))
+rolling_risk = soft_map(percentile(residual, last 730 days))
+weight       = 0 when price ≥ 1.15 × trailing 120d low; ramps to 1 at the low
+risk         = global − weight × (global − min(global, rolling))
+```
 
 The defaults are calibrated against the May 22, 2026 screenshot:
 
 | Parameter | Default | Source |
 | --- | --- | --- |
-| `time_power` | `0.60` | grid search |
-| `low_quantile` | `0.06` | grid search |
-| `high_quantile` | `0.68` | grid search |
-| `score_lower_quantile` | `0.06` | lower score anchor |
-| `score_upper_quantile` | `0.995` | upper-tail score anchor |
-| `score_power` | `1.0` | near-linear pointy score |
+| `time_power` | `0.60` | `CQM_DEFAULTS` / `web/src/utils/cqm.ts` |
+| `low_quantile` | `0.06` | same |
+| `high_quantile` | `0.68` | same |
+| `score_power` | `1.5` | same (`score = risk^1.5`) |
+| `risk_roll_days` | `730` | gated 2y rolling window |
+| `risk_gate_near_days` | `120` | near-low lookback |
+| `risk_gate_near_buffer` | `1.15` | smooth gate ramp |
 
 These reproduce the visible screenshot anchors:
 
@@ -58,9 +61,10 @@ EQM score = 0.143  (reference 0.145)
 ```
 
 Override any of these with `--time-power`, `--low-quantile`, `--high-quantile`,
-`--score-lower-quantile`, `--score-upper-quantile`, or `--score-power`. To
-re-run the grid search and find new defaults against a target snapshot, see the
-calibration section below.
+`--score-power`, or the `--risk-*` gate flags. Python defaults live in
+`eqm_model.CQM_DEFAULTS` and must stay in sync with `web/src/utils/cqm.ts`.
+To re-run grid search against alternate risk-price knots, see the calibration
+section below.
 
 ## Price Band Hypothesis
 

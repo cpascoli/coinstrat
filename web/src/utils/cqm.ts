@@ -1,6 +1,7 @@
 /**
  * CoinStrat Quantile Model (CQM) — TypeScript port of the Python EQM replica
- * developed in EQM-model/. The model is a reverse-engineered approximation of
+ * developed in EQM-model/. Default parameters live in DEFAULT_CONFIG below and
+ * must stay in sync with eqm_model.CQM_DEFAULTS. The model is a reverse-engineered approximation of
  * BTCAnalytica's "Empirical Quantile Model" (EQM) chart.
  *
  * Two trends are computed:
