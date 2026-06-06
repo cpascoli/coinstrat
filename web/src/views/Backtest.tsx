@@ -588,7 +588,7 @@ const Backtest: React.FC<Props> = ({ data }) => {
                         <MetricBox
                           icon={<ShieldAlert className="h-4 w-4" style={{ color }} />}
                           label="Max Drawdown"
-                          value={`-${(r.maxDrawdown * 100).toFixed(1)}%`}
+                          value={`-${(r.maxReturnDrawdown * 100).toFixed(1)}%`}
                           tone="negative"
                         />
                       </Grid>
@@ -611,6 +611,7 @@ const Backtest: React.FC<Props> = ({ data }) => {
             <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
               Total portfolio value (BTC holdings at market price + cash reserves) for each strategy.
               All strategies receive the same DCA deposits; CoinStrat holds cash as dry powder when CORE is OFF and deploys reserves on re-entry.
+              Max Drawdown is measured on portfolio value relative to cumulative deposits (not raw portfolio value, which ongoing deposits can inflate).
               {cqmDca && cqmFit && (
                 <> CQM Risk DCA trades <code>(1 − 2 × Risk) × size</code> per period, where <code>size = max(base, {(cqmTradeFraction * 100).toFixed(0)}% × cash)</code> on BUYs and <code>size = max(base, {(cqmTradeFraction * 100).toFixed(0)}% × btc_value)</code> on SELLs — each side scales with its own reserve. The {(cqmTradeFraction * 100).toFixed(0)}% term lets the strategy redeploy accumulated dry powder when Risk falls and liquidate ~{(cqmTradeFraction * 100).toFixed(0)}% of the BTC position per period at cycle tops, instead of staying anchored to a flat USD base.</>
               )}
@@ -843,7 +844,8 @@ const Backtest: React.FC<Props> = ({ data }) => {
                 <CompRow label="BTC Value" values={results.map(r => fmtUsd(r.finalBtcHeld * (r.series.length > 0 ? r.series[r.series.length - 1].btcPrice : 0)))} />
                 <CompRow label="Total Return" values={results.map(r => fmtPct(r.totalReturn * 100))} />
                 <CompRow label="BTC Accumulated" values={results.map(r => r.btcAccumulated.toFixed(4))} />
-                <CompRow label="Max Drawdown" values={results.map(r => `-${(r.maxDrawdown * 100).toFixed(1)}%`)} />
+                <CompRow label="Max Drawdown" values={results.map(r => `-${(r.maxReturnDrawdown * 100).toFixed(1)}%`)} />
+                <CompRow label="Max DD (portfolio)" values={results.map(r => `-${(r.maxDrawdown * 100).toFixed(1)}%`)} />
               </TableBody>
             </Table>
           </TableContainer>

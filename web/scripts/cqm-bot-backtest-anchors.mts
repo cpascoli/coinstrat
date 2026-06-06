@@ -115,7 +115,7 @@ const VARIANTS: Variant[] = [
 
 function printStrategyRow(r: StrategyResult) {
   console.log(
-    `  ${r.name.padEnd(18)}${fmtPct(r.totalReturn).padStart(7)}  ${fmtPct(r.maxDrawdown).padStart(6)}  ${fmtBtc(r.finalBtcHeld).padStart(10)}  ${fmtUsd(r.finalCashBalance).padStart(8)}  ${fmtUsd(r.finalPortfolioValue)}`,
+    `  ${r.name.padEnd(18)}${fmtPct(r.totalReturn).padStart(7)}  ${fmtPct(r.maxReturnDrawdown).padStart(6)}  ${fmtPct(r.maxDrawdown).padStart(6)}  ${fmtBtc(r.finalBtcHeld).padStart(10)}  ${fmtUsd(r.finalCashBalance).padStart(8)}  ${fmtUsd(r.finalPortfolioValue)}`,
   );
 }
 
@@ -125,7 +125,7 @@ function printVariantBlock(
   cqm: StrategyResult,
 ) {
   console.log(`  [${variant.label}]`);
-  console.log('  Strategy          Return    Max DD    BTC held    Cash      Portfolio');
+  console.log('  Strategy          Return   Ret DD  Port DD    BTC held    Cash      Portfolio');
   printStrategyRow(baseline);
   printStrategyRow(cqm);
   const alpha = cqm.totalReturn - baseline.totalReturn;
@@ -177,6 +177,7 @@ export function runCqmBotAnchorBacktest() {
   console.log('Reserve acceleration: when cash (buys) or BTC value (sells) exceeds base/1%,');
   console.log('trade size scales to 1% of that reserve instead of a flat base — redeploys dry');
   console.log('powder faster in bears and liquidates ~1%/day of BTC at tops.');
+  console.log('Ret DD = drawdown on portfolio ÷ deposits; Port DD = raw portfolio (masked by inflows).');
   console.log('');
 
   for (const anchor of anchors) {

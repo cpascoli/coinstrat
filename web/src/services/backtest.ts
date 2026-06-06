@@ -72,7 +72,10 @@ export interface StrategyResult {
   finalCashBalance: number;  // remaining USD cash in portfolio (dry powder)
   finalPortfolioValue: number;
   totalReturn: number;       // % return on total capital deposited
-  maxDrawdown: number;       // worst peak-to-trough %
+  /** Peak-to-trough on raw portfolio value (BTC + cash). Masked by ongoing DCA deposits. */
+  maxDrawdown: number;
+  /** Peak-to-trough on portfolio value ÷ cumulative deposits — fair for DCA windows. */
+  maxReturnDrawdown: number;
   btcAccumulated: number;
 }
 
@@ -136,6 +139,18 @@ function computeMaxDrawdown(values: number[]): number {
   }
 
   return maxDD;
+}
+
+/**
+ * Max drawdown on the return-vs-deposits equity curve (portfolio ÷ cumulative
+ * deposits). Removes the upward drift from fresh DCA inflows so short windows
+ * still show loss periods.
+ */
+function computeMaxReturnDrawdown(series: SeriesPoint[]): number {
+  const equity = series
+    .filter((s) => s.cashDeployed > 0)
+    .map((s) => s.portfolioValue / s.cashDeployed);
+  return computeMaxDrawdown(equity);
 }
 
 // --- Strategy Simulation ---
@@ -287,6 +302,7 @@ function runStrategy(
     ? ((finalPortfolioValue - state.totalDeposited) / state.totalDeposited)
     : 0;
   const maxDrawdown = computeMaxDrawdown(series.map(s => s.portfolioValue));
+  const maxReturnDrawdown = computeMaxReturnDrawdown(series);
 
   return {
     name,
@@ -299,6 +315,7 @@ function runStrategy(
     finalPortfolioValue,
     totalReturn,
     maxDrawdown,
+    maxReturnDrawdown,
     btcAccumulated: state.btcHeld,
   };
 }

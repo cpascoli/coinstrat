@@ -233,6 +233,30 @@ describe('Backtest — CQM Risk DCA strategy', () => {
     // (covered indirectly by the V-shape mini-cycle test below).
   });
 
+  it('maxReturnDrawdown reflects loss vs deposits when gross portfolio DD is zero', () => {
+    const n = 9;
+    const data: SignalData[] = [];
+    const riskMap = new Map<string, number>();
+    for (let i = 0; i < n; i++) {
+      const d = new Date(Date.UTC(2026, 4, 25 + i));
+      const date = d.toISOString().slice(0, 10);
+      const price = 77000 - i * 1000;
+      data.push(makeRow(date, price));
+      riskMap.set(date, 0.31);
+    }
+    const results = runBacktest(data, {
+      ...baseConfig,
+      startDate: '2026-05-25',
+      cqmDca: true,
+      cqmRiskByDate: riskMap,
+      cqmTradeFraction: 0,
+    });
+    const cqm = results.find((r) => r.name === 'CQM Risk DCA')!;
+    expect(cqm.maxDrawdown).toBeCloseTo(0, 6);
+    expect(cqm.maxReturnDrawdown).toBeGreaterThan(0.02);
+    expect(cqm.totalReturn).toBeLessThan(0);
+  });
+
   it('accumulates BTC + cash (BTCAnalytica-style) on a synthetic mini-cycle', () => {
     // Synthetic price cycle: $20K → $80K → $20K
     // Risks: 0 at low, 1 at high, 0 at low again
