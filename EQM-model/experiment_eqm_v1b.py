@@ -625,6 +625,8 @@ def plot_eqm_v1b(
     qr_scale_label: str,
     scale_at_date: float,
     cfg: V1BConfig,
+    *,
+    chart_label: str = "v1b",
 ) -> None:
     dates = prices.index
     last_date = pd.Timestamp(snapshot_date)
@@ -641,9 +643,9 @@ def plot_eqm_v1b(
     trend_band = trend_risk_band(prices, window=60)
     composite_r2 = trend_risk_r_squared(prices, trend_band)
 
-    fig, axes = plt.subplots(5, 1, figsize=(13, 18), sharex=False)
+    fig, axes = plt.subplots(4, 1, figsize=(13, 15), sharex=False)
     fig.suptitle(
-        "Bitcoin Empirical Quantile Model (EQM) — v1b Experiment",
+        f"Bitcoin Empirical Quantile Model (EQM) — {chart_label} Experiment",
         fontsize=14,
         fontweight="bold",
     )
@@ -752,53 +754,8 @@ def plot_eqm_v1b(
         ],
     )
 
-    # --- Panel 3: linear vs cycle-tuned global risk (pre soft-gate) ---
+    # --- Panel 3: risk ---
     ax = axes[2]
-    shade_regimes(ax, regimes)
-    linear_risk_values = signals["risk_linear"].to_numpy(dtype=float) * 100.0
-    global_risk_values = signals["risk_global"].to_numpy(dtype=float) * 100.0
-    colored_line(ax, signals.index, linear_risk_values, cmap="RdYlGn_r", vmin=0.0, vmax=100.0)
-    ax.plot(
-        signals.index,
-        global_risk_values,
-        color="#5c3d99",
-        lw=1.2,
-        ls=(0, (5, 3)),
-        alpha=0.95,
-        zorder=5,
-    )
-    ax.axhline(50.0, color="#999999", lw=0.6, ls=":", zorder=2)
-    ax.set_ylim(-2, 102)
-    ax.set_ylabel("Risk (%)")
-    ax.grid(True, alpha=0.2, zorder=1)
-    ax.legend(
-        handles=[
-            Line2D([0], [0], color="#d95f02", lw=2.0, label="Linear (6%/68%, γ=1)"),
-            Line2D([0], [0], color="#5c3d99", lw=1.2, ls=(0, (5, 3)), label="Global (cycle γ + high_q)"),
-        ],
-        loc="upper left",
-        fontsize=7,
-        framealpha=0.85,
-        bbox_to_anchor=(0.0, 1.0),
-    )
-    panel_label(ax, f"Risk Tuning  (vs {risk_driver_label}, pre-gate)")
-    last_linear_risk = float(signals["risk_linear"].loc[last_date])
-    last_global_risk = float(signals["risk_global"].loc[last_date])
-    tuning_delta = last_global_risk - last_linear_risk
-    gate_delta = last_v1b_risk - last_global_risk
-    snapshot_box(
-        ax,
-        [
-            ("Linear risk", f"{last_linear_risk * 100:.1f}%"),
-            ("Global risk", f"{last_global_risk * 100:.1f}%"),
-            ("Tuning Δ", f"{tuning_delta * 100:+.1f}pp"),
-            ("Gated risk", f"{last_v1b_risk * 100:.1f}%"),
-            ("Gate Δ", f"{gate_delta * 100:+.1f}pp"),
-        ],
-    )
-
-    # --- Panel 4: risk ---
-    ax = axes[3]
     shade_regimes(ax, regimes)
     risk_values = signals["risk"].to_numpy(dtype=float) * 100.0
     colored_line(ax, signals.index, risk_values, cmap="RdYlGn_r", vmin=0.0, vmax=100.0)
@@ -808,10 +765,10 @@ def plot_eqm_v1b(
     ax.grid(True, alpha=0.2, zorder=1)
     ax.legend(
         handles=[Line2D([0], [0], color="#d95f02", lw=2.0, label=f"{risk_driver_label} risk")],
-        loc="upper right",
+        loc="lower left",
         fontsize=7,
         framealpha=0.85,
-        bbox_to_anchor=(1.0, 1.0),
+        bbox_to_anchor=(0.0, 0.0),
     )
     panel_label(ax, f"EQM Risk  (vs {risk_driver_label})")
     last_risk = float(signals["risk"].loc[last_date])
@@ -822,10 +779,11 @@ def plot_eqm_v1b(
             ("Fair value", money(last_fair)),
             ("QR 50%", money(last_qr50)),
         ],
+        corner="top_right",
     )
 
-    # --- Panel 5: risk vs price ---
-    ax = axes[4]
+    # --- Panel 4: risk vs price ---
+    ax = axes[3]
     p_lo = price_for_risk_fair(risk_fit, fair, last_date, 0.0)
     p_hi = price_for_risk_fair(risk_fit, fair, last_date, 1.0)
     grid_prices = np.linspace(max(p_lo * 0.5, 1.0), p_hi * 1.10, 600)

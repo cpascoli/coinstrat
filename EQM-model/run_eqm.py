@@ -2,7 +2,7 @@
 """
 CLI runner for the reverse-engineered BTC EQM prototype.
 
-Produces the five-panel eqm_replica.png chart: price bands, gold SMA, risk
+Produces the four-panel eqm_replica.png chart: price bands, gold SMA, risk
 time series, and risk-vs-price curve. Uses production v1b defaults from
 eqm_model.CQM_DEFAULTS (tail-scaled QR fan, global fair-value risk).
 """
@@ -129,8 +129,13 @@ def panel_label(ax, text: str) -> None:
     ax.set_title(text, loc="left", fontsize=10, fontweight="bold", pad=4)
 
 
-def snapshot_box(ax, lines: list[tuple[str, str]]) -> None:
-    """Place a small key/value snapshot table in the bottom-right corner."""
+def snapshot_box(
+    ax,
+    lines: list[tuple[str, str]],
+    *,
+    corner: str = "bottom_right",
+) -> None:
+    """Place a small key/value snapshot table in a chart corner."""
     if not lines:
         return
     label_width = max(len(label) for label, _ in lines)
@@ -139,15 +144,19 @@ def snapshot_box(ax, lines: list[tuple[str, str]]) -> None:
         f"{label.ljust(label_width)}  {value.rjust(value_width)}"
         for label, value in lines
     )
+    if corner == "top_right":
+        x, y, va = 0.995, 0.96, "top"
+    else:
+        x, y, va = 0.995, 0.04, "bottom"
     ax.text(
-        0.995,
-        0.04,
+        x,
+        y,
         formatted,
         transform=ax.transAxes,
         fontsize=8,
         family="monospace",
         ha="right",
-        va="bottom",
+        va=va,
         zorder=6,
         bbox={
             "facecolor": "white",
@@ -342,7 +351,7 @@ def plot_eqm(
     trend_band = trend_risk_band(prices, window=60)
     composite_r2 = trend_risk_r_squared(prices, trend_band)
 
-    fig, axes = plt.subplots(5, 1, figsize=(13, 18), sharex=False)
+    fig, axes = plt.subplots(4, 1, figsize=(13, 15), sharex=False)
     fig.suptitle(
         f"Bitcoin Empirical Quantile Model (EQM) — Replica  {title_suffix}",
         fontsize=14,
@@ -445,17 +454,6 @@ def plot_eqm(
 
     ax = axes[2]
     shade_regimes(ax, regimes)
-    score_values = signals["score"].to_numpy(dtype=float)
-    colored_line(ax, signals.index, score_values, cmap="RdYlGn_r", vmin=0.0, vmax=1.0)
-    ax.axhline(0.5, color="#999999", lw=0.6, ls=":", zorder=2)
-    ax.set_ylim(-0.02, 1.02)
-    ax.set_ylabel("Score")
-    ax.grid(True, alpha=0.2, zorder=1)
-    panel_label(ax, "EQM Score")
-    snapshot_box(ax, [("EQM Score", f"{float(signals['score'].loc[last_date]):.3f}")])
-
-    ax = axes[3]
-    shade_regimes(ax, regimes)
     risk_values = signals["risk"].to_numpy(dtype=float) * 100.0
     colored_line(ax, signals.index, risk_values, cmap="RdYlGn_r", vmin=0.0, vmax=100.0)
     ax.axhline(50.0, color="#999999", lw=0.6, ls=":", zorder=2)
@@ -464,10 +462,10 @@ def plot_eqm(
     ax.grid(True, alpha=0.2, zorder=1)
     ax.legend(
         handles=[Line2D([0], [0], color="#d95f02", lw=2.0, label="QR 50% risk")],
-        loc="upper right",
+        loc="lower left",
         fontsize=7,
         framealpha=0.85,
-        bbox_to_anchor=(1.0, 1.0),
+        bbox_to_anchor=(0.0, 0.0),
     )
     panel_label(ax, "EQM Risk  (vs QR 50%)")
     snapshot_box(
@@ -477,9 +475,10 @@ def plot_eqm(
             ("Fair value", money(last_fair)),
             ("QR 50%", money(last_qr50)),
         ],
+        corner="top_right",
     )
 
-    ax = axes[4]
+    ax = axes[3]
     p_lo = price_for_risk_fair(risk_fit, fair, last_date, 0.0)
     p_hi = price_for_risk_fair(risk_fit, fair, last_date, 1.0)
     grid_prices = np.linspace(max(p_lo * 0.5, 1.0), p_hi * 1.10, 600)
