@@ -10,6 +10,7 @@ import {
   LogOut,
   LogIn,
   Shield,
+  Bot,
   BookOpen,
   Database,
   Key,
@@ -23,6 +24,7 @@ import Home from './views/Home';
 import Backtest from './views/Backtest';
 import Profile from './views/Profile';
 import Admin from './views/Admin';
+import BotPage from './views/Bot';
 import Developer from './views/Developer';
 import DocsArchitecture from './views/DocsArchitecture';
 import DocsHome from './views/DocsHome';
@@ -553,10 +555,16 @@ const App: React.FC = () => {
                         <ListItemText>Profile</ListItemText>
                       </MenuItem>
                       {isAdmin && (
-                        <MenuItem onClick={() => { setAnchorEl(null); navigate('/admin'); }}>
-                          <ListItemIcon><Shield size={16} /></ListItemIcon>
-                          <ListItemText>Admin</ListItemText>
-                        </MenuItem>
+                        <>
+                          <MenuItem onClick={() => { setAnchorEl(null); navigate('/bot'); }}>
+                            <ListItemIcon><Bot size={16} /></ListItemIcon>
+                            <ListItemText>CQM Bot</ListItemText>
+                          </MenuItem>
+                          <MenuItem onClick={() => { setAnchorEl(null); navigate('/admin'); }}>
+                            <ListItemIcon><Shield size={16} /></ListItemIcon>
+                            <ListItemText>Admin</ListItemText>
+                          </MenuItem>
+                        </>
                       )}
                       <MenuItem onClick={async () => { setAnchorEl(null); await signOut(); navigate('/'); }}>
                         <ListItemIcon><LogOut size={16} /></ListItemIcon>
@@ -620,6 +628,7 @@ const App: React.FC = () => {
           <Route path="/backtest" element={renderDataRoute(<Backtest data={data} />)} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/admin" element={<Admin />} />
+          <Route path="/bot" element={<BotPage />} />
           <Route path="/api-docs" element={<Navigate to="/developer" replace />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />

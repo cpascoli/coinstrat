@@ -27,6 +27,7 @@ import {
   Menu as MenuIcon,
   Newspaper,
   Shield,
+  Bot,
   User,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -410,10 +411,16 @@ const Home: React.FC<HomeProps> = ({
                     <ListItemText>Profile</ListItemText>
                   </MenuItem>
                   {isAdmin && (
-                    <MenuItem onClick={() => { setNavMenuEl(null); navigate('/admin'); }}>
-                      <ListItemIcon><Shield size={16} /></ListItemIcon>
-                      <ListItemText>Admin</ListItemText>
-                    </MenuItem>
+                    <>
+                      <MenuItem onClick={() => { setNavMenuEl(null); navigate('/bot'); }}>
+                        <ListItemIcon><Bot size={16} /></ListItemIcon>
+                        <ListItemText>CQM Bot</ListItemText>
+                      </MenuItem>
+                      <MenuItem onClick={() => { setNavMenuEl(null); navigate('/admin'); }}>
+                        <ListItemIcon><Shield size={16} /></ListItemIcon>
+                        <ListItemText>Admin</ListItemText>
+                      </MenuItem>
+                    </>
                   )}
                   <MenuItem onClick={async () => { setNavMenuEl(null); await signOut(); navigate('/'); }}>
                     <ListItemIcon><LogOut size={16} /></ListItemIcon>

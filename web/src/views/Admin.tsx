@@ -41,8 +41,6 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, type Profile, type Tier } from '../lib/supabase';
-import CqmBotTab from './admin/CqmBotTab';
-
 function parseJsonOrApiFailure(status: number, text: string): { ok: true; data: unknown } | { ok: false; message: string } {
   const trimmed = text.trim();
   if (!trimmed) return { ok: false, message: `Empty response body (HTTP ${status})` };
@@ -736,14 +734,13 @@ const Admin: React.FC = () => {
         onChange={(_, value) => setTabIdx(value)}
         sx={{ mb: 2, '& .MuiTab-root': { fontWeight: 700, textTransform: 'none' } }}
       >
-        <Tab label="CQM Bot" />
         <Tab label={`Registered Users (${users.length})`} />
         <Tab label={`Newsletter Subscribers (${activeSubscribers.length})`} />
         <Tab label="Newsletter" />
         <Tab label="Signals & Alerts" />
       </Tabs>
 
-      {tabIdx === 1 && (
+      {tabIdx === 0 && (
         <Paper>
           {loading ? (
             <Box sx={{ p: 4, textAlign: 'center' }}>
@@ -813,7 +810,7 @@ const Admin: React.FC = () => {
         </Paper>
       )}
 
-      {tabIdx === 2 && (
+      {tabIdx === 1 && (
         <Paper>
           {loading ? (
             <Box sx={{ p: 4, textAlign: 'center' }}>
@@ -890,7 +887,7 @@ const Admin: React.FC = () => {
         </Paper>
       )}
 
-      {tabIdx === 3 && (
+      {tabIdx === 2 && (
         <Stack spacing={2.5}>
           {newsletterMessage && (
             <Alert severity={newsletterMessage.severity}>{newsletterMessage.text}</Alert>
@@ -1286,9 +1283,7 @@ const Admin: React.FC = () => {
         </Stack>
       )}
 
-      {tabIdx === 0 && <CqmBotTab authHeaders={authHeaders} />}
-
-      {tabIdx === 4 && (
+      {tabIdx === 3 && (
         <Stack spacing={3}>
           <Paper sx={{ p: 2.5 }}>
             <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>

@@ -29,7 +29,7 @@ import {
 import { Activity, Banknote, Pause, Play, RefreshCw, Save, Settings as SettingsIcon, TrendingUp } from 'lucide-react';
 
 /**
- * Admin Dashboard — CQM Risk DCA Bot tab.
+ * CQM Risk DCA Bot admin panel (`/bot`).
  *
  * Three Paper sections:
  *   1. Bot Status (balances, live Risk, computed target, Execute button).
