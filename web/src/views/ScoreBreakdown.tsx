@@ -524,11 +524,11 @@ function BottomAccumulationBreakdown({ current }: { current: SignalData }) {
       title: 'Capitulation',
       score: current.BOTTOM_CAPITULATION_SCORE,
       formula: hasDerivatives
-        ? 'Holder stress, capped at 15, plus derivatives stress, capped at 5. Holder stress uses LTH SOPR, SIP, and BTC drawdown. Derivatives stress uses 7D funding and 90D OI drawdown.'
-        : 'Legacy stress score from LTH SOPR, Supply in Profit, and BTC drawdown from the 365D high, capped at 20.',
+        ? 'Holder stress, capped at 15, plus derivatives stress, capped at 5. Holder stress uses LTH SOPR, percent addresses in profit, and BTC drawdown. Derivatives stress uses 7D funding and 90D OI drawdown.'
+        : 'Legacy stress score from LTH SOPR, percent addresses in profit, and BTC drawdown from the 365D high, capped at 20.',
       contributions: [
         { label: 'LTH SOPR stress', value: fmtNum((current as any).LTH_SOPR, 3), points: lthSoprStressPoints, max: hasDerivatives ? 7 : 9 },
-        { label: 'Supply in Profit stress', value: fmtPct((current as any).SIP), points: sipStressPoints, max: hasDerivatives ? 4 : 6 },
+        { label: 'Addresses-in-profit stress', value: fmtPct((current as any).SIP), points: sipStressPoints, max: hasDerivatives ? 4 : 6 },
         { label: 'BTC drawdown from 365D high', value: fmtRatioPct((current as any).BTC_DRAWDOWN_FROM_365D_HIGH), points: drawdownStressPoints, max: hasDerivatives ? 4 : 5 },
         ...(hasDerivatives
           ? [

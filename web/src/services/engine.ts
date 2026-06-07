@@ -228,7 +228,7 @@ export async function computeAllSignals(): Promise<SignalData[]> {
     // On-chain valuation metrics from BGeometrics
     fetchLTH_SOPR(),                // Long-Term Holder SOPR, daily
     fetchLTH_NUPL(),                // Long-Term Holder NUPL, daily (display-only)
-    fetchSupplyInProfit(),          // Supply in Profit %, daily (Euphoria Exhaustion exit)
+    fetchSupplyInProfit(),          // Percent addresses in profit %, daily (Euphoria Exhaustion exit)
     fetchSTHRealizedPrice(),        // Short-Term Holders Realized Price, daily
     fetchLTHRealizedPrice(),        // Long-Term Holders Realized Price, daily
     fetchRealizedPrice(),           // All-holder Realized Price, daily
@@ -294,7 +294,7 @@ export async function computeAllSignals(): Promise<SignalData[]> {
   fillSeries(lthRealizedPrice, "LTH_REALIZED_PRICE");
   fillSeries(realizedPrice, "REALIZED_PRICE");
 
-  // Supply in Profit (%) — used in Euphoria Exhaustion exit logic
+  // Percent addresses in profit (%) — used in Euphoria Exhaustion exit logic
   fillSeries(supplyInProfit, "SIP");
 
   // ISM Manufacturing PMI (display-only, not used in scoring)
@@ -649,7 +649,7 @@ export async function computeAllSignals(): Promise<SignalData[]> {
   //      or 3 (deep value / capitulation) so CORE stays ON at bear bottoms.
   //
   //   B) Euphoria Exhaustion:
-  //      Phase 1 — ARM: Supply in Profit > 95% for at least 14 of the last 21 days.
+  //      Phase 1 — ARM: percent addresses in profit > 95% for at least 14 of the last 21 days.
   //      Phase 2 — EXHAUST: SIP drops below 90% and fails to reclaim 95%
   //                within 45 days. This can fire before the 40W trend breaks,
   //                but only when valuation is truly euphoric (VAL_SCORE = 0).

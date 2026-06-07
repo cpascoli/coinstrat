@@ -325,8 +325,8 @@ export async function fetchBGeometrics(file: string): Promise<DataPoint[]> {
 }
 
 /**
- * Supply in Profit (%). BGeometrics profit_loss stalled on 2026-04-26; prefer
- * Bitcoin Magazine Pro "Percent Addresses in Profit" (closely correlated pre-2026).
+ * Percent addresses in profit (%), stored as `SIP`. BGeometrics profit_loss
+ * stalled on 2026-04-26; prefer Bitcoin Magazine Pro addresses-in-profit feed.
  */
 export async function fetchSupplyInProfit(): Promise<DataPoint[]> {
   try {

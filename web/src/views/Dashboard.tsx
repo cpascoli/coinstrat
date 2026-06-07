@@ -231,7 +231,7 @@ const Dashboard: React.FC<Props> = ({ current, history }) => {
                 <SnapshotRow label="NUPL" value={fmtNum((current as any).NUPL, 3)} score={current.VAL_SCORE} />
                 <SnapshotRow label="MVRV" value={fmtNum(current.MVRV, 2)} score={current.VAL_SCORE} />
                 <SnapshotRow label="LTH SOPR" value={fmtNum((current as any).LTH_SOPR, 3)} score={typeof (current as any).LTH_SOPR === 'number' && (current as any).LTH_SOPR < 1.0 ? 2 : (typeof (current as any).LTH_SOPR === 'number' && (current as any).LTH_SOPR < 1.5 ? 1 : 0)} />
-                <SnapshotRow label="Supply in Profit" value={typeof current.SIP === 'number' ? fmtPct(current.SIP) : 'n/a'} score={(current.SIP_EXHAUSTED ?? 0) === 1 ? 0 : (current.SIP_EUPHORIA_FLAG ?? 0) === 1 ? 1 : 2} />
+                <SnapshotRow label="Percent Addresses in Profit" value={typeof current.SIP === 'number' ? fmtPct(current.SIP) : 'n/a'} score={(current.SIP_EXHAUSTED ?? 0) === 1 ? 0 : (current.SIP_EUPHORIA_FLAG ?? 0) === 1 ? 1 : 2} />
                 <SnapshotRow label="BTC 40W MA" value={fmtUsd((current as any).BTC_MA40W)} score={current.PRICE_REGIME_ON} />
               </TableBody>
             </Table>

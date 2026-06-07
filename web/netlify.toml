@@ -36,7 +36,7 @@
   to = "/.netlify/functions/bgeometrics/:splat"
   status = 200
 
-# Proxy for Bitcoin Magazine Pro on-chain data (addresses in profit → SIP)
+# Proxy for Bitcoin Magazine Pro on-chain data (percent addresses in profit)
 [[redirects]]
   from = "/api/bmp/*"
   to = "/.netlify/functions/bitcoinmagazinepro/:splat"

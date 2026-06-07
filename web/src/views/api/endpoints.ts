@@ -39,7 +39,7 @@ export const endpointGroups: EndpointGroup[] = [
         path: '/api/v1/signals/current',
         summary: 'Latest signal snapshot',
         description:
-          'Returns the most recent signal state: CORE_ON, MACRO_ON, ACCUM_ON, all scores (VAL, LIQ, DXY, CYCLE), BTC price, MVRV, Supply in Profit, and Euphoria Exhaustion diagnostics. Served from a 1-hour cache.',
+          'Returns the most recent signal state: CORE_ON, MACRO_ON, ACCUM_ON, all scores (VAL, LIQ, DXY, CYCLE), BTC price, MVRV, percent addresses in profit, and Euphoria Exhaustion diagnostics. Served from a 1-hour cache.',
         auth: 'none',
       },
     ],

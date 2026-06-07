@@ -32,7 +32,7 @@ const SCORES: ScoreDoc[] = [
     ],
     notes: [
       'Suggested deployment bands are intentionally broad: 0%, 0-10%, 25-40%, 50-75%, and 75-100%.',
-      'Capitulation now includes optional Binance derivatives context: 7-day BTCUSDT perpetual funding and open-interest drawdown from the 90-day high. When these feeds are unavailable, the score falls back to holder stress, Supply in Profit, and BTC drawdown.',
+      'Capitulation now includes optional Binance derivatives context: 7-day BTCUSDT perpetual funding and open-interest drawdown from the 90-day high. When these feeds are unavailable, the score falls back to holder stress, percent addresses in profit, and BTC drawdown.',
       'The price components avoid reusing the persistence-filtered PRICE_REGIME_ON signal. Price setup rewards deep price impairment, while price repair rewards reclaim, momentum, and base stabilization.',
       'The score does not override CORE. It is a sizing and context layer for investors who want staged accumulation.',
       'Future versions can add funding rates, open interest flushes, ETF flows, stablecoin supply, oil shocks, real yields, and credit spreads.',

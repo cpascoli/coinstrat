@@ -199,7 +199,7 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
                     <MetricChip title="Price Regime" label="PRICE_REGIME" value={current.PRICE_REGIME_ON} />
                   </Grid>
                   <Grid item xs={4}>
-                    <MetricChip title="Supply in Profit" label="SIP" value={typeof current.SIP === 'number' ? `${current.SIP.toFixed(1)}%` : '–'} />
+                    <MetricChip title="Percent Addresses in Profit" label="% Addrs" value={typeof current.SIP === 'number' ? `${current.SIP.toFixed(1)}%` : '–'} />
                   </Grid>
                   { // show euphoria flag if SIP is not exhausted
                     current.SIP_EXHAUSTED === 0 && (
@@ -209,7 +209,7 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
                     )
                   }
                   <Grid item xs={4}>
-                    <MetricChip title="SIP Exhausted" label="SIP_EXHAUST" value={(current.SIP_EXHAUSTED ?? 0) === 1 ? 'YES' : 'NO'} />
+                    <MetricChip title="Euphoria Exhausted" label="EXHAUSTED" value={(current.SIP_EXHAUSTED ?? 0) === 1 ? 'YES' : 'NO'} />
                   </Grid>
                   { // show observation window if SIP is not exhausted
                     current.SIP_EXHAUSTED === 0 && (

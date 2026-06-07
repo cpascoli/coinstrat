@@ -18,7 +18,7 @@ const PIPELINE: Stage[] = [
       'CoinStrat starts from external time series covering liquidity, macro conditions, BTC price, and on-chain valuation.',
     details: [
       'Macro/liquidity inputs include `WALCL`, `WTREGEN`, `RRPONTSYD`, `DTWEXBGS`, `SAHMREALTIME`, `T10Y3M`, and `ISM_PMI` (ISM Manufacturing PMI).',
-      'Market and on-chain inputs include `BTCUSD`, `MVRV`, `LTH_SOPR`, and `SIP`.',
+      'Market and on-chain inputs include `BTCUSD`, `MVRV`, `LTH_SOPR`, and percent addresses in profit (`SIP`).',
       '`NUPL` (Net Unrealized Profit/Loss) is derived from MVRV as `1 − 1/MVRV` and used directly in `VAL_SCORE`.',
       'Additional context series like `ECB_RAW`, `BOJ_RAW`, `EURUSD`, and `JPYUSD` are also cached for transparency and future expansion.',
       'All series are aligned onto a common daily timeline with forward-filling where appropriate so the model can evaluate a full state each day.',
@@ -58,7 +58,7 @@ const PIPELINE: Stage[] = [
       '`CORE_ON` is the primary permission engine. It uses valuation and trend to decide whether accumulation is allowed.',
       '`MACRO_ON` is an intensity modifier, not a separate buy permission. It turns on only when liquidity and business cycle are strong enough and the dollar is not a headwind.',
       '`ACCUM_ON` is the final permission and currently equals `CORE_ON`.',
-      'Because these are stateful signals, they are not recalculated from scratch each day in a purely stateless way. The prior regime matters, especially for `CORE_ON` and the SIP exhaustion state machine.',
+      'Because these are stateful signals, they are not recalculated from scratch each day in a purely stateless way. The prior regime matters, especially for `CORE_ON` and the addresses-in-profit exhaustion state machine.',
     ],
   },
   {

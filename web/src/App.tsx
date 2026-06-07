@@ -106,7 +106,7 @@ export interface SignalData {
   BTC_OPEN_INTEREST_USD?: number;
   BTC_OI_DRAWDOWN_90D?: number;
   // Euphoria Exhaustion diagnostics
-  SIP?: number;                // Supply in Profit (%)
+  SIP?: number;                // Percent addresses in profit (%)
   SIP_EUPHORIA_FLAG?: number;  // 1 if euphoria detected this cycle
   SIP_EXHAUSTED?: number;      // 1 if failed to reclaim 95% within 45d window
   SIP_OBS_DAYS?: number;       // Days into observation window (0 if not active)

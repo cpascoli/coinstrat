@@ -36,7 +36,7 @@ function heuristicSeries(prompt: string): StrategySeriesKey[] {
     { seriesKey: 'REALIZED_PRICE', keywords: ['realized price', 'all holder realized price', 'aggregate realized price', 'network realized price'] },
     { seriesKey: 'STH_REALIZED_PRICE', keywords: ['sth realized price', 'short term holder realized price', 'short-term holder realized price'] },
     { seriesKey: 'LTH_REALIZED_PRICE', keywords: ['lth realized price', 'long term holder realized price', 'long-term holder realized price'] },
-    { seriesKey: 'SIP', keywords: ['supply in profit', 'sip'] },
+    { seriesKey: 'SIP', keywords: ['percent addresses in profit', 'addresses in profit', 'sip'] },
     { seriesKey: 'DXY', keywords: ['dxy', 'dollar'] },
     { seriesKey: 'SAHM', keywords: ['sahm'] },
     { seriesKey: 'YC_M', keywords: ['yield curve', '10y3m', '10y-3m'] },

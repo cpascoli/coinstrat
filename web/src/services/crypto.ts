@@ -270,9 +270,9 @@ export async function fetchLTH_NUPL(): Promise<PricePoint[]> {
 }
 
 /**
- * Fetch Supply in Profit (%) — Bitcoin Magazine Pro "Percent Addresses in Profit"
+ * Fetch percent addresses in profit (%) from Bitcoin Magazine Pro,
  * with BGeometrics profit_loss fallback (stale since 2026-04-26).
- * Used by the Euphoria Exhaustion exit logic.
+ * Stored as `SIP` in the signal cache. Used by the Euphoria Exhaustion exit logic.
  */
 export async function fetchSupplyInProfit(): Promise<PricePoint[]> {
   const isDev = import.meta.env.DEV;

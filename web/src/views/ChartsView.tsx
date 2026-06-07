@@ -23,7 +23,7 @@ interface Props {
 }
 
 type RangeKey = 'all' | '10y' | '5y' | '2y' | '1y';
-type ChartsSection = 'system' | 'bottom' | 'valuation' | 'liquidity' | 'business' | 'global' | 'usd' | 'cqm';
+type ChartsSection = 'system' | 'cqm' | 'bottom' | 'valuation' | 'liquidity' | 'business' | 'usd';
 type CqmBandScale = 'semi-log' | 'log-log';
 
 const CQM_QR_GENESIS_MS = new Date('2009-01-01').getTime();
@@ -275,13 +275,15 @@ function lookupRiskPctAtPrice(
 const ChartsView: React.FC<Props> = ({ data }) => {
   const [range, setRange] = useState<RangeKey>('all');
   const [cqmBandScale, setCqmBandScale] = useState<CqmBandScale>('semi-log');
+  const [cqmBrushRange, setCqmBrushRange] = useState<{ startIndex: number; endIndex: number } | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
 
   const section: ChartsSection = useMemo(() => {
     const m = location.pathname.match(/^\/charts\/([^/]+)/);
     const seg = (m?.[1] ?? 'system').toLowerCase();
-    if (seg === 'system' || seg === 'bottom' || seg === 'valuation' || seg === 'liquidity' || seg === 'business' || seg === 'global' || seg === 'usd' || seg === 'cqm') return seg as ChartsSection;
+    if (seg === 'system' || seg === 'cqm' || seg === 'bottom' || seg === 'valuation' || seg === 'liquidity' || seg === 'business' || seg === 'usd') return seg as ChartsSection;
+    if (seg === 'global') return 'liquidity';
     return 'system';
   }, [location.pathname]);
 
@@ -293,7 +295,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
     }
     const m = location.pathname.match(/^\/charts\/([^/]+)/);
     const seg = (m?.[1] ?? '').toLowerCase();
-    if (seg && seg !== 'system' && seg !== 'bottom' && seg !== 'valuation' && seg !== 'liquidity' && seg !== 'business' && seg !== 'global' && seg !== 'usd' && seg !== 'cqm') {
+    if (seg && seg !== 'system' && seg !== 'cqm' && seg !== 'bottom' && seg !== 'valuation' && seg !== 'liquidity' && seg !== 'global' && seg !== 'business' && seg !== 'usd') {
       navigate('/charts/system', { replace: true });
     }
   }, [location.pathname, navigate]);
@@ -657,22 +659,31 @@ const ChartsView: React.FC<Props> = ({ data }) => {
     return [{ price: cqmSnapshot.price, riskPct: cqmRiskAtPrice }];
   }, [cqmSnapshot, cqmRiskAtPrice]);
 
-  const cqmLogLogXDomain = useMemo((): [number, number] => {
-    const days = (cqmChartData as any[])
-      .map((d) => Number(d.cqmDays))
-      .filter((v) => Number.isFinite(v) && v > 0);
-    if (!days.length) return [1, 10];
-    const min = Math.min(...days);
-    const max = Math.max(...days);
-    return [min * 0.85, max * 1.15];
-  }, [cqmChartData]);
-
   const cqmLogLogXTickFormatter = (days: number) => {
     if (!Number.isFinite(days) || days <= 0) return '';
     const d = new Date(CQM_QR_GENESIS_MS + days * DAY_MS);
     if (isNaN(d.getTime())) return '';
     return (range === 'all' || range === '10y' || range === '5y') ? format(d, 'yyyy') : format(d, 'MMM yy');
   };
+
+  const cqmYearTicks = useMemo(() => {
+    const rows = cqmChartData as any[];
+    if (!rows.length) return { ts: [] as number[], days: [] as number[] };
+    const si = cqmBrushRange?.startIndex ?? 0;
+    const ei = cqmBrushRange?.endIndex ?? rows.length - 1;
+    const minTs = Number(rows[si].ts);
+    const maxTs = Number(rows[ei].ts);
+    const startYear = new Date(minTs).getUTCFullYear() + 1;
+    const endYear = new Date(maxTs).getUTCFullYear();
+    const tsTicks: number[] = [];
+    const daysTicks: number[] = [];
+    for (let y = startYear; y <= endYear; y++) {
+      const jan1 = Date.UTC(y, 0, 1);
+      tsTicks.push(jan1);
+      daysTicks.push(cqmDaysSinceGenesis(jan1));
+    }
+    return { ts: tsTicks, days: daysTicks };
+  }, [cqmChartData, cqmBrushRange]);
 
   const tickCount = range === 'all' ? 10 : range === '10y' ? 10 : range === '5y' ? 8 : range === '2y' ? 8 : 6;
 
@@ -716,13 +727,12 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           sx={{ minHeight: 40 }}
         >
           <Tab value="system" label="System" sx={{ minHeight: 40 }} />
+          <Tab value="cqm" label="CQM" sx={{ minHeight: 40 }} />
           <Tab value="bottom" label="Bottom Score" sx={{ minHeight: 40 }} />
           <Tab value="valuation" label="Valuation" sx={{ minHeight: 40 }} />
           <Tab value="liquidity" label="Liquidity" sx={{ minHeight: 40 }} />
-          <Tab value="global" label="Global Liq." sx={{ minHeight: 40 }} />
           <Tab value="business" label="Business Cycle" sx={{ minHeight: 40 }} />
           <Tab value="usd" label="USD" sx={{ minHeight: 40 }} />
-          <Tab value="cqm" label="CQM" sx={{ minHeight: 40 }} />
         </Tabs>
 
         <ToggleButtonGroup
@@ -1340,29 +1350,29 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       </Paper>
       )}
 
-      {/* Supply in Profit (SIP) — Euphoria Exhaustion exit logic */}
+      {/* Percent Addresses in Profit — Euphoria Exhaustion exit logic */}
       {section === 'valuation' && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
-            Supply in Profit (SIP)
+            Percent Addresses in Profit
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            Percentage of total BTC supply currently in profit (current price above the price at which coins last moved on-chain).
+            Percentage of Bitcoin addresses whose average cost basis is below the current price (Bitcoin Magazine Pro).
             <br />
-            Used in the Euphoria Exhaustion logic: when SIP is above 95% for at least 14 of the last 21 days the setup is armed;
-            if SIP then drops below 90% and fails to reclaim 95% within 45 days, exhaustion is confirmed and can contribute to a CORE exit while valuation is euphoric.
+            Used in the Euphoria Exhaustion logic: when the reading is above 95% for at least 14 of the last 21 days the setup is armed;
+            if it then drops below 90% and fails to reclaim 95% within 45 days, exhaustion is confirmed and can contribute to a CORE exit while valuation is euphoric.
             <br />
-            Chart shading only: red stays on from the first exhaustion day until SIP completes a fresh 14-of-21-day reclaim above 95%; after the first arm, the background is only green or red (never unshaded).
+            Chart shading only: red stays on from the first exhaustion day until the reading completes a fresh 14-of-21-day reclaim above 95%; after the first arm, the background is only green or red (never unshaded).
           </Typography>
         </Box>
 
         <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
-          <Chip size="small" variant="outlined" label="Supply in Profit (%)" sx={{ borderColor: '#facc15', color: '#fef08a' }} />
+          <Chip size="small" variant="outlined" label="Percent Addresses in Profit (%)" sx={{ borderColor: '#facc15', color: '#fef08a' }} />
           <Chip size="small" variant="outlined" label="95% Euphoria threshold" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
           <Chip size="small" variant="outlined" label="90% Drop threshold" sx={{ borderColor: '#f59e0b', color: '#fde68a' }} />
           <Chip size="small" variant="filled" label="Euphoria armed" sx={{ bgcolor: 'rgba(34,197,94,0.2)', color: '#bbf7d0', fontSize: 11 }} />
-          <Chip size="small" variant="filled" label="SIP exhausted" sx={{ bgcolor: 'rgba(239,68,68,0.25)', color: '#fecaca', fontSize: 11 }} />
+          <Chip size="small" variant="filled" label="Exhaustion confirmed" sx={{ bgcolor: 'rgba(239,68,68,0.25)', color: '#fecaca', fontSize: 11 }} />
           <Chip size="small" variant="outlined" label="BTCUSD" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
         </Stack>
 
@@ -1391,7 +1401,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               <ReferenceLine yAxisId="sip" y={90} stroke="#f59e0b" strokeDasharray="4 4" strokeWidth={1} label={{ value: '90% Drop', fill: '#fde68a', fontSize: 10, position: 'left' }} />
               <Tooltip content={<CustomTooltip />} />
               {renderChartBrush()}
-              <Line yAxisId="sip" type="monotone" dataKey="SIP" name="Supply in Profit (%)" stroke="#facc15" strokeWidth={2} dot={false} isAnimationActive={false} />
+              <Line yAxisId="sip" type="monotone" dataKey="SIP" name="Percent Addresses in Profit (%)" stroke="#facc15" strokeWidth={2} dot={false} isAnimationActive={false} />
               <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.5} dot={false} isAnimationActive={false} opacity={0.5} />
             </LineChart>
           </ResponsiveContainer>
@@ -1487,7 +1497,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* G3 Global Liquidity: BTC + G3 composite */}
-      {section === 'global' && (
+      {section === 'liquidity' && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1546,7 +1556,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* G3 Global Liquidity: components breakdown */}
-      {section === 'global' && (
+      {section === 'liquidity' && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1590,7 +1600,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* G3 Global Liquidity: YoY */}
-      {section === 'global' && (
+      {section === 'liquidity' && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -2020,7 +2030,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             exclusive
             value={cqmBandScale}
             onChange={(_, value: CqmBandScale | null) => {
-              if (value) setCqmBandScale(value);
+              if (value) { setCqmBandScale(value); setCqmBrushRange(null); }
             }}
             sx={{ flexShrink: 0 }}
           >
@@ -2043,8 +2053,8 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                   type="number"
                   domain={['dataMin', 'dataMax']}
                   scale="time"
+                  ticks={cqmYearTicks.ts}
                   tickFormatter={xTickFormatter}
-                  tickCount={tickCount}
                   minTickGap={24}
                   tick={{ fontSize: 10, fill: '#94a3b8' }}
                   axisLine={false}
@@ -2055,10 +2065,9 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                   dataKey="cqmDays"
                   type="number"
                   scale="log"
-                  domain={cqmLogLogXDomain}
-                  allowDataOverflow
+                  domain={['dataMin', 'dataMax']}
+                  ticks={cqmYearTicks.days}
                   tickFormatter={cqmLogLogXTickFormatter}
-                  tickCount={tickCount}
                   minTickGap={24}
                   tick={{ fontSize: 10, fill: '#94a3b8' }}
                   axisLine={false}
@@ -2086,7 +2095,15 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               />
               <Tooltip content={<CustomTooltip />} />
               {cqmBandScale === 'semi-log' ? (
-                renderChartBrush()
+                <Brush
+                  dataKey="ts"
+                  height={22}
+                  stroke="#60a5fa"
+                  fill="rgba(15, 23, 42, 0.92)"
+                  travellerWidth={10}
+                  tickFormatter={xTickFormatter}
+                  onChange={(r: any) => setCqmBrushRange({ startIndex: r.startIndex ?? 0, endIndex: r.endIndex ?? 0 })}
+                />
               ) : (
                 <Brush
                   dataKey="cqmDays"
@@ -2095,6 +2112,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                   fill="rgba(15, 23, 42, 0.92)"
                   travellerWidth={10}
                   tickFormatter={cqmLogLogXTickFormatter}
+                  onChange={(r: any) => setCqmBrushRange({ startIndex: r.startIndex ?? 0, endIndex: r.endIndex ?? 0 })}
                 />
               )}
               <Line yAxisId="btc" type="monotone" dataKey="CQM_QR_HIGH" name="QR 99.9%" stroke="#ef4444" strokeWidth={1} strokeDasharray="6 4" dot={false} isAnimationActive={false} opacity={0.85} connectNulls />
@@ -2116,8 +2134,6 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             <Chip size="small" label={`CQM 50% $${Math.round(cqmSnapshot.solidMedian).toLocaleString()}`} sx={{ bgcolor: 'rgba(250,204,21,0.18)', color: '#fef08a' }} />
             <Chip size="small" label={`CQM 99.9% $${Math.round(cqmSnapshot.solidUpper).toLocaleString()}`} sx={{ bgcolor: 'rgba(239,68,68,0.18)', color: '#fecaca' }} />
             <Chip size="small" label={`QR 50% $${Math.round(cqmSnapshot.qrDashedMedian).toLocaleString()}`} sx={{ bgcolor: 'rgba(224,168,31,0.18)', color: '#fde68a' }} />
-            <Chip size="small" label={`QR 0.1% $${Math.round(cqmSnapshot.qrDashedLow).toLocaleString()}`} sx={{ bgcolor: 'rgba(34,197,94,0.12)', color: '#bbf7d0' }} />
-            <Chip size="small" label={`QR 99.9% $${Math.round(cqmSnapshot.qrDashedHigh).toLocaleString()}`} sx={{ bgcolor: 'rgba(239,68,68,0.12)', color: '#fecaca' }} />
             <Chip size="small" label={`Risk ${(cqmSnapshot.risk * 100).toFixed(1)}%`} sx={{ bgcolor: 'rgba(96,165,250,0.18)', color: '#bfdbfe' }} />
           </Box>
         )}

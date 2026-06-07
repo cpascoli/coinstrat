@@ -118,10 +118,10 @@ const DATA_FEEDS: DataFeed[] = [
     category: 'onchain',
   },
   {
-    title: 'Supply in Profit',
+    title: 'Percent Addresses in Profit',
     id: 'SIP',
     href: 'https://www.bitcoinmagazinepro.com/charts/percent-addresses-in-profit/',
-    meaning: 'Percent of Bitcoin addresses in profit (Bitcoin Magazine Pro). Closely tracks supply-in-profit; BGeometrics profit_loss is used only as a fallback when BMP is unavailable.',
+    meaning: 'Percent of Bitcoin addresses whose average cost basis is below the current price (Bitcoin Magazine Pro). Stored in the signal cache as `SIP`. BGeometrics profit_loss is used only as a fallback when BMP is unavailable.',
     usage: [
       'Tracks euphoric conditions during late-cycle moves.',
       'Used with observation-window rules to detect exhaustion after overheated conditions.',

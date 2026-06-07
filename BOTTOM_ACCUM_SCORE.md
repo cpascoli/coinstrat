@@ -56,7 +56,7 @@ Purpose: detect whether enough forced selling or holder stress has occurred.
 Current inputs:
 
 - `LTH_SOPR`
-- `SIP` / Supply in Profit
+- `SIP` / Percent Addresses in Profit
 - `BTC_DRAWDOWN_FROM_365D_HIGH`
 - `BTC_FUNDING_7D_AVG`
 - `BTC_OI_DRAWDOWN_90D`
@@ -64,7 +64,7 @@ Current inputs:
 Current scoring intent:
 
 - Reward long-term holder SOPR below or near 1.
-- Reward low Supply in Profit.
+- Reward low percent addresses in profit.
 - Reward large drawdowns from the 365-day high.
 - Reward neutral or negative funding after drawdowns.
 - Reward open-interest flushes from the 90-day high.

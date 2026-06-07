@@ -6,7 +6,7 @@ export const STRATEGY_SERIES_CATALOG = [
   { key: 'REALIZED_PRICE', label: 'Realized Price', kind: 'raw', group: 'valuation', description: 'All-holder aggregate realized price in USD (BGeometrics).' },
   { key: 'STH_REALIZED_PRICE', label: 'STH Realized Price', kind: 'raw', group: 'valuation', description: 'Short-term holder realized price in USD.' },
   { key: 'LTH_REALIZED_PRICE', label: 'LTH Realized Price', kind: 'raw', group: 'valuation', description: 'Long-term holder realized price in USD.' },
-  { key: 'SIP', label: 'Supply In Profit', kind: 'raw', group: 'valuation', description: 'Supply in profit percentage.' },
+  { key: 'SIP', label: 'Percent Addresses In Profit', kind: 'raw', group: 'valuation', description: 'Percent of Bitcoin addresses in profit (Bitcoin Magazine Pro).' },
   { key: 'DXY', label: 'DXY', kind: 'raw', group: 'macro', description: 'US Dollar Index.' },
   { key: 'SAHM', label: 'Sahm Rule', kind: 'raw', group: 'macro', description: 'Realtime Sahm Rule value.' },
   { key: 'YC_M', label: 'Yield Curve', kind: 'raw', group: 'macro', description: '10Y minus 3M Treasury spread.' },
@@ -36,7 +36,7 @@ export const STRATEGY_SERIES_CATALOG = [
   { key: 'MACRO_ON', label: 'MACRO_ON', kind: 'signal', group: 'signals', description: 'Macro acceleration signal.' },
   { key: 'ACCUM_ON', label: 'ACCUM_ON', kind: 'signal', group: 'signals', description: 'Composite accumulation signal.' },
   { key: 'PRICE_REGIME_ON', label: 'PRICE_REGIME_ON', kind: 'signal', group: 'signals', description: 'Price regime signal.' },
-  { key: 'SIP_EXHAUSTED', label: 'SIP Exhausted', kind: 'signal', group: 'signals', description: 'Euphoria exhaustion exit flag.' },
+  { key: 'SIP_EXHAUSTED', label: 'Euphoria Exhausted', kind: 'signal', group: 'signals', description: 'Addresses-in-profit exhaustion exit flag.' },
 ] as const;
 
 export type StrategySeriesKey = typeof STRATEGY_SERIES_CATALOG[number]['key'];

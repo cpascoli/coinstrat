@@ -1218,7 +1218,7 @@ export async function buildWeeklyContext(weekOf: string): Promise<WeeklyContext>
     stateChanges.push(`Price regime turned ${current.PRICE_REGIME_ON === 1 ? 'supportive' : 'cautious'}.`);
   }
   if (current.SIP_EXHAUSTED === 1 && previousRow?.SIP_EXHAUSTED !== 1) {
-    stateChanges.push('Supply-in-profit exhaustion was triggered.');
+    stateChanges.push('Addresses-in-profit exhaustion was triggered.');
   }
 
   const bottomAccum = buildBottomAccumWeeklyBlock(current, previousRow);
@@ -1337,7 +1337,7 @@ function fallbackDraft(
   const changedThisWeek = [
     `MVRV: ${formatNumber(current.MVRV as number | null)} (${formatDelta(context.deltas.MVRV, 2)} vs. last week)`,
     `LTH SOPR: ${formatNumber(current.LTH_SOPR as number | null, 3)} (${formatDelta(context.deltas.LTH_SOPR, 3)} vs. last week)`,
-    `Supply in Profit: ${formatPercent(current.SIP as number | null)} (${formatDelta(context.deltas.SIP, 1, ' pts')} vs. last week)`,
+    `Percent Addresses in Profit: ${formatPercent(current.SIP as number | null)} (${formatDelta(context.deltas.SIP, 1, ' pts')} vs. last week)`,
     `40-week SMA: ${formatCurrency(current.BTC_MA40W as number | null)} (${formatDelta(context.deltas.BTC_MA40W, 0)} vs. last week)`,
     typeof bottomScore === 'number'
       ? `Bottom Accumulation Score: ${bottomScore}/100 (${formatDelta(bottom.deltas.score, 0)} vs. last week) · ${bottomBand}`
