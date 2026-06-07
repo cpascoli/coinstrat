@@ -33,6 +33,7 @@ function heuristicSeries(prompt: string): StrategySeriesKey[] {
     { seriesKey: 'MVRV', keywords: ['mvrv'] },
     { seriesKey: 'LTH_SOPR', keywords: ['sopr'] },
     { seriesKey: 'NUPL', keywords: ['nupl'] },
+    { seriesKey: 'REALIZED_PRICE', keywords: ['realized price', 'all holder realized price', 'aggregate realized price', 'network realized price'] },
     { seriesKey: 'STH_REALIZED_PRICE', keywords: ['sth realized price', 'short term holder realized price', 'short-term holder realized price'] },
     { seriesKey: 'LTH_REALIZED_PRICE', keywords: ['lth realized price', 'long term holder realized price', 'long-term holder realized price'] },
     { seriesKey: 'SIP', keywords: ['supply in profit', 'sip'] },

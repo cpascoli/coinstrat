@@ -120,8 +120,8 @@ const DATA_FEEDS: DataFeed[] = [
   {
     title: 'Supply in Profit',
     id: 'SIP',
-    href: 'https://charts.bgeometrics.com/supply_in_profit.html',
-    meaning: 'Measures the amount of BTC that is currently in profit or loss based on the price at which each bitcoin last moved.',
+    href: 'https://www.bitcoinmagazinepro.com/charts/percent-addresses-in-profit/',
+    meaning: 'Percent of Bitcoin addresses in profit (Bitcoin Magazine Pro). Closely tracks supply-in-profit; BGeometrics profit_loss is used only as a fallback when BMP is unavailable.',
     usage: [
       'Tracks euphoric conditions during late-cycle moves.',
       'Used with observation-window rules to detect exhaustion after overheated conditions.',
@@ -136,6 +136,17 @@ const DATA_FEEDS: DataFeed[] = [
     usage: [
       'Provides context on whether long-term holders are realizing profits or selling under stress.',
       'Included in the cached raw series and newsletter context for weekly interpretation.',
+    ],
+    category: 'onchain',
+  },
+  {
+    title: 'Realized Price',
+    id: 'REALIZED_PRICE',
+    href: 'https://charts.bgeometrics.com/realized_price.html',
+    meaning: 'Aggregate on-chain cost basis for all holders (realized cap ÷ supply), expressed in USD.',
+    usage: [
+      'BGeometrics all-holder realized price feed; cached alongside STH/LTH cohort lines.',
+      'Useful for comparing spot against the network-wide cost basis on valuation charts.',
     ],
     category: 'onchain',
   },

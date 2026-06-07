@@ -228,14 +228,15 @@ export async function patchMVRVInCache(): Promise<SignalRefreshResult> {
 }
 
 /**
- * Back-fill STH / LTH realized price for every cached row from BGeometrics full JSON
- * (same source as incremental refresh), forward-filled along the cache timeline.
+ * Back-fill STH / LTH / aggregate realized price for every cached row from
+ * BGeometrics full JSON (same source as incremental refresh), forward-filled
+ * along the cache timeline.
  *
  * Why this exists: incremental `refreshSignals` only *appends* new dates; it never
- * rewrites older rows. When `STH_REALIZED_PRICE` / `LTH_REALIZED_PRICE` were added
- * after the cache was seeded, historical dates stay null in the blob — Strategy
- * Builder reads `signals_latest` via series-detail and charts look truncated.
- * This patch is the fast fix (two HTTP fetches), analogous to `patchMVRVInCache`.
+ * rewrites older rows. When realized-price fields were added after the cache was
+ * seeded, historical dates stay null in the blob — Strategy Builder reads
+ * `signals_latest` via series-detail and charts look truncated.
+ * This patch is the fast fix (three HTTP fetches), analogous to `patchMVRVInCache`.
  */
 export async function patchSthLthRealizedPriceInCache(): Promise<SignalRefreshResult> {
   const store = signalsStore();
@@ -248,9 +249,10 @@ export async function patchSthLthRealizedPriceInCache(): Promise<SignalRefreshRe
     );
   }
 
-  const [sthSeries, lthSeries] = await Promise.all([
+  const [sthSeries, lthSeries, allSeries] = await Promise.all([
     fetchBGeometrics('sth_realized_price'),
     fetchBGeometrics('lth_realized_price'),
+    fetchBGeometrics('realized_price'),
   ]);
 
   const dates = cachedData.map((r) => r.Date);
@@ -272,15 +274,19 @@ export async function patchSthLthRealizedPriceInCache(): Promise<SignalRefreshRe
 
   const sthFilled = forwardFill(dates, sthSeries);
   const lthFilled = forwardFill(dates, lthSeries);
+  const allFilled = forwardFill(dates, allSeries);
 
   let patched = 0;
   const rows = cachedData.map((row) => {
     const sth = sthFilled.get(row.Date);
     const lth = lthFilled.get(row.Date);
+    const allRp = allFilled.get(row.Date);
     const sthOk =
       typeof row.STH_REALIZED_PRICE === 'number' && Number.isFinite(row.STH_REALIZED_PRICE);
     const lthOk =
       typeof row.LTH_REALIZED_PRICE === 'number' && Number.isFinite(row.LTH_REALIZED_PRICE);
+    const allOk =
+      typeof row.REALIZED_PRICE === 'number' && Number.isFinite(row.REALIZED_PRICE);
 
     let next = row;
     let changed = false;
@@ -290,6 +296,10 @@ export async function patchSthLthRealizedPriceInCache(): Promise<SignalRefreshRe
     }
     if (lth !== undefined && !lthOk) {
       next = { ...next, LTH_REALIZED_PRICE: lth };
+      changed = true;
+    }
+    if (allRp !== undefined && !allOk) {
+      next = { ...next, REALIZED_PRICE: allRp };
       changed = true;
     }
     if (changed) patched += 1;
@@ -304,7 +314,7 @@ export async function patchSthLthRealizedPriceInCache(): Promise<SignalRefreshRe
   });
 
   console.log(
-    `[signal-refresh] STH/LTH realized price patch complete — updated ${patched} of ${rows.length} rows.`,
+    `[signal-refresh] Holder realized price patch complete — updated ${patched} of ${rows.length} rows.`,
   );
 
   return {

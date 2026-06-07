@@ -16,6 +16,7 @@ const ALLOWED_FILES = new Set([
   'profit_loss',
   'sth_realized_price',
   'lth_realized_price',
+  'realized_price',
 ]);
 
 export const handler: Handler = async (event) => {

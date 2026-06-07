@@ -270,10 +270,34 @@ export async function fetchLTH_NUPL(): Promise<PricePoint[]> {
 }
 
 /**
- * Fetch Supply in Profit (%) from BGeometrics.
+ * Fetch Supply in Profit (%) — Bitcoin Magazine Pro "Percent Addresses in Profit"
+ * with BGeometrics profit_loss fallback (stale since 2026-04-26).
  * Used by the Euphoria Exhaustion exit logic.
  */
 export async function fetchSupplyInProfit(): Promise<PricePoint[]> {
+  const isDev = import.meta.env.DEV;
+  const bmpCandidates = isDev
+    ? [
+        '/.netlify/functions/bitcoinmagazinepro?metric=addresses_in_profit',
+        '/api/bmp/addresses_in_profit',
+      ]
+    : ['/api/bmp/addresses_in_profit'];
+
+  for (const url of bmpCandidates) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`BMP error: ${response.statusText}`);
+      const data: { date: string; value: number }[] = await response.json();
+      if (data.length > 0) {
+        return data
+          .filter((p) => Number.isFinite(p.value))
+          .sort((a, b) => a.date.localeCompare(b.date));
+      }
+    } catch (e) {
+      console.warn(`BMP addresses-in-profit fetch failed (${url}):`, e);
+    }
+  }
+
   return fetchBGeometrics('profit_loss');
 }
 
@@ -289,6 +313,13 @@ export async function fetchSTHRealizedPrice(): Promise<PricePoint[]> {
  */
 export async function fetchLTHRealizedPrice(): Promise<PricePoint[]> {
   return fetchBGeometrics('lth_realized_price');
+}
+
+/**
+ * Fetch aggregate (all-holder) Realized Price from BGeometrics.
+ */
+export async function fetchRealizedPrice(): Promise<PricePoint[]> {
+  return fetchBGeometrics('realized_price');
 }
 
 /**

@@ -24,6 +24,14 @@ interface Props {
 
 type RangeKey = 'all' | '10y' | '5y' | '2y' | '1y';
 type ChartsSection = 'system' | 'bottom' | 'valuation' | 'liquidity' | 'business' | 'global' | 'usd' | 'cqm';
+type CqmBandScale = 'semi-log' | 'log-log';
+
+const CQM_QR_GENESIS_MS = new Date('2009-01-01').getTime();
+const DAY_MS = 86_400_000;
+
+function cqmDaysSinceGenesis(ts: number): number {
+  return Math.max(1, (ts - CQM_QR_GENESIS_MS) / DAY_MS);
+}
 
 type RegimeKey = 'LIQ_SCORE' | 'BIZ_CYCLE_SCORE';
 type RegimeSpan = { x1: number; x2: number; value: 0 | 1 | 2 };
@@ -266,6 +274,7 @@ function lookupRiskPctAtPrice(
 
 const ChartsView: React.FC<Props> = ({ data }) => {
   const [range, setRange] = useState<RangeKey>('all');
+  const [cqmBandScale, setCqmBandScale] = useState<CqmBandScale>('semi-log');
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -569,12 +578,16 @@ const ChartsView: React.FC<Props> = ({ data }) => {
   }, [data]);
 
   const cqmChartData = useMemo(() => {
-    if (!cqmFit) return chartData as any[];
+    const withDays = (row: Record<string, unknown>) => ({
+      ...row,
+      cqmDays: cqmDaysSinceGenesis(Number(row.ts)),
+    });
+    if (!cqmFit) return (chartData as any[]).map(withDays);
     const cqmMap = new Map<number, CQMPoint>();
     for (const s of cqmFit.signals) cqmMap.set(s.ts, s);
     return (chartData as any[]).map((d, i, arr) => {
       const cqm = cqmMap.get(d.ts);
-      if (!cqm) return d;
+      if (!cqm) return withDays(d);
       const riskPct = cqm.risk * 100;
       const bucket = cqmRiskBucket(riskPct);
       const prevBucket = i > 0 ? cqmRiskBucket((cqmMap.get(arr[i - 1]?.ts)?.risk ?? NaN) * 100) : null;
@@ -583,7 +596,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
         bucket === target || prevBucket === target || nextBucket === target
       );
       return {
-        ...d,
+        ...withDays(d),
         CQM_LOWER: cqm.solidLower,
         CQM_MEDIAN: cqm.solidMedian,
         CQM_UPPER: cqm.solidUpper,
@@ -643,6 +656,23 @@ const ChartsView: React.FC<Props> = ({ data }) => {
     if (!cqmSnapshot || cqmRiskAtPrice === null) return [];
     return [{ price: cqmSnapshot.price, riskPct: cqmRiskAtPrice }];
   }, [cqmSnapshot, cqmRiskAtPrice]);
+
+  const cqmLogLogXDomain = useMemo((): [number, number] => {
+    const days = (cqmChartData as any[])
+      .map((d) => Number(d.cqmDays))
+      .filter((v) => Number.isFinite(v) && v > 0);
+    if (!days.length) return [1, 10];
+    const min = Math.min(...days);
+    const max = Math.max(...days);
+    return [min * 0.85, max * 1.15];
+  }, [cqmChartData]);
+
+  const cqmLogLogXTickFormatter = (days: number) => {
+    if (!Number.isFinite(days) || days <= 0) return '';
+    const d = new Date(CQM_QR_GENESIS_MS + days * DAY_MS);
+    if (isNaN(d.getTime())) return '';
+    return (range === 'all' || range === '10y' || range === '5y') ? format(d, 'yyyy') : format(d, 'MMM yy');
+  };
 
   const tickCount = range === 'all' ? 10 : range === '10y' ? 10 : range === '5y' ? 8 : range === '2y' ? 8 : 6;
 
@@ -1279,12 +1309,14 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
             Short-term and long-term holder realized prices estimate the average on-chain cost basis for each cohort.
+            The yellow <b>All Holder</b> line is BGeometrics aggregate realized price (network-wide supply-weighted cost basis — not the simple average of STH and LTH).
             <br />
             They are useful valuation anchors for spotting when spot price reclaims or loses key holder cost-basis zones.
           </Typography>
         </Box>
 
         <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="All Holder Realized Price" sx={{ borderColor: '#facc15', color: '#fef08a' }} />
           <Chip size="small" variant="outlined" label="STH Realized Price" sx={{ borderColor: '#f97316', color: '#fdba74' }} />
           <Chip size="small" variant="outlined" label="LTH Realized Price" sx={{ borderColor: '#38bdf8', color: '#bae6fd' }} />
           <Chip size="small" variant="outlined" label="BTCUSD" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
@@ -1298,6 +1330,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
               <YAxis yAxisId="price" orientation="right" scale="log" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
               <Tooltip content={<CustomTooltip />} />
               {renderChartBrush()}
+              <Line yAxisId="price" type="monotone" dataKey="REALIZED_PRICE" name="All Holder Realized Price" stroke="#facc15" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
               <Line yAxisId="price" type="monotone" dataKey="STH_REALIZED_PRICE" name="STH Realized Price" stroke="#f97316" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
               <Line yAxisId="price" type="monotone" dataKey="LTH_REALIZED_PRICE" name="LTH Realized Price" stroke="#38bdf8" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
               <Line yAxisId="price" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.5} dot={false} isAnimationActive={false} opacity={0.5} />
@@ -1952,7 +1985,9 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
             Inspired by BTCAnalytica&apos;s Empirical Quantile Model. Three <b>solid</b> bands come from the tail-scaled asymmetric QR fan: green = 0.1% floor, gold = 20-week SMA of a price / QR-50% log-blend, red = 99.9% ceiling.
             Three <b>dotted</b> lines plot the same scaled QR quantiles directly. Tail scale ramps from 2022 to pin QR 50% near $100.8K on 2026-05-28.
-            Risk uses QR 50% as fair value. History from 2014 for bands/risk; the QR parabola fit uses full BTC history since 2009. See <code>EQM-model/</code> for the Python reference.
+            Risk uses QR 50% as fair value. History from 2014 for bands/risk; the QR parabola fit uses full BTC history since 2009.
+            Toggle <b>Log-log</b> to plot the same series in the model&apos;s native coordinates: log(price) vs log(days since 2009).
+            See <code>EQM-model/</code> for the Python reference.
           </Typography>
         </Box>
 
@@ -1964,19 +1999,78 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           </Box>
         )}
 
-        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
-          <Chip size="small" variant="outlined" label="BTCUSD" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
-          <Chip size="small" variant="outlined" label="CQM 0.1% (solid floor)" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
-          <Chip size="small" variant="outlined" label="CQM 50% (solid median)" sx={{ borderColor: '#facc15', color: '#fef08a' }} />
-          <Chip size="small" variant="outlined" label="CQM 99.9% (solid ceiling)" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
-          <Chip size="small" variant="outlined" label="QR 0.1% / 50% / 99.9% (dotted)" sx={{ borderColor: '#e0a81f', color: '#fde68a' }} />
+        <Stack
+          direction="row"
+          spacing={1}
+          useFlexGap
+          flexWrap="wrap"
+          alignItems="center"
+          justifyContent="space-between"
+          sx={{ mb: 1.5 }}
+        >
+          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+            <Chip size="small" variant="outlined" label="BTCUSD" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
+            <Chip size="small" variant="outlined" label="CQM 0.1% (solid floor)" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
+            <Chip size="small" variant="outlined" label="CQM 50% (solid median)" sx={{ borderColor: '#facc15', color: '#fef08a' }} />
+            <Chip size="small" variant="outlined" label="CQM 99.9% (solid ceiling)" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
+            <Chip size="small" variant="outlined" label="QR 0.1% / 50% / 99.9% (dotted)" sx={{ borderColor: '#e0a81f', color: '#fde68a' }} />
+          </Stack>
+          <ToggleButtonGroup
+            size="small"
+            exclusive
+            value={cqmBandScale}
+            onChange={(_, value: CqmBandScale | null) => {
+              if (value) setCqmBandScale(value);
+            }}
+            sx={{ flexShrink: 0 }}
+          >
+            <ToggleButton value="semi-log" sx={{ textTransform: 'none', px: 1.5 }}>
+              Semi-log
+            </ToggleButton>
+            <ToggleButton value="log-log" sx={{ textTransform: 'none', px: 1.5 }}>
+              Log-log
+            </ToggleButton>
+          </ToggleButtonGroup>
         </Stack>
 
         <Box sx={{ height: { xs: 360, sm: 460, md: 540 }, width: '100%', minWidth: 0 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart key={`cqm-bands-${range}`} data={cqmChartData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
+            <LineChart key={`cqm-bands-${range}-${cqmBandScale}`} data={cqmChartData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
-              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              {cqmBandScale === 'semi-log' ? (
+                <XAxis
+                  dataKey="ts"
+                  type="number"
+                  domain={['dataMin', 'dataMax']}
+                  scale="time"
+                  tickFormatter={xTickFormatter}
+                  tickCount={tickCount}
+                  minTickGap={24}
+                  tick={{ fontSize: 10, fill: '#94a3b8' }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+              ) : (
+                <XAxis
+                  dataKey="cqmDays"
+                  type="number"
+                  scale="log"
+                  domain={cqmLogLogXDomain}
+                  allowDataOverflow
+                  tickFormatter={cqmLogLogXTickFormatter}
+                  tickCount={tickCount}
+                  minTickGap={24}
+                  tick={{ fontSize: 10, fill: '#94a3b8' }}
+                  axisLine={false}
+                  tickLine={false}
+                  label={{
+                    value: 'Days since 2009 (log)',
+                    position: 'insideBottom',
+                    offset: -2,
+                    style: { fill: '#64748b', fontSize: 10 },
+                  }}
+                />
+              )}
               <YAxis
                 yAxisId="btc"
                 scale="log"
@@ -1991,7 +2085,18 @@ const ChartsView: React.FC<Props> = ({ data }) => {
                 }}
               />
               <Tooltip content={<CustomTooltip />} />
-              {renderChartBrush()}
+              {cqmBandScale === 'semi-log' ? (
+                renderChartBrush()
+              ) : (
+                <Brush
+                  dataKey="cqmDays"
+                  height={22}
+                  stroke="#60a5fa"
+                  fill="rgba(15, 23, 42, 0.92)"
+                  travellerWidth={10}
+                  tickFormatter={cqmLogLogXTickFormatter}
+                />
+              )}
               <Line yAxisId="btc" type="monotone" dataKey="CQM_QR_HIGH" name="QR 99.9%" stroke="#ef4444" strokeWidth={1} strokeDasharray="6 4" dot={false} isAnimationActive={false} opacity={0.85} connectNulls />
               <Line yAxisId="btc" type="monotone" dataKey="CQM_QR_MEDIAN" name="QR 50%" stroke="#e0a81f" strokeWidth={1.3} strokeDasharray="2 3" dot={false} isAnimationActive={false} opacity={0.95} connectNulls />
               <Line yAxisId="btc" type="monotone" dataKey="CQM_QR_LOW" name="QR 0.1%" stroke="#22c55e" strokeWidth={1} strokeDasharray="6 4" dot={false} isAnimationActive={false} opacity={0.85} connectNulls />

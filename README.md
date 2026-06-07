@@ -86,7 +86,8 @@ Output metrics: Total Return, Final Portfolio Value, Total Invested, Total Withd
 | **FRED** (Federal Reserve) | WALCL, WTREGEN, RRPONTSYD, DTWEXBGS, SAHMREALTIME, T10Y3M, AMTMNO, ECBASSETSW, JPNASSETS, DEXUSEU, DEXJPUS | Netlify Function (`/api/fred/`) |
 | **Binance** | BTCUSDT klines (daily) | Direct client-side |
 | **Blockchain.info** | MVRV ratio | Direct client-side |
-| **BGeometrics** | LTH SOPR (`lth_sopr`), Supply in Profit (`profit_loss`), STH/LTH Realized Prices | Netlify Function (`/api/bgeometrics/`) |
+| **BGeometrics** | LTH SOPR (`lth_sopr`), STH/LTH Realized Prices | Netlify Function (`/api/bgeometrics/`) |
+| **Bitcoin Magazine Pro** | Supply in Profit (`addresses_in_profit` — percent addresses in profit) | Netlify Function (`/api/bmp/`) |
 | **Local** | `public/data/btc_daily.json` — historical BTC prices pre-2018 for backtest coverage | Bundled |
 
 ---

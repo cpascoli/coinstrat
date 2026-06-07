@@ -8,6 +8,7 @@ import {
   fetchLTH_SOPR,
   fetchLTHRealizedPrice,
   fetchMVRV,
+  fetchRealizedPrice,
   fetchSTHRealizedPrice,
   fetchSupplyInProfit,
   PricePoint,
@@ -207,7 +208,7 @@ export async function computeAllSignals(): Promise<SignalData[]> {
   const [
     walcl, tga, rrp, dxyRaw, sahm, yc, newOrders, btcPrice, mvrv,
     ecbAssets, bojAssets, eurUsd, jpyUsd,
-    lthSopr, lthNupl, supplyInProfit, sthRealizedPrice, lthRealizedPrice,
+    lthSopr, lthNupl, supplyInProfit, sthRealizedPrice, lthRealizedPrice, realizedPrice,
     ismPmi, btcFundingRates, btcOpenInterest,
   ] = await Promise.all([
     fetchFredSeries("WALCL"),
@@ -230,6 +231,7 @@ export async function computeAllSignals(): Promise<SignalData[]> {
     fetchSupplyInProfit(),          // Supply in Profit %, daily (Euphoria Exhaustion exit)
     fetchSTHRealizedPrice(),        // Short-Term Holders Realized Price, daily
     fetchLTHRealizedPrice(),        // Long-Term Holders Realized Price, daily
+    fetchRealizedPrice(),           // All-holder Realized Price, daily
     // ISM Manufacturing PMI (Investing.com free endpoint)
     fetchISM_PMI(),
     // Binance derivatives feeds (non-critical; return [] on failure)
@@ -290,6 +292,7 @@ export async function computeAllSignals(): Promise<SignalData[]> {
   fillSeries(lthNupl, "LTH_NUPL");
   fillSeries(sthRealizedPrice, "STH_REALIZED_PRICE");
   fillSeries(lthRealizedPrice, "LTH_REALIZED_PRICE");
+  fillSeries(realizedPrice, "REALIZED_PRICE");
 
   // Supply in Profit (%) — used in Euphoria Exhaustion exit logic
   fillSeries(supplyInProfit, "SIP");

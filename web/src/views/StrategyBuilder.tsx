@@ -1462,7 +1462,7 @@ function PreviewTraceChart({ row, trace, dates, brushStart, brushEnd, thresholds
 
 function formatSeriesValue(value: number | null, key: string): string {
   if (value == null) return '—';
-  if (['BTCUSD', 'STH_REALIZED_PRICE', 'LTH_REALIZED_PRICE'].includes(key)) {
+  if (['BTCUSD', 'REALIZED_PRICE', 'STH_REALIZED_PRICE', 'LTH_REALIZED_PRICE'].includes(key)) {
     return value.toLocaleString(undefined, {
       style: 'currency',
       currency: 'USD',

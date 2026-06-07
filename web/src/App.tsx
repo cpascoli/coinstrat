@@ -90,6 +90,7 @@ export interface SignalData {
   MVRV?: number;
   STH_REALIZED_PRICE?: number;
   LTH_REALIZED_PRICE?: number;
+  REALIZED_PRICE?: number;
   BOTTOM_ACCUM_SCORE?: number;
   BOTTOM_ONCHAIN_SCORE?: number;
   BOTTOM_CAPITULATION_SCORE?: number;

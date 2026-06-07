@@ -10,6 +10,7 @@ import fetch from 'node-fetch';
 // JSON is imported statically so esbuild bundles it inline — no file-system
 // access at runtime and no path-resolution issues in the Lambda environment.
 import btcDailyRaw from '../../../public/data/btc_daily.json';
+import { fetchBmpAddressesInProfit } from './bmpAddressesInProfit';
 import { getCachedFundingRateSeries, getCachedOpenInterestSeries } from './derivativesCache';
 import { fetchFredSeriesBatch } from './fredClient';
 
@@ -323,6 +324,21 @@ export async function fetchBGeometrics(file: string): Promise<DataPoint[]> {
     }));
 }
 
+/**
+ * Supply in Profit (%). BGeometrics profit_loss stalled on 2026-04-26; prefer
+ * Bitcoin Magazine Pro "Percent Addresses in Profit" (closely correlated pre-2026).
+ */
+export async function fetchSupplyInProfit(): Promise<DataPoint[]> {
+  try {
+    const bmp = await fetchBmpAddressesInProfit();
+    if (bmp.length > 0) return bmp;
+  } catch (error) {
+    console.warn('[compute] BMP addresses-in-profit fetch failed; falling back to BGeometrics.', error);
+  }
+
+  return fetchBGeometrics('profit_loss');
+}
+
 async function fetchISM_PMI(): Promise<DataPoint[]> {
   const baseUrl =
     'https://endpoints.investing.com/pd-instruments/v1/calendars/economic/events/173/occurrences?domain_id=1&limit=1000';
@@ -428,9 +444,10 @@ export async function refreshSignals(
       fetchMVRVTail(fullHistory),
       fetchBGeometrics('lth_sopr'),
       fetchBGeometrics('lth_nupl'),
-      fetchBGeometrics('profit_loss'),
+      fetchSupplyInProfit(),
       fetchBGeometrics('sth_realized_price'),
       fetchBGeometrics('lth_realized_price'),
+      fetchBGeometrics('realized_price'),
       fetchISM_PMI(),
       fetchBinanceFundingRates(fullHistory, useDerivativesCacheOnly),
       fetchBinanceOpenInterest(useDerivativesCacheOnly),
@@ -451,7 +468,7 @@ export async function refreshSignals(
 
   const [
     btcPrices, mvrv,
-    lthSopr, lthNupl, supplyInProfit, sthRealizedPrice, lthRealizedPrice,
+    lthSopr, lthNupl, supplyInProfit, sthRealizedPrice, lthRealizedPrice, realizedPrice,
     ismPmi, btcFundingRates, btcOpenInterest,
   ] = otherResults;
 
@@ -480,7 +497,7 @@ export async function refreshSignals(
   const cachedByDate = new Map(cachedSignals.map((s) => [s.Date, s]));
   const seedKeys = [
     'BTCUSD', 'DXY', 'SAHM', 'YC_M', 'NO', 'MVRV', 'US_LIQ', 'SIP', 'LTH_SOPR', 'LTH_NUPL',
-    'STH_REALIZED_PRICE', 'LTH_REALIZED_PRICE', 'ECB_RAW', 'BOJ_RAW', 'EURUSD', 'JPYUSD', 'WALCL', 'WTREGEN', 'RRPONTSYD',
+    'STH_REALIZED_PRICE', 'LTH_REALIZED_PRICE', 'REALIZED_PRICE', 'ECB_RAW', 'BOJ_RAW', 'EURUSD', 'JPYUSD', 'WALCL', 'WTREGEN', 'RRPONTSYD',
     'G3_ASSETS', 'ISM_PMI', 'BTC_FUNDING_RATE', 'BTC_OPEN_INTEREST_USD',
   ];
 
@@ -505,6 +522,7 @@ export async function refreshSignals(
   overlaySeries(lthNupl, daily, allDates, 'LTH_NUPL');
   overlaySeries(sthRealizedPrice, daily, allDates, 'STH_REALIZED_PRICE');
   overlaySeries(lthRealizedPrice, daily, allDates, 'LTH_REALIZED_PRICE');
+  overlaySeries(realizedPrice, daily, allDates, 'REALIZED_PRICE');
   overlaySeries(supplyInProfit, daily, allDates, 'SIP');
   overlaySeries(ismPmi, daily, allDates, 'ISM_PMI');
   overlaySeries(btcFundingRates, daily, allDates, 'BTC_FUNDING_RATE');
@@ -524,7 +542,7 @@ export async function refreshSignals(
   // still get liquidity / macro scores instead of leaving fields blank.
   forwardFillFields(daily, [
     'WALCL', 'WTREGEN', 'RRPONTSYD', 'DXY', 'SAHM', 'YC_M', 'NO', 'MVRV',
-    'LTH_SOPR', 'LTH_NUPL', 'SIP', 'STH_REALIZED_PRICE', 'LTH_REALIZED_PRICE',
+    'LTH_SOPR', 'LTH_NUPL', 'SIP', 'STH_REALIZED_PRICE', 'LTH_REALIZED_PRICE', 'REALIZED_PRICE',
     'ECB_RAW', 'BOJ_RAW', 'EURUSD', 'JPYUSD', 'ISM_PMI',
     'BTC_FUNDING_RATE', 'BTC_OPEN_INTEREST_USD',
   ]);

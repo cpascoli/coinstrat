@@ -559,7 +559,7 @@ const Admin: React.FC = () => {
 
   const handlePatchSthLthRp = async () => {
     if (!window.confirm(
-      'This will fetch full STH and LTH realized price history from BGeometrics and fill every cached row where those values are missing (same source as scheduled refreshes).\n\nContinue?',
+      'This will fetch full STH, LTH, and aggregate realized price history from BGeometrics and fill every cached row where those values are missing (same source as scheduled refreshes).\n\nContinue?',
     )) return;
 
     setPatchingSthLthRp(true);
@@ -580,10 +580,10 @@ const Admin: React.FC = () => {
       }
       const data = parsed.data as { error?: string; patched?: number; total?: number; cached_at?: string | null };
       if (!res.ok) {
-        setError(data.error ?? `Patch STH/LTH realized price failed (HTTP ${res.status})`);
+        setError(data.error ?? `Patch holder realized prices failed (HTTP ${res.status})`);
       } else {
         setRefreshResult(
-          `STH/LTH realized price patched — ${data.patched ?? '?'} rows updated out of ${data.total ?? '?'} total.`,
+          `Holder realized prices patched — ${data.patched ?? '?'} rows updated out of ${data.total ?? '?'} total.`,
         );
         setCacheInfo((prev) => ({ ...prev, cachedAt: data.cached_at ?? prev.cachedAt, stale: false }));
       }
@@ -1353,7 +1353,7 @@ const Admin: React.FC = () => {
                   startIcon={patchingSthLthRp ? <CircularProgress size={14} color="inherit" /> : <RefreshCw size={14} />}
                   sx={{ textTransform: 'none', fontWeight: 700 }}
                 >
-                  {patchingSthLthRp ? 'Patching…' : 'Patch STH/LTH RP'}
+                  {patchingSthLthRp ? 'Patching…' : 'Patch Holder RP'}
                 </Button>
                 <Button
                   variant="outlined"

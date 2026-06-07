@@ -28,8 +28,8 @@ import { refreshDerivativesCache } from './lib/derivativesCache';
  *     blockchain.info MVRV history (timespan=all, sparse), forward-fills gaps,
  *     and writes values for every cached row where MVRV was null.
  *
- *  3b. Body { "mode": "patch_sth_lth_rp" } → back-fill STH/LTH realized price
- *      from BGeometrics full JSON for every cached row where those fields are
+ *  3b. Body { "mode": "patch_sth_lth_rp" } → back-fill STH/LTH/aggregate realized
+ *      price from BGeometrics full JSON for every cached row where those fields are
  *      null (fixes historical gaps when the series was added after seeding).
  *
  *  3c. Body { "mode": "patch_bottom_scores" } → recompute the existing cache
