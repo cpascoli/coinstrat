@@ -666,8 +666,15 @@ const ChartsView: React.FC<Props> = ({ data }) => {
     return (range === 'all' || range === '10y' || range === '5y') ? format(d, 'yyyy') : format(d, 'MMM yy');
   };
 
+  // The CQM model fit starts at 2014-01-01, so never plot the CQM charts
+  // before then. Smaller range selections still narrow further.
+  const cqmBandsData = useMemo(() => {
+    const floorTs = Date.UTC(2014, 0, 1);
+    return (cqmChartData as any[]).filter((d) => Number(d.ts) >= floorTs);
+  }, [cqmChartData]);
+
   const cqmYearTicks = useMemo(() => {
-    const rows = cqmChartData as any[];
+    const rows = cqmBandsData as any[];
     if (!rows.length) return { ts: [] as number[], days: [] as number[] };
     const si = cqmBrushRange?.startIndex ?? 0;
     const ei = cqmBrushRange?.endIndex ?? rows.length - 1;
@@ -683,7 +690,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       daysTicks.push(cqmDaysSinceGenesis(jan1));
     }
     return { ts: tsTicks, days: daysTicks };
-  }, [cqmChartData, cqmBrushRange]);
+  }, [cqmBandsData, cqmBrushRange]);
 
   const tickCount = range === 'all' ? 10 : range === '10y' ? 10 : range === '5y' ? 8 : range === '2y' ? 8 : 6;
 
@@ -1993,11 +2000,8 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             CoinStrat Quantile Model — Price Bands
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            Inspired by BTCAnalytica&apos;s Empirical Quantile Model. Three <b>solid</b> bands come from the tail-scaled asymmetric QR fan: green = 0.1% floor, gold = 20-week SMA of a price / QR-50% log-blend, red = 99.9% ceiling.
-            Three <b>dotted</b> lines plot the same scaled QR quantiles directly. Tail scale ramps from 2022 to pin QR 50% near $100.8K on 2026-05-28.
-            Risk uses QR 50% as fair value. History from 2014 for bands/risk; the QR parabola fit uses full BTC history since 2009.
+            Inspired by BTCAnalytica&apos;s Empirical Quantile Model. Risk uses QR 50% as fair value.
             Toggle <b>Log-log</b> to plot the same series in the model&apos;s native coordinates: log(price) vs log(days since 2009).
-            See <code>EQM-model/</code> for the Python reference.
           </Typography>
         </Box>
 
@@ -2045,7 +2049,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
 
         <Box sx={{ height: { xs: 360, sm: 460, md: 540 }, width: '100%', minWidth: 0 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart key={`cqm-bands-${range}-${cqmBandScale}`} data={cqmChartData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
+            <LineChart key={`cqm-bands-${range}-${cqmBandScale}`} data={cqmBandsData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
               {cqmBandScale === 'semi-log' ? (
                 <XAxis
@@ -2164,7 +2168,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
 
         <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart key={`cqm-trend-risk-${range}`} data={cqmChartData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
+            <LineChart key={`cqm-trend-risk-${range}`} data={cqmBandsData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
               <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
               <YAxis
@@ -2229,15 +2233,15 @@ const ChartsView: React.FC<Props> = ({ data }) => {
 
         <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart key={`cqm-risk-${range}`} data={cqmChartData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
+            <LineChart key={`cqm-risk-${range}`} data={cqmBandsData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
               <ReferenceArea yAxisId="risk" y1={0} y2={25} fill="#22c55e" fillOpacity={0.16} strokeOpacity={0} />
               <ReferenceArea yAxisId="risk" y1={25} y2={50} fill="#84cc16" fillOpacity={0.14} strokeOpacity={0} />
               <ReferenceArea yAxisId="risk" y1={50} y2={75} fill="#f59e0b" fillOpacity={0.14} strokeOpacity={0} />
               <ReferenceArea yAxisId="risk" y1={75} y2={100} fill="#ef4444" fillOpacity={0.16} strokeOpacity={0} />
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
               <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-              <YAxis yAxisId="risk" domain={[0, 100]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => (typeof v === 'number' ? `${v.toFixed(0)}%` : '')} />
-              <YAxis yAxisId="btc" orientation="right" scale="log" domain={[btcDomain.y1, btcDomain.y2]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
+              <YAxis yAxisId="btc" scale="log" domain={[btcDomain.y1, btcDomain.y2]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
+              <YAxis yAxisId="risk" orientation="right" domain={[0, 100]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => (typeof v === 'number' ? `${v.toFixed(0)}%` : '')} />
               <ReferenceLine yAxisId="risk" y={50} stroke="#94a3b8" strokeDasharray="6 3" strokeWidth={1.2} />
               <Tooltip content={<CustomTooltip />} />
               {renderChartBrush()}

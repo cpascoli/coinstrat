@@ -143,7 +143,7 @@ export interface WeeklyContext {
   highlights: string[];
 }
 
-interface NewsCandidate {
+export interface NewsCandidate {
   title: string;
   url: string;
   source: string;
@@ -151,7 +151,7 @@ interface NewsCandidate {
   publishedAt: string | null;
 }
 
-interface ArticleExcerpt {
+export interface ArticleExcerpt {
   url: string;
   excerpt: string;
 }
@@ -560,7 +560,7 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function normalizeWhitespace(value: string): string {
+export function normalizeWhitespace(value: string): string {
   return value
     .replace(/\u00a0/g, ' ')
     .replace(/\s+/g, ' ')
@@ -611,7 +611,7 @@ function extractArticleParagraphs(html: string): string[] {
   ).slice(0, 4);
 }
 
-async function fetchArticleExcerpt(candidate: NewsCandidate): Promise<ArticleExcerpt | null> {
+export async function fetchArticleExcerpt(candidate: NewsCandidate): Promise<ArticleExcerpt | null> {
   try {
     const response = await fetchWithTimeout(candidate.url, {
       method: 'GET',
@@ -874,7 +874,7 @@ function parseRssItems(xml: string): NewsCandidate[] {
   }).filter((item) => item.title && item.url);
 }
 
-async function fetchNewsCandidates(query: string): Promise<NewsCandidate[]> {
+export async function fetchNewsCandidates(query: string): Promise<NewsCandidate[]> {
   const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`;
   const response = await fetchWithTimeout(url, {
     method: 'GET',
@@ -902,7 +902,7 @@ function buildNewsSourcePackets(curatedLinks: CuratedLinkInput[]): NewsSourcePac
     .slice(0, MAX_ENRICHED_STORIES);
 }
 
-function scoreNewsCandidate(candidate: NewsCandidate): number {
+export function scoreNewsCandidate(candidate: NewsCandidate): number {
   const haystack = `${candidate.title} ${candidate.summary}`.toLowerCase();
   let score = 0;
 

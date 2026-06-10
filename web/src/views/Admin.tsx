@@ -72,6 +72,37 @@ interface EmailSubscriber {
   source: string;
 }
 
+interface DailyNewsSource {
+  title?: string | null;
+  url?: string | null;
+  source?: string | null;
+}
+
+interface DailyNewsResult {
+  ok: boolean;
+  skipped: boolean;
+  reason: string;
+  slug: string | null;
+  date: string;
+  sourceCount: number;
+  article?: {
+    headline: string;
+    summary: string;
+    body: string;
+    labels: string[];
+    sources: DailyNewsSource[];
+    publishedAt: string;
+    imageUrl: string | null;
+    imageAlt: string | null;
+  };
+}
+
+type DailyNewsArticle = NonNullable<DailyNewsResult['article']>;
+
+function todaysDailyNewsSlug(): string {
+  return `bitcoin-news-${new Date().toISOString().slice(0, 10)}`;
+}
+
 type NewsletterAudienceMode = 'all' | 'newsletter_only' | 'paid_only';
 
 interface NewsletterSettings {
@@ -232,6 +263,13 @@ const Admin: React.FC = () => {
   const [ctaHref, setCtaHref] = useState('https://coinstrat.xyz/dashboard');
   const [curatedLinks, setCuratedLinks] = useState<CuratedLink[]>([emptyCuratedLink(0)]);
   const [newsletterMessage, setNewsletterMessage] = useState<{
+    severity: 'success' | 'error';
+    text: string;
+  } | null>(null);
+
+  const [dailyNewsBusy, setDailyNewsBusy] = useState(false);
+  const [dailyNewsResult, setDailyNewsResult] = useState<DailyNewsResult | null>(null);
+  const [dailyNewsMessage, setDailyNewsMessage] = useState<{
     severity: 'success' | 'error';
     text: string;
   } | null>(null);
@@ -711,6 +749,119 @@ const Admin: React.FC = () => {
     }
   };
 
+  const handleGenerateDailyNews = async () => {
+    if (!supabase) {
+      setDailyNewsMessage({ severity: 'error', text: 'News is unavailable (Supabase is not configured).' });
+      return;
+    }
+    const sb = supabase;
+
+    setDailyNewsBusy(true);
+    setDailyNewsMessage(null);
+    setDailyNewsResult(null);
+
+    const slug = todaysDailyNewsSlug();
+    const date = slug.replace('bitcoin-news-', '');
+
+    const mapRow = (row: any): DailyNewsArticle => ({
+      headline: row.headline,
+      summary: row.summary,
+      body: row.body,
+      labels: (row.labels ?? []) as string[],
+      sources: (Array.isArray(row.sources) ? row.sources : []) as DailyNewsSource[],
+      publishedAt: row.published_at,
+      imageUrl: row.image_url ?? null,
+      imageAlt: row.image_alt ?? null,
+    });
+
+    const showArticle = (article: DailyNewsArticle) => {
+      setDailyNewsResult({ ok: true, skipped: false, reason: '', slug, date, sourceCount: article.sources.length, article });
+    };
+
+    try {
+      // Capture current state so we can detect a fresh (re)generation and a NEW
+      // image (the row keeps its previous image_url until the new one attaches).
+      const before = await sb.from('news_articles').select('updated_at, image_url').eq('slug', slug).maybeSingle();
+      const beforeUpdatedAt: string | null = before.data?.updated_at ?? null;
+      const beforeImageUrl: string | null = before.data?.image_url ?? null;
+
+      // Background function returns 202 immediately; the work continues server-side.
+      // Invoke the function path directly (background mode is driven by the
+      // -background suffix; calling it directly avoids any redirect ambiguity).
+      const res = await fetch('/.netlify/functions/daily-news-background', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      });
+      if (res.status !== 202 && res.status !== 200) {
+        const parsed = parseJsonOrApiFailure(res.status, await res.text());
+        throw new Error(parsed.ok ? 'Failed to start generation.' : parsed.message);
+      }
+
+      setDailyNewsMessage({
+        severity: 'success',
+        text: 'Generation started in the background — this can take up to a minute. Waiting for the article…',
+      });
+
+      // Poll the database for the freshly published article + image.
+      const overallDeadline = Date.now() + 150_000;
+      let textArticle: DailyNewsArticle | null = null;
+      let imageDeadline = Number.POSITIVE_INFINITY;
+
+      while (Date.now() < overallDeadline && Date.now() < imageDeadline) {
+        await new Promise((r) => setTimeout(r, 4000));
+
+        const { data } = await sb
+          .from('news_articles')
+          .select('headline, summary, body, labels, sources, image_url, image_alt, published_at, updated_at')
+          .eq('slug', slug)
+          .maybeSingle();
+
+        if (!data || !data.updated_at || data.updated_at === beforeUpdatedAt) continue;
+
+        const article = mapRow(data);
+        // Only the freshly generated image counts — a leftover URL from a prior
+        // run must not end the wait, or we'd show the old image.
+        const imageIsNew = !!article.imageUrl && article.imageUrl !== beforeImageUrl;
+        const displayArticle: DailyNewsArticle = imageIsNew
+          ? article
+          : { ...article, imageUrl: null, imageAlt: null };
+
+        if (!textArticle) {
+          textArticle = displayArticle;
+          showArticle(displayArticle);
+          setDailyNewsMessage({ severity: 'success', text: 'Article published — generating image…' });
+          // Wait up to ~90s more specifically for the new image to attach.
+          imageDeadline = Date.now() + 90_000;
+        } else {
+          showArticle(displayArticle);
+        }
+
+        if (imageIsNew) {
+          setDailyNewsMessage({ severity: 'success', text: 'Article and image generated and published.' });
+          return;
+        }
+      }
+
+      if (textArticle) {
+        setDailyNewsMessage({
+          severity: 'error',
+          text: 'Article published, but no new image was attached (the image step may have failed or timed out). Check the Netlify function logs for the image request, then try again.',
+        });
+        return;
+      }
+
+      setDailyNewsMessage({
+        severity: 'error',
+        text: 'Timed out waiting for the article. It may have been skipped (too few sources in the last 24h) or generation failed — check the Netlify function logs, then try again.',
+      });
+    } catch (err: any) {
+      setDailyNewsResult(null);
+      setDailyNewsMessage({ severity: 'error', text: err.message ?? 'Daily news generation failed.' });
+    } finally {
+      setDailyNewsBusy(false);
+    }
+  };
+
   return (
     <Box sx={{ maxWidth: 1160, mx: 'auto' }}>
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 3 }}>
@@ -737,6 +888,7 @@ const Admin: React.FC = () => {
         <Tab label={`Registered Users (${users.length})`} />
         <Tab label={`Newsletter Subscribers (${activeSubscribers.length})`} />
         <Tab label="Newsletter" />
+        <Tab label="Daily News" />
         <Tab label="Signals & Alerts" />
       </Tabs>
 
@@ -1284,6 +1436,151 @@ const Admin: React.FC = () => {
       )}
 
       {tabIdx === 3 && (
+        <Stack spacing={2.5}>
+          {dailyNewsMessage && (
+            <Alert severity={dailyNewsMessage.severity}>{dailyNewsMessage.text}</Alert>
+          )}
+
+          <Paper sx={{ p: 2.5 }}>
+            <Stack spacing={1.75}>
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <Newspaper size={18} />
+                <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>Daily News Article</Typography>
+              </Stack>
+
+              <Typography variant="body2" color="text.secondary">
+                The scheduler runs automatically every day at 06:00 UTC: it gathers Bitcoin headlines from the last 24 hours, writes one original, cohesive story, generates a pop-art illustration, and publishes it to the public News page with an attributed source list. Use the button below to generate (or regenerate) today&apos;s article now — it overwrites the same day&apos;s post. Generation runs in the background and can take up to a minute; the preview appears here automatically when it&apos;s ready.
+              </Typography>
+
+              <Box>
+                <Button
+                  variant="contained"
+                  disabled={dailyNewsBusy}
+                  onClick={handleGenerateDailyNews}
+                  startIcon={dailyNewsBusy ? <CircularProgress size={14} color="inherit" /> : <RefreshCw size={14} />}
+                  sx={{ textTransform: 'none', fontWeight: 700 }}
+                >
+                  {dailyNewsBusy ? 'Generating…' : "Generate & preview today's article"}
+                </Button>
+              </Box>
+            </Stack>
+          </Paper>
+
+          {dailyNewsResult?.article && !dailyNewsResult.skipped && (
+            <Paper sx={{ p: 2.5 }}>
+              <Stack spacing={1.5}>
+                <Stack
+                  direction="row"
+                  spacing={1}
+                  alignItems="center"
+                  justifyContent="space-between"
+                  flexWrap="wrap"
+                  useFlexGap
+                >
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <Eye size={18} />
+                    <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>Preview</Typography>
+                  </Stack>
+                  {dailyNewsResult.slug && (
+                    <Button
+                      component="a"
+                      href={`/news/${dailyNewsResult.slug}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      size="small"
+                      variant="outlined"
+                      startIcon={<ExternalLink size={14} />}
+                      sx={{ textTransform: 'none', fontWeight: 700 }}
+                    >
+                      View on site
+                    </Button>
+                  )}
+                </Stack>
+
+                <Typography variant="caption" color="text.secondary">
+                  {new Date(dailyNewsResult.article.publishedAt).toLocaleString()} · {dailyNewsResult.sourceCount} sources
+                </Typography>
+
+                <Typography variant="h5" sx={{ fontWeight: 900 }}>
+                  {dailyNewsResult.article.headline}
+                </Typography>
+
+                {dailyNewsResult.article.labels.length > 0 && (
+                  <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                    {dailyNewsResult.article.labels.map((label) => (
+                      <Chip key={label} label={label} size="small" variant="outlined" />
+                    ))}
+                  </Stack>
+                )}
+
+                <Typography variant="subtitle2" sx={{ fontWeight: 700, fontStyle: 'italic', color: 'text.secondary' }}>
+                  {dailyNewsResult.article.summary}
+                </Typography>
+
+                <Divider />
+
+                <Box>
+                  {dailyNewsResult.article.imageUrl && (
+                    <Box
+                      component="img"
+                      src={dailyNewsResult.article.imageUrl}
+                      alt={dailyNewsResult.article.imageAlt ?? dailyNewsResult.article.headline}
+                      sx={{
+                        float: { xs: 'none', sm: 'left' },
+                        width: { xs: '100%', sm: 320 },
+                        maxWidth: '100%',
+                        height: 'auto',
+                        display: 'block',
+                        borderRadius: 2,
+                        border: '1px solid',
+                        borderColor: 'divider',
+                        mb: 2,
+                        mr: { sm: 3 },
+                      }}
+                    />
+                  )}
+                  <Typography
+                    component="div"
+                    sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.75 }}
+                  >
+                    {dailyNewsResult.article.body}
+                  </Typography>
+                  <Box sx={{ clear: 'both' }} />
+                </Box>
+
+                {dailyNewsResult.article.sources.length > 0 && (
+                  <>
+                    <Divider />
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Sources</Typography>
+                    <Stack spacing={1}>
+                      {dailyNewsResult.article.sources.map((source, index) => (
+                        <Box key={`${source.url ?? ''}-${index}`}>
+                          <Typography
+                            component="a"
+                            href={source.url ?? '#'}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            sx={{ fontWeight: 700, color: 'primary.light', textDecoration: 'none', wordBreak: 'break-word' }}
+                          >
+                            {source.title || source.url}
+                          </Typography>
+                          {source.source && (
+                            <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary' }}>
+                              {source.source}
+                            </Typography>
+                          )}
+                        </Box>
+                      ))}
+                    </Stack>
+                  </>
+                )}
+              </Stack>
+            </Paper>
+          )}
+        </Stack>
+      )}
+
+      {tabIdx === 4 && (
         <Stack spacing={3}>
           <Paper sx={{ p: 2.5 }}>
             <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>

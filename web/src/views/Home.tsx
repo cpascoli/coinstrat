@@ -1052,10 +1052,17 @@ const HomePricing: React.FC<{
                     </li>
                   ))}
                 </ul>
+                <div className="flex justify-center">
+                  <span className="mb-3 rounded-full border border-primary/40 bg-primary/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] text-primary">
+                    Coming soon
+                  </span>
+                </div>
                 <button
                   type="button"
-                  onClick={() => onPlanCta(plan.tier, plan.href)}
-                  className="w-full rounded-xl bg-primary py-4 font-bold text-on-primary shadow-lg shadow-primary/25 transition-all hover:brightness-110 active:scale-95"
+                  disabled
+                  aria-disabled="true"
+                  title="Coming soon"
+                  className="w-full cursor-not-allowed rounded-xl bg-primary/40 py-4 font-bold text-on-primary/60"
                 >
                   Go Pro Now
                 </button>
@@ -1090,10 +1097,17 @@ const HomePricing: React.FC<{
                   </li>
                 ))}
               </ul>
+              <div className="flex justify-center">
+                <span className="mb-3 rounded-full border border-[#f59e0b]/40 bg-[#f59e0b]/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] text-[#f59e0b]">
+                  Coming soon
+                </span>
+              </div>
               <button
                 type="button"
-                onClick={() => onPlanCta(plan.tier, plan.href)}
-                className="w-full rounded-xl bg-[#f59e0b] py-4 font-black text-[#0c1322] shadow-lg shadow-[#f59e0b]/20 transition-all hover:brightness-110 active:scale-95"
+                disabled
+                aria-disabled="true"
+                title="Coming soon"
+                className="w-full cursor-not-allowed rounded-xl bg-[#f59e0b]/40 py-4 font-black text-[#0c1322]/60"
               >
                 {plan.cta}
               </button>

@@ -16,6 +16,12 @@ import { format, parseISO } from 'date-fns';
 import { ArrowLeft, ExternalLink } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
+type ArticleSource = {
+  title?: string | null;
+  url?: string | null;
+  source?: string | null;
+};
+
 type ArticleRow = {
   id: string;
   slug: string;
@@ -23,9 +29,20 @@ type ArticleRow = {
   body: string;
   labels: string[] | null;
   source_links: string[] | null;
+  sources: ArticleSource[] | null;
+  image_url: string | null;
+  image_alt: string | null;
   published_at: string;
   created_at: string;
 };
+
+function normalizeSources(raw: unknown): ArticleSource[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (s): s is ArticleSource =>
+      !!s && typeof s === 'object' && typeof (s as ArticleSource).url === 'string' && !!(s as ArticleSource).url,
+  );
+}
 
 const NewsArticle: React.FC = () => {
   const { slug } = useParams<{ slug: string }>();
@@ -50,7 +67,7 @@ const NewsArticle: React.FC = () => {
     setError(null);
     const { data, error: qErr } = await supabase
       .from('news_articles')
-      .select('id, slug, headline, body, labels, source_links, published_at, created_at')
+      .select('id, slug, headline, body, labels, source_links, sources, image_url, image_alt, published_at, created_at')
       .eq('slug', slug)
       .maybeSingle();
 
@@ -71,7 +88,7 @@ const NewsArticle: React.FC = () => {
   }, [load]);
 
   return (
-    <Box sx={{ maxWidth: 720, mx: 'auto', py: { xs: 2, md: 3 } }}>
+    <Box sx={{ maxWidth: 1180, mx: 'auto', py: { xs: 2, md: 3 } }}>
       <Stack spacing={2.5}>
         <Breadcrumbs sx={{ color: 'text.secondary', '& a': { color: 'inherit' } }}>
           <Link component={RouterLink} to="/news" underline="hover" sx={{ fontWeight: 600 }}>
@@ -121,52 +138,42 @@ const NewsArticle: React.FC = () => {
                 <Chip key={l} label={l} size="small" variant="outlined" />
               ))}
             </Box>
-            <Typography
-              component="div"
-              sx={{
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-                lineHeight: 1.75,
-                fontSize: '1rem',
-                color: 'text.primary',
-              }}
-            >
-              {article.body}
-            </Typography>
-            {(article.source_links ?? []).length > 0 && (
-              <>
-                <DividerSoft />
-                <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
-                  Sources
-                </Typography>
-                <Stack spacing={2}>
-                  {(article.source_links ?? []).map((url) => {
-                    const tweetId = extractTweetId(url);
-                    if (tweetId) {
-                      return <EmbeddedTweet key={url} tweetId={tweetId} url={url} />;
-                    }
-                    return (
-                      <Link
-                        key={url}
-                        href={url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        sx={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 0.5,
-                          fontSize: '0.875rem',
-                          wordBreak: 'break-all',
-                        }}
-                      >
-                        <ExternalLink size={14} style={{ flexShrink: 0 }} />
-                        {prettifySourceUrl(url)}
-                      </Link>
-                    );
-                  })}
-                </Stack>
-              </>
-            )}
+            <Box>
+              {article.image_url && (
+                <Box
+                  component="img"
+                  src={article.image_url}
+                  alt={article.image_alt ?? article.headline}
+                  loading="lazy"
+                  sx={{
+                    float: { xs: 'none', sm: 'left' },
+                    width: { xs: '100%', sm: '50%' },
+                    maxWidth: '100%',
+                    height: 'auto',
+                    display: 'block',
+                    borderRadius: 2,
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    mb: 2,
+                    mr: { sm: 3 },
+                  }}
+                />
+              )}
+              <Typography
+                component="div"
+                sx={{
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  lineHeight: 1.75,
+                  fontSize: '1rem',
+                  color: 'text.primary',
+                }}
+              >
+                {article.body}
+              </Typography>
+              <Box sx={{ clear: 'both' }} />
+            </Box>
+            <SourcesSection sources={normalizeSources(article.sources)} sourceLinks={article.source_links ?? []} />
             <DividerSoft />
             <Typography variant="body2" sx={{ color: 'text.secondary', fontStyle: 'italic' }}>
               Generated{' '}
@@ -290,6 +297,76 @@ const EmbeddedTweet: React.FC<{ tweetId: string; url: string }> = ({ tweetId, ur
 };
 
 /* ------------------------------------------------------------------ */
+
+const SourcesSection: React.FC<{ sources: ArticleSource[]; sourceLinks: string[] }> = ({
+  sources,
+  sourceLinks,
+}) => {
+  if (sources.length === 0 && sourceLinks.length === 0) return null;
+  return (
+    <>
+      <DividerSoft />
+      <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
+        Sources
+      </Typography>
+      <Stack spacing={2}>
+        {sources.map((s) => {
+          const url = s.url as string;
+          const title = s.title?.trim();
+          const source = s.source?.trim();
+          return (
+            <Box key={url}>
+              <Link
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                sx={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 0.5,
+                  fontWeight: 700,
+                  wordBreak: 'break-word',
+                }}
+              >
+                <ExternalLink size={14} style={{ flexShrink: 0 }} />
+                {title || prettifySourceUrl(url)}
+              </Link>
+              {source && (
+                <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mt: 0.25 }}>
+                  {source}
+                </Typography>
+              )}
+            </Box>
+          );
+        })}
+        {sourceLinks.map((url) => {
+          const tweetId = extractTweetId(url);
+          if (tweetId) {
+            return <EmbeddedTweet key={url} tweetId={tweetId} url={url} />;
+          }
+          return (
+            <Link
+              key={url}
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              sx={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 0.5,
+                fontSize: '0.875rem',
+                wordBreak: 'break-all',
+              }}
+            >
+              <ExternalLink size={14} style={{ flexShrink: 0 }} />
+              {prettifySourceUrl(url)}
+            </Link>
+          );
+        })}
+      </Stack>
+    </>
+  );
+};
 
 function prettifySourceUrl(raw: string): string {
   try {
