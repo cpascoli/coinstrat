@@ -161,6 +161,8 @@ function buildRiskSpans(
 
   let current: RiskBand | null = null;
   let startTs: number | null = null;
+  // ts of the previous row that carried a finite risk value.
+  let prevTs: number | null = null;
 
   for (let i = 0; i < rows.length; i++) {
     const r = riskByDate.get(rows[i].date);
@@ -171,20 +173,25 @@ function buildRiskSpans(
     if (current === null) {
       current = b;
       startTs = ts;
+      prevTs = ts;
       continue;
     }
 
-    if (b !== current && startTs !== null) {
-      const prevTs = rows[i - 1]?.ts ?? ts;
-      if (prevTs > startTs) spans.push({ x1: startTs, x2: prevTs, band: current });
+    if (b !== current && startTs !== null && prevTs !== null) {
+      // Split the gap at the midpoint of the transition so the previous band
+      // ends exactly where the next one begins — adjacent colored areas are
+      // juxtaposed with no unshaded seam between them.
+      const boundary = (prevTs + ts) / 2;
+      if (boundary > startTs) spans.push({ x1: startTs, x2: boundary, band: current });
       current = b;
-      startTs = ts;
+      startTs = boundary;
     }
+
+    prevTs = ts;
   }
 
-  if (current !== null && startTs !== null) {
-    const endTs = rows[rows.length - 1].ts;
-    if (endTs > startTs) spans.push({ x1: startTs, x2: endTs, band: current });
+  if (current !== null && startTs !== null && prevTs !== null) {
+    if (prevTs > startTs) spans.push({ x1: startTs, x2: prevTs, band: current });
   }
 
   return spans;
@@ -285,22 +292,11 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
     }
 
     let cancelled = false;
-    setCqmRiskLoading(true);
-    setCqmRiskProgress(0);
-
-    // The expanding-window refits take ~1–2 minutes on full history, so run
-    // them in a Web Worker to keep the UI responsive. Fall back to a
-    // main-thread compute if workers are unavailable.
     let worker: Worker | null = null;
     let fallbackTimer = 0;
-    try {
-      worker = new Worker(
-        new URL('../workers/cqmWalkForwardWorker.ts', import.meta.url),
-        { type: 'module' },
-      );
-    } catch {
-      worker = null;
-    }
+
+    setCqmRiskLoading(true);
+    setCqmRiskProgress(0);
 
     const finish = (map: Map<string, number>) => {
       if (cancelled) return;
@@ -309,37 +305,80 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
       setCqmRiskProgress(1);
     };
 
-    if (worker) {
-      worker.onmessage = (event) => {
+    // The expanding-window refits take ~1–2 minutes on full history, so prefer
+    // the server-side precomputed map (identical for everyone, refreshed daily).
+    // Fall back to an in-browser Web Worker — or a main-thread compute if
+    // workers are unavailable — when the cache can't be reached.
+    const runLocalCompute = () => {
+      try {
+        worker = new Worker(
+          new URL('../workers/cqmWalkForwardWorker.ts', import.meta.url),
+          { type: 'module' },
+        );
+      } catch {
+        worker = null;
+      }
+
+      if (worker) {
+        worker.onmessage = (event) => {
+          if (cancelled) return;
+          const msg = event.data as
+            | { type: 'progress'; done: number; total: number }
+            | { type: 'result'; entries: Array<[string, number]> }
+            | { type: 'error'; message: string };
+          if (msg.type === 'progress') {
+            setCqmRiskProgress(msg.total > 0 ? msg.done / msg.total : 0);
+          } else if (msg.type === 'result') {
+            finish(new Map(msg.entries));
+          } else {
+            console.warn('CQM walk-forward worker failed:', msg.message);
+            finish(new Map());
+          }
+        };
+        worker.onerror = (err) => {
+          console.warn('CQM walk-forward worker error:', err.message);
+          finish(new Map());
+        };
+        worker.postMessage({ points: cqmPricePoints });
+      } else {
+        fallbackTimer = window.setTimeout(() => {
+          try {
+            finish(buildWalkForwardRiskMap(cqmPricePoints));
+          } catch (err) {
+            console.warn('CQM walk-forward risk failed:', err);
+            finish(new Map());
+          }
+        }, 0);
+      }
+    };
+
+    (async () => {
+      try {
+        const res = await fetch('/api/v1/signals/cqm-walkforward');
         if (cancelled) return;
-        const msg = event.data as
-          | { type: 'progress'; done: number; total: number }
-          | { type: 'result'; entries: Array<[string, number]> }
-          | { type: 'error'; message: string };
-        if (msg.type === 'progress') {
-          setCqmRiskProgress(msg.total > 0 ? msg.done / msg.total : 0);
-        } else if (msg.type === 'result') {
-          finish(new Map(msg.entries));
-        } else {
-          console.warn('CQM walk-forward worker failed:', msg.message);
-          finish(new Map());
+        if (res.ok) {
+          const json = await res.json();
+          if (cancelled) return;
+          const entries: Array<{ date?: string; risk?: number }> = Array.isArray(json?.data)
+            ? json.data
+            : [];
+          if (entries.length > 0) {
+            const map = new Map<string, number>();
+            for (const e of entries) {
+              const r = Number(e.risk);
+              if (e.date && Number.isFinite(r)) map.set(e.date, r);
+            }
+            if (map.size > 0) {
+              finish(map);
+              return;
+            }
+          }
         }
-      };
-      worker.onerror = (err) => {
-        console.warn('CQM walk-forward worker error:', err.message);
-        finish(new Map());
-      };
-      worker.postMessage({ points: cqmPricePoints });
-    } else {
-      fallbackTimer = window.setTimeout(() => {
-        try {
-          finish(buildWalkForwardRiskMap(cqmPricePoints));
-        } catch (err) {
-          console.warn('CQM walk-forward risk failed:', err);
-          finish(new Map());
-        }
-      }, 0);
-    }
+      } catch {
+        // Precomputed map unavailable (offline / not yet seeded) — compute locally.
+      }
+      if (!cancelled) runLocalCompute();
+    })();
 
     return () => {
       cancelled = true;
@@ -479,19 +518,33 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
   const useRiskShading = isCqm && riskSpans.length > 0;
 
   // Per-day walk-forward risk series (the exact values driving the sim),
-  // windowed to the simulation interval, for the CQM Risk chart.
-  const wfRiskData = useMemo(
-    () =>
-      chartData
-        .filter((d: any) => Number.isFinite(d.cqmRisk))
-        .map((d: any) => ({
-          ts: d.ts,
-          fullDate: d.fullDate,
-          riskPct: (d.cqmRisk as number) * 100,
-          btcPrice: d.btcPrice,
-        })),
-    [chartData],
-  );
+  // windowed to the simulation interval, for the CQM Risk chart. The risk line
+  // is split into the four risk-band colors (same technique as the lookback
+  // chart): each point carries its value only on its band's key, with prev/next
+  // overlap so the colored segments join across band boundaries without gaps.
+  const wfRiskData = useMemo(() => {
+    const rows = chartData
+      .filter((d: any) => Number.isFinite(d.cqmRisk))
+      .map((d: any) => ({
+        ts: d.ts,
+        fullDate: d.fullDate,
+        riskPct: (d.cqmRisk as number) * 100,
+        btcPrice: d.btcPrice,
+      }));
+    return rows.map((row, i) => {
+      const band = riskBand(row.riskPct / 100);
+      const prev = i > 0 ? riskBand(rows[i - 1].riskPct / 100) : null;
+      const next = i < rows.length - 1 ? riskBand(rows[i + 1].riskPct / 100) : null;
+      const inBand = (b: RiskBand) => band === b || prev === b || next === b;
+      return {
+        ...row,
+        riskCool: inBand(0) ? row.riskPct : null,
+        riskWarm: inBand(1) ? row.riskPct : null,
+        riskHot: inBand(2) ? row.riskPct : null,
+        riskEuphoric: inBand(3) ? row.riskPct : null,
+      };
+    });
+  }, [chartData]);
 
   // BTC price Y domain (right axis, log scale)
   const btcDomain = useMemo(() => {
@@ -1078,7 +1131,7 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
         <Paper sx={{ p: { xs: 2, sm: 3 } }}>
           <Box sx={{ mb: 2.5 }}>
             <Typography variant="h6" sx={{ fontWeight: 800 }}>
-              Portfolio Value Over Time
+              Portfolio Value
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
               {isCqm ? (
@@ -1477,7 +1530,10 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
                         <Tooltip content={<WfRiskTooltip />} />
                         {renderChartBrush()}
                         <Line yAxisId="btc" type="monotone" dataKey="btcPrice" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.4} dot={false} isAnimationActive={false} opacity={0.45} />
-                        <Line yAxisId="risk" type="monotone" dataKey="riskPct" name="Walk-forward Risk %" stroke="#a855f7" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls />
+                        <Line yAxisId="risk" type="monotone" dataKey="riskCool" name="CQM Risk %" stroke="#22c55e" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
+                        <Line yAxisId="risk" type="monotone" dataKey="riskWarm" name="CQM Risk %" stroke="#84cc16" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
+                        <Line yAxisId="risk" type="monotone" dataKey="riskHot" name="CQM Risk %" stroke="#f59e0b" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
+                        <Line yAxisId="risk" type="monotone" dataKey="riskEuphoric" name="CQM Risk %" stroke="#ef4444" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
                       </LineChart>
                     </ResponsiveContainer>
                   </Box>
@@ -1784,10 +1840,16 @@ function ComparisonTiles({ cqm, baseline }: { cqm: StrategyResult; baseline: Str
       baseline: Number.isFinite(baseline.returnOverMaxDrawdown) ? baseline.returnOverMaxDrawdown.toFixed(2) : 'n/a',
     },
     {
+      label: 'Total Invested',
+      primary: fmtUsd(cqm.totalInvested),
+      note: 'Same for both (equal funding)',
+    },
+    {
       label: 'Final Value',
       primary: fmtUsd(cqm.finalPortfolioValue),
       baseline: fmtUsd(baseline.finalPortfolioValue),
     },
+
     {
       label: 'BTC Position',
       primary: cqm.btcAccumulated.toFixed(4),
@@ -1803,11 +1865,6 @@ function ComparisonTiles({ cqm, baseline }: { cqm: StrategyResult; baseline: Str
       primary: fmtUsd(cqm.avgCashBalance),
       baseline: fmtUsd(baseline.avgCashBalance),
     },
-    {
-      label: 'Total Invested',
-      primary: fmtUsd(cqm.totalInvested),
-      note: 'Same for both (equal funding)',
-    },
   ];
 
   return (
@@ -1819,11 +1876,11 @@ function ComparisonTiles({ cqm, baseline }: { cqm: StrategyResult; baseline: Str
         <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
           <Stack direction="row" spacing={0.75} alignItems="center">
             <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: cqmColor }} />
-            <Typography variant="caption" color="text.secondary">Big value — CQM Risk DCA (tested)</Typography>
+            <Typography variant="caption" color="text.secondary">CQM Risk DCA (tested)</Typography>
           </Stack>
           <Stack direction="row" spacing={0.75} alignItems="center">
             <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: baseColor }} />
-            <Typography variant="caption" color="text.secondary">Small value — Baseline DCA (reference)</Typography>
+            <Typography variant="caption" color="text.secondary">Simple DCA (benchmark)</Typography>
           </Stack>
         </Stack>
       </Box>

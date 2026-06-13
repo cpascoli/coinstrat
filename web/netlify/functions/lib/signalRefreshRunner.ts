@@ -6,6 +6,7 @@ import {
   type SignalRow,
 } from './compute';
 import { patchCqmFieldsInCache } from './cqmCache';
+import { triggerWalkForwardRecompute } from './cqmWalkForwardCache';
 import { persistSignalAlertChanges, detectAlertChanges } from './signalAlerts';
 import { signalsStore } from './store';
 import { evaluateActiveStrategies } from './strategyAlerts';
@@ -465,6 +466,9 @@ export async function runSignalRefresh(mode: 'incremental' | 'rebuild'): Promise
 
     const strategySummary = await evaluateActiveStrategies(patchedRows, []);
 
+    // The BTC history changed wholesale; refresh the precomputed walk-forward map.
+    await triggerWalkForwardRecompute();
+
     console.log(`[signal-refresh] Rebuilt full cache with ${patchedRows.length} rows.`);
 
     return {
@@ -525,6 +529,10 @@ export async function runSignalRefresh(mode: 'incremental' | 'rebuild'): Promise
     .filter((row) => row.Date >= replaceFromDate)
     .map((row) => row.Date);
   const strategySummary = await evaluateActiveStrategies(patchedRows, changedDates);
+
+  // New daily close(s) landed; refresh the precomputed walk-forward risk map
+  // (fire-and-forget background recompute, ~1–2 min, won't block this run).
+  await triggerWalkForwardRecompute();
 
   console.log(
     `[signal-refresh] Replaced tail from ${replaceFromDate}, appended ${newRows.length} new rows (${patchedRows.length} total).`,

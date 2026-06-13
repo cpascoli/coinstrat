@@ -77,6 +77,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/v1/signals/cqm-walkforward"
+  to = "/.netlify/functions/signal-cqm-walkforward"
+  status = 200
+
+[[redirects]]
   from = "/api/v1/news"
   to = "/.netlify/functions/news-publish"
   status = 200

@@ -10,6 +10,7 @@ import ScoreBreakdown from '../views/ScoreBreakdown';
 import CoreMacroDocs from '../views/models/docs/CoreMacroDocs';
 import BottomDocs from '../views/models/docs/BottomDocs';
 import CqmDocs from '../views/models/docs/CqmDocs';
+import CqmOverview from '../views/models/CqmOverview';
 
 export type ModelId = 'core-macro' | 'bottom' | 'cqm';
 
@@ -153,6 +154,8 @@ const cqmModel: ModelDef = {
   ],
   chartSections: ['cqm'],
   backtestVariant: 'cqm',
+  OverviewComponent: CqmOverview,
+  overviewGated: false,
   Docs: CqmDocs,
   currentState: (rows) => {
     if (!rows || rows.length < 365) return null;

@@ -2198,6 +2198,52 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
       </Paper>
       )}
 
+      {/* CoinStrat Quantile Model — Risk */}
+      {(show('cqm') || show('cqm-risk')) && (
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Box sx={{ mb: 2.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            CQM Risk
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            CQM Risk maps log(price / QR 50% fair value) through the full-sample empirical residual distribution, with cycle-aware γ and upper-percentile knots.
+            <br />
+            Risk drives dynamic DCA sizing: below fair value (50%) it deploys up to 6% of the idle cash pile per period — tapering to zero at 50% and never below the <code>base × (1 − 2 × Risk)</code> floor; 50–75% is a hold zone; above 75% it sells, scaling up to full size at 100%.
+          </Typography>
+        </Box>
+
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="0–25% Buy zone" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="25–50% Accumulate" sx={{ borderColor: '#84cc16', color: '#d9f99d' }} />
+          <Chip size="small" variant="outlined" label="50–75% Trim" sx={{ borderColor: '#f59e0b', color: '#fde68a' }} />
+          <Chip size="small" variant="outlined" label="75–100% Sell zone" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
+        </Stack>
+
+        <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart key={`cqm-risk-${range}`} data={cqmBandsData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
+              <ReferenceArea yAxisId="risk" y1={0} y2={25} fill="#22c55e" fillOpacity={0.16} strokeOpacity={0} />
+              <ReferenceArea yAxisId="risk" y1={25} y2={50} fill="#84cc16" fillOpacity={0.14} strokeOpacity={0} />
+              <ReferenceArea yAxisId="risk" y1={50} y2={75} fill="#f59e0b" fillOpacity={0.14} strokeOpacity={0} />
+              <ReferenceArea yAxisId="risk" y1={75} y2={100} fill="#ef4444" fillOpacity={0.16} strokeOpacity={0} />
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis yAxisId="btc" scale="log" domain={[btcDomain.y1, btcDomain.y2]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
+              <YAxis yAxisId="risk" orientation="right" domain={[0, 100]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => (typeof v === 'number' ? `${v.toFixed(0)}%` : '')} />
+              <ReferenceLine yAxisId="risk" y={50} stroke="#94a3b8" strokeDasharray="6 3" strokeWidth={1.2} />
+              <Tooltip content={<CustomTooltip />} />
+              {renderChartBrush()}
+              <Line yAxisId="risk" type="monotone" dataKey="CQM_RISK_COOL" name="CQM Risk %" stroke="#22c55e" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
+              <Line yAxisId="risk" type="monotone" dataKey="CQM_RISK_WARM" name="CQM Risk %" stroke="#84cc16" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
+              <Line yAxisId="risk" type="monotone" dataKey="CQM_RISK_HOT" name="CQM Risk %" stroke="#f59e0b" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
+              <Line yAxisId="risk" type="monotone" dataKey="CQM_RISK_EUPHORIC" name="CQM Risk %" stroke="#ef4444" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
+              <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.4} dot={false} isAnimationActive={false} opacity={0.45} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Box>
+      </Paper>
+      )}
+
       {/* CoinStrat Quantile Model — Trend-Risk Composite */}
       {show('cqm') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
@@ -2210,7 +2256,7 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
             <br />
             The 60-day median tracks the local price level after smoothing out daily noise; the 10–90 envelope shows how dispersed the last two months of trading have been.
             <br />
-            Useful as a fast-reacting overlay on top of the long-run CQM bands above, especially around regime shifts.
+            Useful as a fast-reacting overlay on top of the long-run CQM price bands above, especially around regime shifts.
           </Typography>
         </Box>
 
@@ -2261,52 +2307,6 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
             )}
           </Box>
         )}
-      </Paper>
-      )}
-
-      {/* CoinStrat Quantile Model — Risk */}
-      {(show('cqm') || show('cqm-risk')) && (
-      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
-        <Box sx={{ mb: 2.5 }}>
-          <Typography variant="h6" sx={{ fontWeight: 800 }}>
-            CQM Risk
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            CQM Risk maps log(price / QR 50% fair value) through the full-sample empirical residual distribution, with cycle-aware γ and upper-percentile knots.
-            <br />
-            DCA rule: <code>daily_usd = base × (1 − 2 × Risk)</code>.
-          </Typography>
-        </Box>
-
-        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
-          <Chip size="small" variant="outlined" label="0–25% Buy zone" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
-          <Chip size="small" variant="outlined" label="25–50% Accumulate" sx={{ borderColor: '#84cc16', color: '#d9f99d' }} />
-          <Chip size="small" variant="outlined" label="50–75% Trim" sx={{ borderColor: '#f59e0b', color: '#fde68a' }} />
-          <Chip size="small" variant="outlined" label="75–100% Sell zone" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
-        </Stack>
-
-        <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart key={`cqm-risk-${range}`} data={cqmBandsData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
-              <ReferenceArea yAxisId="risk" y1={0} y2={25} fill="#22c55e" fillOpacity={0.16} strokeOpacity={0} />
-              <ReferenceArea yAxisId="risk" y1={25} y2={50} fill="#84cc16" fillOpacity={0.14} strokeOpacity={0} />
-              <ReferenceArea yAxisId="risk" y1={50} y2={75} fill="#f59e0b" fillOpacity={0.14} strokeOpacity={0} />
-              <ReferenceArea yAxisId="risk" y1={75} y2={100} fill="#ef4444" fillOpacity={0.16} strokeOpacity={0} />
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
-              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-              <YAxis yAxisId="btc" scale="log" domain={[btcDomain.y1, btcDomain.y2]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')} />
-              <YAxis yAxisId="risk" orientation="right" domain={[0, 100]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => (typeof v === 'number' ? `${v.toFixed(0)}%` : '')} />
-              <ReferenceLine yAxisId="risk" y={50} stroke="#94a3b8" strokeDasharray="6 3" strokeWidth={1.2} />
-              <Tooltip content={<CustomTooltip />} />
-              {renderChartBrush()}
-              <Line yAxisId="risk" type="monotone" dataKey="CQM_RISK_COOL" name="CQM Risk %" stroke="#22c55e" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
-              <Line yAxisId="risk" type="monotone" dataKey="CQM_RISK_WARM" name="CQM Risk %" stroke="#84cc16" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
-              <Line yAxisId="risk" type="monotone" dataKey="CQM_RISK_HOT" name="CQM Risk %" stroke="#f59e0b" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
-              <Line yAxisId="risk" type="monotone" dataKey="CQM_RISK_EUPHORIC" name="CQM Risk %" stroke="#ef4444" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
-              <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.4} dot={false} isAnimationActive={false} opacity={0.45} />
-            </LineChart>
-          </ResponsiveContainer>
-        </Box>
       </Paper>
       )}
 
