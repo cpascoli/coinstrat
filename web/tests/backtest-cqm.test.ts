@@ -58,6 +58,7 @@ describe('Backtest — CQM Risk DCA strategy', () => {
       ...baseConfig,
       cqmDca: true,
       cqmRiskByDate: riskMap,
+      cqmDynamicSizing: false,
     });
     expect(results.length).toBe(3);
     expect(results[2].name).toBe('CQM Risk DCA');
@@ -73,6 +74,7 @@ describe('Backtest — CQM Risk DCA strategy', () => {
       ...baseConfig,
       cqmDca: true,
       cqmRiskByDate: riskMap,
+      cqmDynamicSizing: false,
     });
     const baseline = results.find((r) => r.name === 'Baseline DCA')!;
     const cqm = results.find((r) => r.name === 'CQM Risk DCA')!;
@@ -91,6 +93,7 @@ describe('Backtest — CQM Risk DCA strategy', () => {
       ...baseConfig,
       cqmDca: true,
       cqmRiskByDate: riskMap,
+      cqmDynamicSizing: false,
     });
     const cqm = results.find((r) => r.name === 'CQM Risk DCA')!;
     expect(cqm.totalInvested).toBeCloseTo(n * 100, 6);
@@ -108,6 +111,7 @@ describe('Backtest — CQM Risk DCA strategy', () => {
       ...baseConfig,
       cqmDca: true,
       cqmRiskByDate: riskMap,
+      cqmDynamicSizing: false,
     });
     const cqm = results.find((r) => r.name === 'CQM Risk DCA')!;
     // No BTC was ever bought, so sells go to zero. Cash equals all deposits.
@@ -129,6 +133,7 @@ describe('Backtest — CQM Risk DCA strategy', () => {
       ...baseConfig,
       cqmDca: true,
       cqmRiskByDate: riskMap,
+      cqmDynamicSizing: false,
     });
     const cqm = results.find((r) => r.name === 'CQM Risk DCA')!;
     // First 30 days: bought 30 × $100 = $3000 of BTC at $100 → 30 BTC
@@ -154,6 +159,7 @@ describe('Backtest — CQM Risk DCA strategy', () => {
       ...baseConfig,
       cqmDca: true,
       cqmRiskByDate: riskMap,
+      cqmDynamicSizing: false,
     };
     const noAccel = runBacktest(data, { ...cfg, cqmTradeFraction: 0 });
     const withAccel = runBacktest(data, { ...cfg, cqmTradeFraction: 0.01 });
@@ -182,6 +188,7 @@ describe('Backtest — CQM Risk DCA strategy', () => {
       dcaAmount: base,
       cqmDca: true,
       cqmRiskByDate: riskMap,
+      cqmDynamicSizing: false,
     };
     const noAccel = runBacktest(data, { ...cfg, cqmTradeFraction: 0 });
     const withAccel = runBacktest(data, { ...cfg, cqmTradeFraction: 0.01 });
@@ -215,6 +222,7 @@ describe('Backtest — CQM Risk DCA strategy', () => {
       dcaAmount: base,
       cqmDca: true,
       cqmRiskByDate: riskMap,
+      cqmDynamicSizing: false,
     };
     const noAccel = runBacktest(data, { ...cfg, cqmTradeFraction: 0 });
     const withAccel = runBacktest(data, { ...cfg, cqmTradeFraction: 0.01 });
@@ -250,6 +258,7 @@ describe('Backtest — CQM Risk DCA strategy', () => {
       cqmDca: true,
       cqmRiskByDate: riskMap,
       cqmTradeFraction: 0,
+      cqmDynamicSizing: false,
     });
     const cqm = results.find((r) => r.name === 'CQM Risk DCA')!;
     expect(cqm.maxDrawdown).toBeCloseTo(0, 6);
@@ -278,10 +287,109 @@ describe('Backtest — CQM Risk DCA strategy', () => {
       dcaAmount: 500,
       cqmDca: true,
       cqmRiskByDate: riskMap,
+      cqmDynamicSizing: false,
     });
     const baseline = results.find((r) => r.name === 'Baseline DCA')!;
     const cqm = results.find((r) => r.name === 'CQM Risk DCA')!;
     // CQM should outperform a naïve baseline that buys equally at every price
     expect(cqm.totalReturn).toBeGreaterThan(baseline.totalReturn);
+  });
+
+  it('IRR is ~0 when price is flat and everything is bought immediately', () => {
+    const n = 365;
+    const data = buildDailyData(n, 100);
+    const results = runBacktest(data, baseConfig);
+    const baseline = results.find((r) => r.name === 'Baseline DCA')!;
+    expect(baseline.totalReturn).toBeCloseTo(0, 6);
+    expect(baseline.annualizedIrr).toBeCloseTo(0, 3);
+  });
+
+  it('cash APY accrues interest on idle cash and lifts total return', () => {
+    const n = 365;
+    const data = buildDailyData(n, 100);
+    const riskMap = new Map<string, number>();
+    for (const d of data) riskMap.set(d.Date, 0.6); // dead zone: never trades
+    const noYield = runBacktest(data, {
+      ...baseConfig,
+      cqmDca: true,
+      cqmRiskByDate: riskMap,
+    });
+    const withYield = runBacktest(data, {
+      ...baseConfig,
+      cqmDca: true,
+      cqmRiskByDate: riskMap,
+      cashAnnualYieldPct: 4,
+    });
+    const a = noYield.find((r) => r.name === 'CQM Risk DCA')!;
+    const b = withYield.find((r) => r.name === 'CQM Risk DCA')!;
+    expect(a.totalInterestEarned).toBe(0);
+    expect(b.totalInterestEarned).toBeGreaterThan(0);
+    expect(b.totalReturn).toBeGreaterThan(a.totalReturn);
+    // ~4% APY on an average balance of ~half the deposits over a year:
+    // interest should be roughly 36500 × 0.5 × 0.04 ≈ $730 (loose bounds).
+    expect(b.totalInterestEarned).toBeGreaterThan(400);
+    expect(b.totalInterestEarned).toBeLessThan(1100);
+    // Baseline holds no cash → unaffected by APY.
+    const baseA = noYield.find((r) => r.name === 'Baseline DCA')!;
+    const baseB = withYield.find((r) => r.name === 'Baseline DCA')!;
+    expect(baseB.totalReturn).toBeCloseTo(baseA.totalReturn, 9);
+  });
+
+  it('reports avgCashBalance and returnOverMaxDrawdown', () => {
+    const n = 60;
+    const data: SignalData[] = [];
+    const riskMap = new Map<string, number>();
+    for (let i = 0; i < n; i++) {
+      const d = new Date(Date.UTC(2024, 0, 1 + i));
+      const date = d.toISOString().slice(0, 10);
+      // price dips then recovers so there is a real drawdown
+      const price = 100 - 30 * Math.sin((Math.PI * i) / (n - 1));
+      data.push(makeRow(date, price));
+      riskMap.set(date, 0);
+    }
+    const results = runBacktest(data, {
+      ...baseConfig,
+      cqmDca: true,
+      cqmRiskByDate: riskMap,
+    });
+    const baseline = results.find((r) => r.name === 'Baseline DCA')!;
+    expect(baseline.avgCashBalance).toBeCloseTo(0, 6);
+    expect(baseline.maxReturnDrawdown).toBeGreaterThan(0);
+    expect(Number.isFinite(baseline.returnOverMaxDrawdown)).toBe(true);
+    expect(baseline.returnOverMaxDrawdown).toBeCloseTo(
+      baseline.totalReturn / baseline.maxReturnDrawdown,
+      9,
+    );
+  });
+
+  it('dynamic sizing redeploys cash piled up during high-risk phase', () => {
+    const phase1 = 50;
+    const phase2 = 50;
+    const n = phase1 + phase2;
+    const price = 100;
+    const data = buildDailyData(n, price);
+    const riskMap = new Map<string, number>();
+    for (let i = 0; i < n; i++) {
+      riskMap.set(data[i].Date, i < phase1 ? 0.8 : 0);
+    }
+    const legacy = runBacktest(data, {
+      ...baseConfig,
+      cqmDca: true,
+      cqmRiskByDate: riskMap,
+      cqmDynamicSizing: false,
+      cqmTradeFraction: 0,
+    });
+    const dynamic = runBacktest(data, {
+      ...baseConfig,
+      cqmDca: true,
+      cqmRiskByDate: riskMap,
+      cqmDynamicSizing: true,
+      cqmMaxCashFraction: 0.06,
+      cqmSellThreshold: 0.75,
+    });
+    const a = legacy.find((r) => r.name === 'CQM Risk DCA')!;
+    const b = dynamic.find((r) => r.name === 'CQM Risk DCA')!;
+    expect(b.btcAccumulated).toBeGreaterThan(a.btcAccumulated);
+    expect(b.finalCashBalance).toBeLessThan(a.finalCashBalance);
   });
 });

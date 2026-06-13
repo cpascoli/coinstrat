@@ -16,7 +16,6 @@ import {
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import {
-  Activity,
   BookOpen,
   LayoutDashboard,
   Crown,
@@ -29,6 +28,8 @@ import {
   Shield,
   Bot,
   User,
+  Layers,
+  LineChart,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import type { SignalData } from '../App';
@@ -180,10 +181,12 @@ const Home: React.FC<HomeProps> = ({
         return pathname.startsWith('/docs') || pathname === '/developer';
       case 'news':
         return pathname.startsWith('/news');
-      case 'charts':
-        return pathname.startsWith('/charts');
-      case 'backtest':
-        return pathname === '/backtest';
+      case 'models':
+        return pathname.startsWith('/models');
+      case 'indicators':
+        return pathname.startsWith('/indicators');
+      case 'lab':
+        return pathname === '/lab' || pathname === '/backtest';
       default:
         return false;
     }
@@ -228,17 +231,20 @@ const Home: React.FC<HomeProps> = ({
                   </NavLink>
                 </>
               ) : null}
+              <NavLink to="/models" navKey="models">
+                Models
+              </NavLink>
+              <NavLink to="/indicators" navKey="indicators">
+                Indicators
+              </NavLink>
+              <NavLink to="/lab" navKey="lab">
+                Lab
+              </NavLink>
               <NavLink to="/news" navKey="news">
                 News
               </NavLink>
               <NavLink to="/docs" navKey="docs">
                 Docs
-              </NavLink>
-              <NavLink to="/charts/system" navKey="charts">
-                Charts
-              </NavLink>
-              <NavLink to="/backtest" navKey="backtest">
-                Backtest
               </NavLink>
             </div>
 
@@ -288,25 +294,36 @@ const Home: React.FC<HomeProps> = ({
 
                   <MenuItem
                     component={Link}
-                    to="/charts/system"
+                    to="/models"
                     onClick={() => setMobilePublicNavEl(null)}
                     sx={{ color: '#dce2f7', py: 1.25 }}
                   >
                     <ListItemIcon sx={{ color: 'inherit', minWidth: 36 }}>
-                      <Activity size={18} />
+                      <Layers size={18} />
                     </ListItemIcon>
-                    <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Charts</ListItemText>
+                    <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Models</ListItemText>
                   </MenuItem>
                   <MenuItem
                     component={Link}
-                    to="/backtest"
+                    to="/indicators"
+                    onClick={() => setMobilePublicNavEl(null)}
+                    sx={{ color: '#dce2f7', py: 1.25 }}
+                  >
+                    <ListItemIcon sx={{ color: 'inherit', minWidth: 36 }}>
+                      <LineChart size={18} />
+                    </ListItemIcon>
+                    <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Indicators</ListItemText>
+                  </MenuItem>
+                  <MenuItem
+                    component={Link}
+                    to="/lab"
                     onClick={() => setMobilePublicNavEl(null)}
                     sx={{ color: '#dce2f7', py: 1.25 }}
                   >
                     <ListItemIcon sx={{ color: 'inherit', minWidth: 36 }}>
                       <FlaskConical size={18} />
                     </ListItemIcon>
-                    <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Backtest</ListItemText>
+                    <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Lab</ListItemText>
                   </MenuItem>
                   <Divider sx={{ borderColor: 'rgba(148,163,184,0.15)', my: 0.5 }} />
                   <MenuItem
@@ -368,25 +385,36 @@ const Home: React.FC<HomeProps> = ({
 
                   <MenuItem
                     component={Link}
-                    to="/charts/system"
+                    to="/models"
                     onClick={() => setNavMenuEl(null)}
                     sx={{ display: { xs: 'flex', md: 'none' }, color: '#dce2f7', py: 1.25 }}
                   >
                     <ListItemIcon sx={{ color: 'inherit', minWidth: 36 }}>
-                      <Activity size={18} />
+                      <Layers size={18} />
                     </ListItemIcon>
-                    <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Charts</ListItemText>
+                    <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Models</ListItemText>
                   </MenuItem>
                   <MenuItem
                     component={Link}
-                    to="/backtest"
+                    to="/indicators"
+                    onClick={() => setNavMenuEl(null)}
+                    sx={{ display: { xs: 'flex', md: 'none' }, color: '#dce2f7', py: 1.25 }}
+                  >
+                    <ListItemIcon sx={{ color: 'inherit', minWidth: 36 }}>
+                      <LineChart size={18} />
+                    </ListItemIcon>
+                    <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Indicators</ListItemText>
+                  </MenuItem>
+                  <MenuItem
+                    component={Link}
+                    to="/lab"
                     onClick={() => setNavMenuEl(null)}
                     sx={{ display: { xs: 'flex', md: 'none' }, color: '#dce2f7', py: 1.25 }}
                   >
                     <ListItemIcon sx={{ color: 'inherit', minWidth: 36 }}>
                       <FlaskConical size={18} />
                     </ListItemIcon>
-                    <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Backtest</ListItemText>
+                    <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Lab</ListItemText>
                   </MenuItem>
                   <Divider sx={{ display: { xs: 'block', md: 'none' }, borderColor: 'rgba(148,163,184,0.15)', my: 0.5 }} />
                   <MenuItem

@@ -18,8 +18,8 @@ const DocsHome: React.FC = () => {
                 CoinStrat <span className="text-primary">Docs</span>
               </h1>
               <p className="max-w-xl font-body text-lg leading-relaxed text-on-surface-variant">
-                Reference material for CoinStrat. Understand the external data feeds behind the model, and see how the signal
-                engine is assembled.
+                Platform reference for CoinStrat: the external data feeds, the overall architecture, and the Signal Builder.
+                Model-specific scoring and signal docs now live under each model.
               </p>
             </div>
           </div>
@@ -74,26 +74,26 @@ const DocsHome: React.FC = () => {
 
           <DocTile
             className="md:col-span-4"
-            icon="query_stats"
+            icon="layers"
             iconClass="bg-primary/10 text-primary"
             accentHover="hover:border-primary/30"
-            title="Scores"
-            text="Definitions, formulas, thresholds, and rationale for valuation, liquidity, cycle, and dollar-regime scoring."
-            to="/docs/scores"
-            linkLabel="Open Scores Docs"
+            title="Models"
+            text="Each CoinStrat model has its own overview, charts, factors and docs — including the scores and signals reference for CORE/MACRO."
+            to="/models"
+            linkLabel="Browse Models"
             linkClass="text-primary"
             chevron
           />
 
           <DocTile
             className="md:col-span-4"
-            icon="verified_user"
+            icon="show_chart"
             iconClass="bg-tertiary/10 text-tertiary"
             accentHover="hover:border-tertiary/30"
-            title="Signals"
-            text="How the Core Engine, Macro Accelerator, and final accumulation permission are synthesized from the factor scores."
-            to="/docs/signals"
-            linkLabel="Open Signals Docs"
+            title="Indicators"
+            text="The shared market-lens charts the models read from — valuation, liquidity, business cycle and the US dollar."
+            to="/indicators"
+            linkLabel="Open Indicators"
             linkClass="text-tertiary"
             chevron
           />

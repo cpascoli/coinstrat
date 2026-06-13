@@ -3,6 +3,7 @@ import { Resend } from 'resend';
 import { signalsStore } from './store';
 import { serviceSupabase } from './auth';
 import { buildCqmWeeklyBlockFromRows, type CqmWeeklyBlock } from './cqmSnapshot';
+import { generateAndStoreImage, removeStoredImage } from './aiImage';
 
 export type NewsletterIssueStatus = 'draft' | 'scheduled' | 'sending' | 'sent' | 'failed';
 export type NewsletterAudienceMode = 'all' | 'newsletter_only' | 'paid_only';
@@ -44,6 +45,8 @@ export interface NewsletterDraft {
     href: string;
   };
   complianceFooter: string;
+  imageUrl?: string | null;
+  imageAlt?: string | null;
 }
 
 export interface NewsletterIssueRecord {
@@ -195,6 +198,10 @@ const ARTICLE_FETCH_TIMEOUT_MS = 3500;
 const ARTICLE_EXCERPT_MAX_CHARS = 1800;
 const PROMPT_EXCERPT_MAX_CHARS = 700;
 const OPENAI_TIMEOUT_MS = 30000;
+const newsletterImageEnabled = (process.env.NEWSLETTER_IMAGE ?? 'true').toLowerCase() !== 'false';
+// Time-box the hero image so synchronous admin compose (60s gateway) still fits;
+// the weekly auto-send runs in a background function and is not gated by this.
+const NEWSLETTER_IMAGE_TIMEOUT_MS = 35000;
 
 interface SignalRow {
   Date: string;
@@ -1436,6 +1443,8 @@ function fallbackDraft(
       href: ctaHref?.trim() || `${appUrl}/dashboard`,
     },
     complianceFooter: 'You are receiving this because you subscribed to CoinStrat updates. This email is informational and not investment advice.',
+    imageUrl: null,
+    imageAlt: null,
   };
 }
 
@@ -1488,6 +1497,8 @@ function normalizeDraft(raw: any, fallback: NewsletterDraft): NewsletterDraft {
     complianceFooter: typeof raw?.complianceFooter === 'string' && raw.complianceFooter.trim()
       ? raw.complianceFooter.trim()
       : fallback.complianceFooter,
+    imageUrl: typeof raw?.imageUrl === 'string' && raw.imageUrl.trim() ? raw.imageUrl.trim() : fallback.imageUrl ?? null,
+    imageAlt: typeof raw?.imageAlt === 'string' && raw.imageAlt.trim() ? raw.imageAlt.trim() : fallback.imageAlt ?? null,
   };
 }
 
@@ -1497,7 +1508,7 @@ async function generateNewsletterDraft(
   editorNote: string | null,
   ctaLabel: string | null,
   ctaHref: string | null,
-): Promise<{ draft: NewsletterDraft; provider: string; model: string }> {
+): Promise<{ draft: NewsletterDraft; provider: string; model: string; imagePrompt: string; imageAlt: string }> {
   const fallback = fallbackDraft(context, curatedLinks, editorNote, ctaLabel, ctaHref);
   const newsSourcePackets = buildNewsSourcePackets(curatedLinks);
 
@@ -1517,7 +1528,7 @@ async function generateNewsletterDraft(
       {
         role: 'system',
         content:
-          'You are writing only the Weekly Bitcoin Headlines section of the CoinStrat newsletter. You will receive a small set of article source packets containing title, source, url, and cleaned excerpts. Use those excerpts to write a compelling, engaging and specific market narrative that stitches the stories together. Focus on actual developments, firms, events, macro drivers, and risks mentioned in the excerpts. Avoid generic crypto-market boilerplate. Do not repeat the headlines verbatim and do not output a list of headlines. Return valid JSON with exactly these keys: `headlinesNarrative` and `curatedLinks`. `headlinesNarrative` must be 160-240 words split into 2 or 3 short paragraphs separated by blank lines. `curatedLinks` must be an array in the same order as the supplied links, where each item has `url` and `commentary`. Each `commentary` must be one short sentence explaining why that link mattered this week.',
+          'You are writing only the Weekly Bitcoin Headlines section of the CoinStrat newsletter. You will receive a small set of article source packets containing title, source, url, and cleaned excerpts. Use those excerpts to write a compelling, engaging and specific market narrative that stitches the stories together. Focus on actual developments, firms, events, macro drivers, and risks mentioned in the excerpts. Avoid generic crypto-market boilerplate. Do not repeat the headlines verbatim and do not output a list of headlines. Return valid JSON with exactly these keys: `headlinesNarrative`, `curatedLinks`, `imagePrompt`, and `imageAlt`. `headlinesNarrative` must be 160-240 words split into 2 or 3 short paragraphs separated by blank lines. `curatedLinks` must be an array in the same order as the supplied links, where each item has `url` and `commentary`. Each `commentary` must be one short sentence explaining why that link mattered this week. `imagePrompt` must describe a single sophisticated visual metaphor for the one key takeaway of the week, suitable for an illustration; do NOT include any Bitcoin or cryptocurrency coin logos, coin symbols, text, words, numbers, brand logos, charts, or identifiable real people. `imageAlt` must be a concise (max 120 characters) alt-text description of that illustration.',
       },
       {
         role: 'user',
@@ -1596,6 +1607,13 @@ async function generateNewsletterDraft(
       }
     }
 
+    const imagePrompt = typeof (parsed as any)?.imagePrompt === 'string'
+      ? (parsed as any).imagePrompt.trim()
+      : '';
+    const imageAlt = typeof (parsed as any)?.imageAlt === 'string'
+      ? (parsed as any).imageAlt.trim()
+      : '';
+
     return {
       draft: {
         ...fallback,
@@ -1607,6 +1625,8 @@ async function generateNewsletterDraft(
       },
       provider: 'openai',
       model: openAiModel,
+      imagePrompt,
+      imageAlt,
     };
   } catch (error) {
     console.error('[newsletter/openai]', error);
@@ -1626,6 +1646,11 @@ function renderNewsletterContent(issue: {
   draft: NewsletterDraft;
 }): { html: string; text: string } {
   const headlinesParagraphs = normalizeParagraphs(issue.draft.headlinesNarrative);
+  const heroImageHtml = issue.draft.imageUrl
+    ? `<div style="margin-bottom:14px;">
+        <img src="${escapeHtml(issue.draft.imageUrl)}" alt="${escapeHtml(issue.draft.imageAlt ?? issue.draft.headline)}" width="732" style="display:block;width:100%;max-width:732px;height:auto;border-radius:10px;border:1px solid #1e293b;" />
+      </div>`
+    : '';
   const sectionsHtml = issue.draft.signalSections.map((section) => `
     <div style="background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:16px;margin-bottom:14px;">
       <h2 style="margin:0 0 10px;font-size:16px;color:#f8fafc;">${escapeHtml(section.title)}</h2>
@@ -1673,6 +1698,8 @@ function renderNewsletterContent(issue: {
               <h1 style="margin:10px 0 8px;font-size:24px;line-height:1.2;color:#f8fafc;">${escapeHtml(issue.draft.headline)}</h1>
               <p style="margin:0;color:#94a3b8;font-size:14px;">Week of ${escapeHtml(issue.weekOf)} · data through ${escapeHtml(issue.referenceDate)}</p>
                     </div>
+
+                    ${heroImageHtml}
 
                     <div style="background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:14px;margin-bottom:12px;">
               <p style="margin:0;color:#cbd5e1;line-height:1.75;">${escapeHtml(issue.draft.summary)}</p>
@@ -1792,10 +1819,33 @@ export async function composeNewsletterIssue(input: ComposeIssueInput): Promise<
     input.ctaHref?.trim() || null,
   );
 
+  let draft = generation.draft;
+
+  // Best-effort hero illustration generated from the week's story. Failures never
+  // block composing/sending — the email simply renders without an image.
+  if (newsletterImageEnabled) {
+    const previousImageUrl = existing?.draft_json && 'imageUrl' in existing.draft_json
+      ? existing.draft_json.imageUrl ?? null
+      : null;
+
+    const image = await generateAndStoreImage({
+      pathPrefix: `newsletter-${weekOf}`,
+      prompt: generation.imagePrompt,
+      alt: generation.imageAlt,
+      fallbackSubject: `this week's Bitcoin story: ${draft.headline}`,
+      timeoutMs: NEWSLETTER_IMAGE_TIMEOUT_MS,
+    });
+
+    if (image) {
+      draft = { ...draft, imageUrl: image.url, imageAlt: image.alt };
+      await removeStoredImage(previousImageUrl, image.path);
+    }
+  }
+
   const rendered = renderNewsletterContent({
     weekOf,
     referenceDate: context.referenceDate,
-    draft: generation.draft,
+    draft,
   });
 
   const status: NewsletterIssueStatus = existing?.sent_at
@@ -1808,10 +1858,10 @@ export async function composeNewsletterIssue(input: ComposeIssueInput): Promise<
     .from('newsletter_issues')
     .update({
       status,
-      subject: generation.draft.subject,
-      preview_text: generation.draft.previewText,
+      subject: draft.subject,
+      preview_text: draft.previewText,
       structured_context_json: context,
-      draft_json: generation.draft,
+      draft_json: draft,
       html: rendered.html,
       text: rendered.text,
       scheduled_for: nextScheduledAt(settings, weekOf),

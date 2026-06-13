@@ -6,8 +6,11 @@
  *  - Last-order lookup against `public.cqm_bot_orders` (for the frequency
  *    hard-guard).
  *  - Server-side CQM Risk: `fitCQM()` on signal-cache BTCUSD (global fair-value
- *    risk vs tail-scaled QR 50% — same model as the in-app charts).
- *  - Computing the target_trade_gbp from the strategy formula and the
+ *    risk vs auto-calibrated QR 50% — same model as the in-app charts).
+ *  - Virtual strategy balances reconstructed from the bot's own order ledger
+ *    plus accrued base deposits (never the raw exchange balances, which can
+ *    include assets the bot must not manage).
+ *  - Computing the target_trade_gbp from the dynamic sizing rule and the
  *    next-allowed-slot timestamp from the configured frequency.
  *
  * All access uses the service-role Supabase client and runs only inside
@@ -16,7 +19,20 @@
 
 import { serviceSupabase } from './auth';
 import { fitCQM } from '../../../src/utils/cqm';
+import {
+  computeCqmDynamicTrade,
+  CQM_DEFAULT_MAX_CASH_FRACTION,
+  CQM_DEFAULT_SELL_THRESHOLD,
+} from '../../../src/utils/cqmSizing';
 import { loadBtcPricePoints } from './cqmSnapshot';
+import {
+  computeVirtualBalances,
+  LEDGER_ORDER_STATUSES,
+  type LedgerOrderRow,
+  type VirtualBalances,
+} from './cqmLedger';
+
+export type { VirtualBalances } from './cqmLedger';
 
 export type BotFrequency = 'daily' | 'weekly' | 'monthly';
 
@@ -324,6 +340,33 @@ export async function computeLatestRisk(): Promise<RiskSnapshot> {
 }
 
 // ---------------------------------------------------------------------------
+// Virtual strategy balances (bot ledger, not exchange balances)
+// ---------------------------------------------------------------------------
+
+/**
+ * Reconstructs the GBP cash and BTC the strategy controls from its own order
+ * history plus accrued base deposits (one base amount per cadence slot since
+ * the first executed order). See cqmLedger.ts for the exact rules.
+ */
+export async function loadVirtualBalances(
+  settings: Pick<BotSettings, 'base_amount_gbp' | 'frequency'>,
+  now: Date = new Date(),
+): Promise<VirtualBalances> {
+  const { data, error } = await serviceSupabase
+    .from('cqm_bot_orders')
+    .select('side, triggered_at, coinbase_status, target_amount_gbp, btc_gbp_ref, base_filled, quote_filled, fees_gbp')
+    .in('coinbase_status', [...LEDGER_ORDER_STATUSES])
+    .order('triggered_at', { ascending: true })
+    .limit(20000);
+
+  if (error) {
+    throw new Error(`Failed to load CQM bot orders for the ledger: ${error.message}`);
+  }
+
+  return computeVirtualBalances((data ?? []) as LedgerOrderRow[], settings, now);
+}
+
+// ---------------------------------------------------------------------------
 // Target trade sizing
 // ---------------------------------------------------------------------------
 
@@ -335,20 +378,72 @@ export interface TargetTrade {
   signedGbp: number;
 }
 
+export interface TargetTradeInput {
+  baseGbp: number;
+  risk: number;
+  /** GBP cash available for buys (including today's deposit). */
+  cashGbp?: number;
+  /** Net BTC held (non-negative for sizing). */
+  btcHeld?: number;
+  /** BTC-GBP price for sell sizing. */
+  btcGbp?: number;
+  maxCashFraction?: number;
+  sellThreshold?: number;
+  minGbp?: number;
+}
+
 /**
- * The strategy is: target = base × (1 − 2 × Risk).
- *   target > 0 → BUY that many GBP of BTC.
- *   target < 0 → SELL BTC worth that many GBP.
- *   |target| below `minGbp` → NONE (skip the trade).
+ * The strategy is:
+ *   Dynamic (default when cashGbp is provided):
+ *     BUY  Risk < 50%: max(base × (1 − 2R), taper × maxCashFraction × cash),
+ *          capped at the available cash
+ *     HOLD 50% ≤ Risk ≤ sellThreshold
+ *     SELL Risk > sellThreshold: scaled sell of base or 1% of BTC value,
+ *          capped at the BTC held
+ *   Legacy (when cashGbp omitted):
+ *     target = base × (1 − 2 × Risk)
  *
  * The result is always rounded to whole pence.
  */
 export function computeTarget(
   baseGbp: number,
   risk: number,
-  minGbp = 1,
+  minGbp?: number,
+): TargetTrade;
+export function computeTarget(input: TargetTradeInput): TargetTrade;
+export function computeTarget(
+  baseOrInput: number | TargetTradeInput,
+  riskArg?: number,
+  minGbpArg = 1,
 ): TargetTrade {
-  const signed = baseGbp * (1 - 2 * risk);
+  const input: TargetTradeInput = typeof baseOrInput === 'number'
+    ? { baseGbp: baseOrInput, risk: riskArg ?? 0.5, minGbp: minGbpArg }
+    : baseOrInput;
+  const minGbp = input.minGbp ?? 1;
+
+  if (Number.isFinite(input.cashGbp)) {
+    const sized = computeCqmDynamicTrade({
+      baseAmount: input.baseGbp,
+      risk: input.risk,
+      cashBalance: input.cashGbp as number,
+      btcHeld: input.btcHeld ?? 0,
+      btcPrice: input.btcGbp ?? 0,
+      maxCashFraction: input.maxCashFraction ?? CQM_DEFAULT_MAX_CASH_FRACTION,
+      sellThreshold: input.sellThreshold ?? CQM_DEFAULT_SELL_THRESHOLD,
+    });
+    if (sized.buyAmount >= minGbp) {
+      const rounded = Math.round(sized.buyAmount * 100) / 100;
+      return { side: 'BUY', amountGbp: rounded, signedGbp: rounded };
+    }
+    if (sized.sellAmount >= minGbp) {
+      const rounded = Math.round(sized.sellAmount * 100) / 100;
+      return { side: 'SELL', amountGbp: rounded, signedGbp: -rounded };
+    }
+    const signed = Math.round(input.baseGbp * (1 - 2 * input.risk) * 100) / 100;
+    return { side: 'NONE', amountGbp: 0, signedGbp: signed };
+  }
+
+  const signed = input.baseGbp * (1 - 2 * input.risk);
   const rounded = Math.round(signed * 100) / 100;
   const abs = Math.abs(rounded);
   if (abs < minGbp) {

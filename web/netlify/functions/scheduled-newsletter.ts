@@ -1,35 +1,36 @@
 import type { Config } from '@netlify/functions';
-import { runAutomaticNewsletterSend } from './lib/newsletter';
 
-interface ScheduledInvocationBody {
-  next_run?: string;
-}
-
+/**
+ * Scheduled trigger (00:30 UTC). Scheduled functions are capped at 30s, which is
+ * too short for the weekly compose (news sourcing + draft LLM + AI hero image) and
+ * send, so this only fires the background function (15-minute limit) and returns
+ * immediately.
+ */
 export const config: Config = {
   schedule: '30 0 * * *',
 };
 
-async function readScheduledBody(request: Request): Promise<ScheduledInvocationBody> {
+export default async (): Promise<Response> => {
+  const base = process.env.URL || process.env.DEPLOY_PRIME_URL || process.env.VITE_APP_URL || '';
+  const cronSecret = process.env.CRON_SECRET || '';
+
   try {
-    return await request.json() as ScheduledInvocationBody;
-  } catch {
-    return {};
-  }
-}
+    if (!base) {
+      throw new Error('Site URL (process.env.URL) is unavailable; cannot invoke background function.');
+    }
 
-export default async (request: Request): Promise<Response> => {
-  try {
-    const body = await readScheduledBody(request);
-    const result = await runAutomaticNewsletterSend();
-    const payload = {
-      ok: true,
-      scheduled_for: body.next_run ?? null,
-      result,
-    };
+    const res = await fetch(`${base}/.netlify/functions/newsletter-send-background`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${cronSecret}`,
+      },
+      body: JSON.stringify({ trigger: 'scheduled' }),
+    });
 
-    console.log('[scheduled-newsletter]', JSON.stringify(payload));
+    console.log('[scheduled-newsletter] triggered background function', res.status);
 
-    return new Response(JSON.stringify(payload), {
+    return new Response(JSON.stringify({ ok: true, triggered: true, status: res.status }), {
       status: 200,
       headers: { 'content-type': 'application/json' },
     });

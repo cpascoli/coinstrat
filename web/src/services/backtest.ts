@@ -1,4 +1,9 @@
 import { SignalData } from '../App';
+import {
+  computeCqmDynamicTrade,
+  CQM_DEFAULT_MAX_CASH_FRACTION,
+  CQM_DEFAULT_SELL_THRESHOLD,
+} from '../utils/cqmSizing';
 
 // --- Configuration ---
 
@@ -7,6 +12,7 @@ export type OffSignalMode = 'pause' | 'sell_matching' | 'sell_all';
 
 export interface BacktestConfig {
   startDate: string;          // YYYY-MM-DD
+  endDate?: string;           // YYYY-MM-DD (inclusive). Defaults to the last available date.
   dcaAmount: number;          // USD per period (e.g. 100)
   frequency: DcaFrequency;
   offSignalMode: OffSignalMode;
@@ -14,25 +20,16 @@ export interface BacktestConfig {
   accelMultiplier: number;    // default 3
   /**
    * Enable the CoinStrat Quantile Model (CQM) Risk-Weighted DCA strategy.
-   * Rule (BTCAnalytica's EQM tweet, with a symmetric balance-aware
-   * acceleration):
-   *   BUY  (Risk < 0.5): size = max(base, cqmTradeFraction × cashBalance)
-   *   SELL (Risk > 0.5): size = max(base, cqmTradeFraction × btcValue)
-   *   target_trade_usd = size × (1 − 2 × Risk)
-   * → Risk = 0 (bottom): buy `size`  (capped by available cash)
-   * → Risk = 0.5 (fair):  do nothing
-   * → Risk = 1 (top):    sell `size` of BTC  (capped by available BTC)
    *
-   * Each side scales with its own reserve: cash on buys, BTC value
-   * (= btcHeld × price) on sells. So 1% of dry powder is deployed per
-   * period during deep bears, and 1% of the BTC position is liquidated
-   * per period at cycle tops. With the default 1% fraction both rules
-   * reduce to plain `base × (1 − 2 × Risk)` until the relevant reserve
-   * exceeds `base / cqmTradeFraction`.
+   * Dynamic sizing (default when `cqmDynamicSizing` is true):
+   *   BUY  (Risk < 50%): max(base × (1 − 2R), maxCashFraction × (0.5 − R)/0.5 × cash)
+   *   HOLD (50% ≤ Risk ≤ sellThreshold): no trade
+   *   SELL (Risk > sellThreshold): max(base, btcSellFraction × btcValue) × (R − sellThreshold)/(1 − sellThreshold)
    *
-   * Each period still deposits `dcaAmount` of cash for equal-funding
-   * fairness; the rule then determines how that cash (and any reserves)
-   * is allocated.
+   * Legacy flat-fraction rule (when `cqmDynamicSizing` is false):
+   *   size = max(base, cqmTradeFraction × reserve); trade = size × (1 − 2R)
+   *
+   * Each period still deposits `dcaAmount` of cash for equal-funding fairness.
    */
   cqmDca?: boolean;
   /**
@@ -42,13 +39,53 @@ export interface BacktestConfig {
    */
   cqmRiskByDate?: Map<string, number>;
   /**
-   * Fraction of the relevant reserve the CQM strategy is allowed to
+   * Use the tuned dynamic sizing rule (risk-scaled cash deployment +
+   * dead-zone sells). Default true. Set false to recover the legacy
+   * flat `cqmTradeFraction` rule.
+   */
+  cqmDynamicSizing?: boolean;
+  /**
+   * Max fraction of cash balance deployable per period at Risk 0, tapering
+   * linearly to 0 at fair value (50%). Default 6% (tuned).
+   */
+  cqmMaxCashFraction?: number;
+  /**
+   * Risk level above which sells begin (dead zone from 50% to this value).
+   * Default 0.75 (tuned). Set to 1 to disable sells (buy-only).
+   */
+  cqmSellThreshold?: number;
+  /**
+   * Fraction of the relevant reserve the legacy CQM strategy is allowed to
    * deploy per period (in addition to the base DCA amount). Applied to
    * cash balance for buys and to BTC value (btcHeld × price) for sells.
    * Default: 0.01 (1%). Set to 0 to recover the original
-   * `base × (1 − 2 × Risk)` rule.
+   * `base × (1 − 2 × Risk)` rule. Ignored when `cqmDynamicSizing` is true.
    */
   cqmTradeFraction?: number;
+  /**
+   * Optional opening balances the simulation starts with, before any DCA
+   * deposits. Both are counted as initial invested capital (cash at face value,
+   * BTC at the first day's price) so Total Return stays a fair ratio.
+   * Default: 0 / 0 (pure DCA from zero).
+   */
+  startingCash?: number;
+  startingBtc?: number;
+  /**
+   * Allow the CQM strategy to short. It still deposits `dcaAmount` each period
+   * (equal-funding with the baseline) and trades `base × (1 − 2 × Risk)`, but
+   * SELLs are no longer capped by the current BTC holdings — the net BTC
+   * position may go negative. Later buys wind the short back down and then build
+   * a long, all on a single netted inventory (no explicit cover; idealized with
+   * no borrow cost or liquidation). Total Return stays comparable to the
+   * baseline because total deposits are unchanged.
+   */
+  cqmAllowShort?: boolean;
+  /**
+   * Annual yield earned on idle cash, in percent (e.g. 4 = 4% APY), accrued
+   * daily. Applies to every strategy's cash balance, so cash-holding
+   * strategies aren't unfairly penalized vs T-bill reality. Default 0.
+   */
+  cashAnnualYieldPct?: number;
 }
 
 // --- Results ---
@@ -60,6 +97,18 @@ export interface SeriesPoint {
   cashDeployed: number;      // cumulative USD deposited into the strategy
   cashWithdrawn: number;     // cumulative USD received from sells (stays in portfolio as cash)
   btcPrice: number;
+}
+
+/** A single executed buy/sell, with the portfolio state immediately after it. */
+export interface Trade {
+  date: string;
+  side: 'buy' | 'sell';
+  btcAmount: number;        // BTC transacted (always positive magnitude)
+  usdAmount: number;        // USD value transacted (always positive magnitude)
+  price: number;            // BTC price at execution
+  btcHeld: number;          // net BTC position after the trade (may be negative when shorting)
+  cashBalance: number;      // USD cash after the trade
+  portfolioValue: number;   // btcHeld * price + cashBalance after the trade
 }
 
 export interface StrategyResult {
@@ -76,7 +125,22 @@ export interface StrategyResult {
   maxDrawdown: number;
   /** Peak-to-trough on portfolio value ÷ cumulative deposits — fair for DCA windows. */
   maxReturnDrawdown: number;
+  /** Net BTC position at the end. Can be negative when shorting is allowed. */
   btcAccumulated: number;
+  /**
+   * Money-weighted annualized return (IRR) on the deposit stream. Accounts for
+   * the timing of each deposit, unlike totalReturn which treats all deposits
+   * as equal regardless of when they were made.
+   */
+  annualizedIrr: number;
+  /** totalReturn ÷ maxReturnDrawdown (risk-adjusted). NaN when DD is ~0. */
+  returnOverMaxDrawdown: number;
+  /** Mean USD cash balance across the window (idle capital / dry powder). */
+  avgCashBalance: number;
+  /** Total interest accrued on idle cash (0 unless cashAnnualYieldPct set). */
+  totalInterestEarned: number;
+  /** Chronological list of executed buys/sells (deposits alone are not trades). */
+  trades: Trade[];
 }
 
 // --- Helpers ---
@@ -153,6 +217,48 @@ function computeMaxReturnDrawdown(series: SeriesPoint[]): number {
   return computeMaxDrawdown(equity);
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+interface DepositFlow {
+  ts: number;     // epoch ms of the deposit
+  amount: number; // USD deposited (always positive)
+}
+
+/**
+ * Money-weighted annualized return (IRR) of a deposit stream against the
+ * final portfolio value. Solves for the daily rate r such that all deposits
+ * compounded at r equal the final value, then annualizes. The objective is
+ * monotonic in r (all deposits are positive), so bisection always converges.
+ */
+function computeAnnualizedIrr(
+  flows: DepositFlow[],
+  finalValue: number,
+  endTs: number,
+): number {
+  if (flows.length === 0 || !Number.isFinite(finalValue)) return NaN;
+  if (finalValue <= 0) return -1;
+
+  const days = flows.map((f) => Math.max(0, (endTs - f.ts) / DAY_MS));
+  const fv = (r: number): number => {
+    let sum = 0;
+    for (let i = 0; i < flows.length; i++) {
+      sum += flows[i].amount * Math.pow(1 + r, days[i]);
+    }
+    return sum - finalValue;
+  };
+
+  let lo = -0.05; // -0.05/day ≈ total loss within months; safely below any real outcome
+  let hi = 0.05;  // +0.05/day ≈ 5,000,000%+ annualized; safely above
+  if (fv(lo) > 0 || fv(hi) < 0) return NaN; // outcome outside bracket (degenerate)
+  for (let iter = 0; iter < 200; iter++) {
+    const mid = (lo + hi) / 2;
+    if (fv(mid) > 0) hi = mid;
+    else lo = mid;
+  }
+  const rDaily = (lo + hi) / 2;
+  return Math.pow(1 + rDaily, 365.25) - 1;
+}
+
 // --- Strategy Simulation ---
 
 /**
@@ -204,11 +310,25 @@ function runStrategy(
   allDailyData: SignalData[],
   config: BacktestConfig,
   decisionLogic: (d: SignalData, state: SimState) => TradeDecision,
+  allowShort = false,
 ): StrategyResult {
+  // Opening balances. BTC is valued at the first available price so it counts
+  // as initial invested capital alongside the starting cash.
+  const startingCash = Math.max(0, config.startingCash ?? 0);
+  const startingBtc = Math.max(0, config.startingBtc ?? 0);
+  let firstPrice = 0;
+  for (const d of allDailyData) {
+    const p = d.BTCUSD;
+    if (Number.isFinite(p) && p > 0) {
+      firstPrice = p;
+      break;
+    }
+  }
+
   const state: SimState = {
-    btcHeld: 0,
-    cashBalance: 0,
-    totalDeposited: 0,
+    btcHeld: startingBtc,
+    cashBalance: startingCash,
+    totalDeposited: startingCash + startingBtc * firstPrice,
     totalSellProceeds: 0,
     prevCoreOn: false,
   };
@@ -216,19 +336,42 @@ function runStrategy(
   // Track which sampled dates trigger actions
   const actionDates = new Set(sampledData.map(d => d.Date));
 
+  // Daily interest accrual on idle cash (0 unless cashAnnualYieldPct is set).
+  const cashYieldPct = Math.max(0, config.cashAnnualYieldPct ?? 0);
+  const dailyCashRate = cashYieldPct > 0 ? Math.pow(1 + cashYieldPct / 100, 1 / 365.25) - 1 : 0;
+  let totalInterestEarned = 0;
+
+  // Deposit stream for the money-weighted (IRR) return.
+  const depositFlows: DepositFlow[] = [];
+  if (state.totalDeposited > 0) {
+    const firstTs = allDailyData.length > 0 ? new Date(allDailyData[0].Date).getTime() : 0;
+    depositFlows.push({ ts: firstTs, amount: state.totalDeposited });
+  }
+
   // Build series on ALL daily data for smooth charting,
   // but only execute deposits + trades on sampled dates.
   const series: SeriesPoint[] = [];
+  const trades: Trade[] = [];
   let soldAllAlready = false;
+  let cashBalanceSum = 0;
 
   for (const d of allDailyData) {
     const price = d.BTCUSD;
     if (!Number.isFinite(price) || price <= 0) continue;
+    const dayTs = new Date(d.Date).getTime();
+
+    // 0. Accrue daily interest on the cash held overnight.
+    if (dailyCashRate > 0 && state.cashBalance > 0) {
+      const interest = state.cashBalance * dailyCashRate;
+      state.cashBalance += interest;
+      totalInterestEarned += interest;
+    }
 
     if (actionDates.has(d.Date)) {
       // 1. Deposit DCA amount as cash (base funding, equal across strategies)
       state.cashBalance += config.dcaAmount;
       state.totalDeposited += config.dcaAmount;
+      depositFlows.push({ ts: dayTs, amount: config.dcaAmount });
 
       // 2. Get the strategy's decision
       const decision = decisionLogic(d, state);
@@ -237,24 +380,50 @@ function runStrategy(
       if (decision.extraDeposit > 0) {
         state.cashBalance += decision.extraDeposit;
         state.totalDeposited += decision.extraDeposit;
+        depositFlows.push({ ts: dayTs, amount: decision.extraDeposit });
       }
 
       // 3. Execute sells first (to free up cash)
       if (decision.sellAll) {
         if (!soldAllAlready && state.btcHeld > 0) {
-          const proceeds = state.btcHeld * price;
+          const btcSold = state.btcHeld;
+          const proceeds = btcSold * price;
           state.totalSellProceeds += proceeds;
           state.cashBalance += proceeds;
           state.btcHeld = 0;
           soldAllAlready = true;
+          trades.push({
+            date: d.Date,
+            side: 'sell',
+            btcAmount: btcSold,
+            usdAmount: proceeds,
+            price,
+            btcHeld: state.btcHeld,
+            cashBalance: state.cashBalance,
+            portfolioValue: state.btcHeld * price + state.cashBalance,
+          });
         }
       } else if (decision.sellBtcUsd > 0) {
-        const btcToSell = Math.min(decision.sellBtcUsd / price, state.btcHeld);
+        // When shorting is allowed the sell is NOT capped by holdings, so the
+        // net position can go negative; otherwise cap at the current balance.
+        const btcToSell = allowShort
+          ? decision.sellBtcUsd / price
+          : Math.min(decision.sellBtcUsd / price, state.btcHeld);
         if (btcToSell > 0) {
           const proceeds = btcToSell * price;
           state.btcHeld -= btcToSell;
           state.totalSellProceeds += proceeds;
           state.cashBalance += proceeds;
+          trades.push({
+            date: d.Date,
+            side: 'sell',
+            btcAmount: btcToSell,
+            usdAmount: proceeds,
+            price,
+            btcHeld: state.btcHeld,
+            cashBalance: state.cashBalance,
+            portfolioValue: state.btcHeld * price + state.cashBalance,
+          });
         }
         soldAllAlready = false;
       } else {
@@ -264,9 +433,20 @@ function runStrategy(
       // 4. Execute buys (deploy reserves first, then regular buy)
       if (decision.deployReserves && state.cashBalance > 0) {
         // Lump-sum: convert entire cash reserve to BTC
-        const lumpBtc = state.cashBalance / price;
+        const spendUsd = state.cashBalance;
+        const lumpBtc = spendUsd / price;
         state.btcHeld += lumpBtc;
         state.cashBalance = 0;
+        trades.push({
+          date: d.Date,
+          side: 'buy',
+          btcAmount: lumpBtc,
+          usdAmount: spendUsd,
+          price,
+          btcHeld: state.btcHeld,
+          cashBalance: state.cashBalance,
+          portfolioValue: state.btcHeld * price + state.cashBalance,
+        });
       } else if (decision.buyBtcUsd > 0) {
         // Buy up to what cash allows
         const spendUsd = Math.min(decision.buyBtcUsd, state.cashBalance);
@@ -274,6 +454,16 @@ function runStrategy(
           const btcBought = spendUsd / price;
           state.btcHeld += btcBought;
           state.cashBalance -= spendUsd;
+          trades.push({
+            date: d.Date,
+            side: 'buy',
+            btcAmount: btcBought,
+            usdAmount: spendUsd,
+            price,
+            btcHeld: state.btcHeld,
+            cashBalance: state.cashBalance,
+            portfolioValue: state.btcHeld * price + state.cashBalance,
+          });
         }
       }
 
@@ -282,6 +472,7 @@ function runStrategy(
     }
 
     const portfolioValue = state.btcHeld * price + state.cashBalance;
+    cashBalanceSum += state.cashBalance;
 
     series.push({
       date: d.Date,
@@ -304,6 +495,13 @@ function runStrategy(
   const maxDrawdown = computeMaxDrawdown(series.map(s => s.portfolioValue));
   const maxReturnDrawdown = computeMaxReturnDrawdown(series);
 
+  const endTs = series.length > 0 ? new Date(series[series.length - 1].date).getTime() : 0;
+  const annualizedIrr = computeAnnualizedIrr(depositFlows, finalPortfolioValue, endTs);
+  const returnOverMaxDrawdown = maxReturnDrawdown > 1e-6
+    ? totalReturn / maxReturnDrawdown
+    : NaN;
+  const avgCashBalance = series.length > 0 ? cashBalanceSum / series.length : 0;
+
   return {
     name,
     series,
@@ -317,6 +515,11 @@ function runStrategy(
     maxDrawdown,
     maxReturnDrawdown,
     btcAccumulated: state.btcHeld,
+    annualizedIrr,
+    returnOverMaxDrawdown,
+    avgCashBalance,
+    totalInterestEarned,
+    trades,
   };
 }
 
@@ -326,14 +529,19 @@ export function runBacktest(
   data: SignalData[],
   config: BacktestConfig,
 ): StrategyResult[] {
-  // 1. Filter data to start date
-  const filtered = data.filter(d => d.Date >= config.startDate);
+  // 1. Filter data to the [startDate, endDate] window (endDate inclusive,
+  //    defaults to the full available range when omitted).
+  const filtered = data.filter(
+    d => d.Date >= config.startDate && (!config.endDate || d.Date <= config.endDate),
+  );
   if (filtered.length === 0) return [];
 
   // 2. Sample for DCA periods
   const sampled = sampleByFrequency(filtered, config.frequency);
 
-  // 3. Baseline DCA — always buy immediately, never hold cash
+  // 3. Baseline DCA — always buy immediately, never hold cash. deployReserves
+  //    keeps it fully invested, so any opening lump sum is bought on day one
+  //    (no-op when there is no starting cash, e.g. the Lab default).
   const baseline = runStrategy(
     'Baseline DCA',
     sampled,
@@ -344,7 +552,7 @@ export function runBacktest(
       buyBtcUsd: config.dcaAmount,
       sellBtcUsd: 0,
       sellAll: false,
-      deployReserves: false,
+      deployReserves: true,
     }),
   );
 
@@ -429,17 +637,13 @@ export function runBacktest(
     results.push(accelerated);
   }
 
-  // 6. Optionally run CQM Risk-Weighted DCA.
-  //    Rule (each side scales with its own reserve):
-  //      BUY  (Risk < 0.5): size = max(base, fraction × cashBalance)
-  //      SELL (Risk > 0.5): size = max(base, fraction × btcValue)
-  //      target_trade_usd = size × (1 − 2 × Risk)
-  //    where btcValue = btcHeld × price.
-  //    Each period we deposit `dcaAmount` of cash (equal-funding).
-  //    BTC sells are capped by current btcHeld (no shorts in this port).
+  // 6. Optionally run CQM Risk-Weighted DCA (dynamic or legacy sizing).
   if (config.cqmDca && config.cqmRiskByDate && config.cqmRiskByDate.size > 0) {
     const riskMap = config.cqmRiskByDate;
+    const useDynamic = config.cqmDynamicSizing !== false;
     const tradeFraction = Math.max(0, config.cqmTradeFraction ?? 0.01);
+    const maxCashFraction = config.cqmMaxCashFraction ?? CQM_DEFAULT_MAX_CASH_FRACTION;
+    const sellThreshold = config.cqmSellThreshold ?? CQM_DEFAULT_SELL_THRESHOLD;
     const cqm = runStrategy(
       'CQM Risk DCA',
       sampled,
@@ -447,13 +651,29 @@ export function runBacktest(
       config,
       (d, state) => {
         const risk = riskMap.get(d.Date);
-        // Fall back to neutral (risk = 0.5 → no trade) when missing.
         const r = Number.isFinite(risk) ? Math.max(0, Math.min(1, risk as number)) : 0.5;
+
+        if (useDynamic) {
+          const sized = computeCqmDynamicTrade({
+            baseAmount: config.dcaAmount,
+            risk: r,
+            cashBalance: state.cashBalance,
+            btcHeld: state.btcHeld,
+            btcPrice: d.BTCUSD,
+            maxCashFraction,
+            sellThreshold,
+          });
+          return {
+            extraDeposit: 0,
+            buyBtcUsd: sized.buyAmount,
+            sellBtcUsd: sized.sellAmount,
+            sellAll: false,
+            deployReserves: false,
+          };
+        }
+
         const tradeSign = 1 - 2 * r;
         if (tradeSign > 0) {
-          // BUY side: scale with cash balance (the buy-side reserve) so
-          // accumulated dry powder is redeployed into BTC when Risk
-          // eventually drops, instead of staying stranded.
           const size = Math.max(
             config.dcaAmount,
             tradeFraction * state.cashBalance,
@@ -467,12 +687,6 @@ export function runBacktest(
           };
         }
         if (tradeSign < 0) {
-          // SELL side: scale with BTC value (the sell-side reserve), so
-          // the sell rate keeps up with bull-market appreciation. A flat
-          // `base` would become negligible at high BTC prices; tying it
-          // to btcValue means we liquidate ~1%/period of the BTC
-          // position when Risk hits the top — symmetric with the buy
-          // side's 1%-of-cash deployment.
           const btcValue = state.btcHeld * d.BTCUSD;
           const size = Math.max(
             config.dcaAmount,
@@ -494,6 +708,7 @@ export function runBacktest(
           deployReserves: false,
         };
       },
+      Boolean(config.cqmAllowShort),
     );
     results.push(cqm);
   }

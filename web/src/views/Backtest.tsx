@@ -1,26 +1,35 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  Brush, ReferenceArea,
+  Brush, ReferenceArea, ReferenceLine,
 } from 'recharts';
+import { Link as RouterLink, useSearchParams } from 'react-router-dom';
 import { SignalData } from '../App';
 import {
-  runBacktest, BacktestConfig, StrategyResult, DcaFrequency, OffSignalMode,
+  runBacktest, BacktestConfig, StrategyResult, DcaFrequency, OffSignalMode, Trade,
 } from '../services/backtest';
-import { fitCQM, type CQMFit } from '../utils/cqm';
+import {
+  CQM_DEFAULT_MAX_CASH_FRACTION,
+  CQM_DEFAULT_SELL_THRESHOLD,
+} from '../utils/cqmSizing';
+import { buildWalkForwardRiskMap } from '../utils/cqmWalkForward';
+import ChartsView from './ChartsView';
 import { format } from 'date-fns';
-import { FlaskConical, TrendingUp, Coins, BarChart3, ShieldAlert, DollarSign, ArrowDownToLine, Wallet } from 'lucide-react';
+import { FlaskConical, TrendingUp, Coins, BarChart3, ShieldAlert, DollarSign, ArrowDownToLine, Wallet, Download, ArrowUpDown } from 'lucide-react';
 import {
   Box,
+  Button,
   Card,
   CardContent,
   CardHeader,
   Chip,
+  CircularProgress,
   Divider,
   FormControl,
   Grid,
   InputAdornment,
   InputLabel,
+  Link as MuiLink,
   MenuItem,
   Paper,
   Select,
@@ -31,6 +40,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   ToggleButton,
@@ -38,8 +48,15 @@ import {
   Typography,
 } from '@mui/material';
 
+export type BacktestVariant = 'core-macro' | 'cqm';
+
 interface Props {
   data: SignalData[];
+  /**
+   * When set, the simulator is locked to a single model's strategies and the
+   * irrelevant controls are hidden. Undefined = the full cross-model Lab.
+   */
+  variant?: BacktestVariant;
 }
 
 type RangeKey = 'all' | '5y' | '4y' | '3y' | '2y' | '1y' | 'custom';
@@ -109,82 +126,289 @@ function systemColor(v: 0 | 1 | 2 | 3) {
   }
 }
 
-const Backtest: React.FC<Props> = ({ data }) => {
+// CQM Risk shading: split [0,1] into the same 4 bands used on the CQM Risk
+// chart (cool / warm / hot / euphoric) and shade the chart background by the
+// per-day risk value over time.
+type RiskBand = 0 | 1 | 2 | 3;
+type RiskSpan = { x1: number; x2: number; band: RiskBand };
+
+function riskBand(r: number): RiskBand {
+  if (r < 0.25) return 0;
+  if (r < 0.5) return 1;
+  if (r < 0.75) return 2;
+  return 3;
+}
+
+function riskColor(b: RiskBand): { fill: string; alpha: number } {
+  switch (b) {
+    case 0: return { fill: '#22c55e', alpha: 0.16 };
+    case 1: return { fill: '#84cc16', alpha: 0.14 };
+    case 2: return { fill: '#f59e0b', alpha: 0.14 };
+    case 3: return { fill: '#ef4444', alpha: 0.16 };
+    default: {
+      const _exhaustive: never = b;
+      return _exhaustive;
+    }
+  }
+}
+
+function buildRiskSpans(
+  rows: Array<{ ts: number; date: string }>,
+  riskByDate: Map<string, number>,
+): RiskSpan[] {
+  const spans: RiskSpan[] = [];
+  if (!rows.length || riskByDate.size === 0) return spans;
+
+  let current: RiskBand | null = null;
+  let startTs: number | null = null;
+
+  for (let i = 0; i < rows.length; i++) {
+    const r = riskByDate.get(rows[i].date);
+    const ts = rows[i].ts;
+    if (!Number.isFinite(r)) continue;
+    const b = riskBand(r as number);
+
+    if (current === null) {
+      current = b;
+      startTs = ts;
+      continue;
+    }
+
+    if (b !== current && startTs !== null) {
+      const prevTs = rows[i - 1]?.ts ?? ts;
+      if (prevTs > startTs) spans.push({ x1: startTs, x2: prevTs, band: current });
+      current = b;
+      startTs = ts;
+    }
+  }
+
+  if (current !== null && startTs !== null) {
+    const endTs = rows[rows.length - 1].ts;
+    if (endTs > startTs) spans.push({ x1: startTs, x2: endTs, band: current });
+  }
+
+  return spans;
+}
+
+const Backtest: React.FC<Props> = ({ data, variant }) => {
   const [range, setRange] = useState<RangeKey>('5y');
   const [customDate, setCustomDate] = useState<string>(ALL_START_DATE);
-  const [frequency, setFrequency] = useState<DcaFrequency>('weekly');
+  // End of the simulation window. Empty string = "today" (last available date).
+  const [customEndDate, setCustomEndDate] = useState<string>('');
+  // CQM defaults to a daily $100 base DCA; other variants/Lab keep weekly.
+  const [frequency, setFrequency] = useState<DcaFrequency>(() => (variant === 'cqm' ? 'daily' : 'weekly'));
   const [dcaAmount, setDcaAmount] = useState<number>(100);
+
+  // Optional URL overrides:
+  //   ?start-date=YYYY-MM-DD   → simulation start date
+  //   ?end-date=YYYY-MM-DD     → simulation end date (defaults to today)
+  //   ?dca-amount=100          → base DCA amount (USD)
+  //   ?dca-frequency=daily     → daily | weekly | monthly
+  const [searchParams] = useSearchParams();
+  const startDateParam = searchParams.get('start-date');
+  const endDateParam = searchParams.get('end-date');
+  const dcaAmountParam = searchParams.get('dca-amount');
+  const dcaFrequencyParam = searchParams.get('dca-frequency');
+  useEffect(() => {
+    if (startDateParam && /^\d{4}-\d{2}-\d{2}$/.test(startDateParam)) {
+      const clamped = startDateParam < ALL_START_DATE ? ALL_START_DATE : startDateParam;
+      setCustomDate(clamped);
+      setRange('custom');
+    }
+  }, [startDateParam]);
+  useEffect(() => {
+    if (endDateParam && /^\d{4}-\d{2}-\d{2}$/.test(endDateParam)) {
+      setCustomEndDate(endDateParam);
+    }
+  }, [endDateParam]);
+  useEffect(() => {
+    if (dcaAmountParam === null) return;
+    const v = parseFloat(dcaAmountParam);
+    if (Number.isFinite(v) && v > 0) setDcaAmount(v);
+  }, [dcaAmountParam]);
+  useEffect(() => {
+    const v = (dcaFrequencyParam ?? '').toLowerCase();
+    if (v === 'daily' || v === 'weekly' || v === 'monthly') setFrequency(v);
+  }, [dcaFrequencyParam]);
   const [offSignalMode, setOffSignalMode] = useState<OffSignalMode>('pause');
   const [macroAccel, setMacroAccel] = useState<boolean>(true);
   const [cqmDca, setCqmDca] = useState<boolean>(false);
-  // CQM trade fraction (cash for buys, btc_value for sells). UI exposes
-  // 1% / 2% / 3% / 4% / 5% as preset values; stored as a fraction (0.01..0.05).
+  // Tuned dynamic sizing knobs (6% cash-frac @ R=0, sell above 75%).
+  const [cqmMaxCashFraction, setCqmMaxCashFraction] = useState<number>(CQM_DEFAULT_MAX_CASH_FRACTION);
+  const [cqmSellThreshold, setCqmSellThreshold] = useState<number>(CQM_DEFAULT_SELL_THRESHOLD);
+  // Legacy flat reserve-scaling (Lab only). When enabled, disables dynamic sizing.
   const [cqmTradeFraction, setCqmTradeFraction] = useState<number>(0.01);
+  const [cqmFractionEnabled, setCqmFractionEnabled] = useState<boolean>(false);
+  const [cqmRiskByDate, setCqmRiskByDate] = useState<Map<string, number>>(new Map());
+  const [cqmRiskLoading, setCqmRiskLoading] = useState(false);
+  const [cqmRiskProgress, setCqmRiskProgress] = useState(0); // 0..1
+  // Annual yield on idle cash (APY %), accrued daily across all strategies.
+  const [cashYieldPct, setCashYieldPct] = useState<number>(0);
+
+  // --- Per-model variant -------------------------------------------------
+  // Locks the simulator to a single model's strategies and hides the
+  // controls that don't apply to it. Undefined = the cross-model Lab.
+  const isLab = !variant;
+  const isCore = variant === 'core-macro';
+  const isCqm = variant === 'cqm';
+  // Effective config flags after applying the variant's locks.
+  const effMacroAccel = isCqm ? false : macroAccel;
+  const effCqmDca = isCqm ? true : isCore ? false : cqmDca;
+  const effCqmDynamicSizing = isCqm || !cqmFractionEnabled;
+  const effCqmTradeFraction = cqmFractionEnabled ? cqmTradeFraction : 0;
 
   // --- CoinStrat Quantile Model (CQM) -------------------------------------
-  // Fit on the FULL BTC history once when the data arrives. The fit
-  // produces a per-day CQM Risk in [0, 1] used by the CQM Risk-Weighted
-  // DCA strategy. Fit is independent of the selected backtest range so we
-  // always use a stable, full-history calibration.
-  const cqmFit: CQMFit | null = useMemo(() => {
-    if (!cqmDca) return null;
-    if (!data || data.length < 365) return null;
+  // Walk-forward risk: causal expanding-window refits (no look-ahead).
+  // First run can take ~1 minute on the full BTC history.
+  const cqmPricePoints = useMemo(() => {
+    if (!effCqmDca || !data.length) return [];
     const points: { date: string; ts: number; price: number }[] = [];
     for (const d of data) {
-      const price = Number((d as any).BTCUSD);
+      const price = Number((d as { BTCUSD?: number }).BTCUSD);
       if (!Number.isFinite(price) || price <= 0) continue;
       const ts = new Date(d.Date).getTime();
       if (!Number.isFinite(ts)) continue;
       points.push({ date: d.Date, ts, price });
     }
-    if (points.length < 365) return null;
+    return points;
+  }, [data, effCqmDca]);
+
+  useEffect(() => {
+    if (!effCqmDca || cqmPricePoints.length < 365) {
+      setCqmRiskByDate(new Map());
+      setCqmRiskLoading(false);
+      setCqmRiskProgress(0);
+      return;
+    }
+
+    let cancelled = false;
+    setCqmRiskLoading(true);
+    setCqmRiskProgress(0);
+
+    // The expanding-window refits take ~1–2 minutes on full history, so run
+    // them in a Web Worker to keep the UI responsive. Fall back to a
+    // main-thread compute if workers are unavailable.
+    let worker: Worker | null = null;
+    let fallbackTimer = 0;
     try {
-      return fitCQM(points);
-    } catch (err) {
-      console.warn('CQM fit failed:', err);
-      return null;
+      worker = new Worker(
+        new URL('../workers/cqmWalkForwardWorker.ts', import.meta.url),
+        { type: 'module' },
+      );
+    } catch {
+      worker = null;
     }
-  }, [data, cqmDca]);
 
-  // date (YYYY-MM-DD) → CQM Risk in [0, 1]. Empty when CQM is disabled.
-  const cqmRiskByDate = useMemo(() => {
-    const map = new Map<string, number>();
-    if (cqmFit) {
-      for (const s of cqmFit.signals) map.set(s.date, s.risk);
+    const finish = (map: Map<string, number>) => {
+      if (cancelled) return;
+      setCqmRiskByDate(map);
+      setCqmRiskLoading(false);
+      setCqmRiskProgress(1);
+    };
+
+    if (worker) {
+      worker.onmessage = (event) => {
+        if (cancelled) return;
+        const msg = event.data as
+          | { type: 'progress'; done: number; total: number }
+          | { type: 'result'; entries: Array<[string, number]> }
+          | { type: 'error'; message: string };
+        if (msg.type === 'progress') {
+          setCqmRiskProgress(msg.total > 0 ? msg.done / msg.total : 0);
+        } else if (msg.type === 'result') {
+          finish(new Map(msg.entries));
+        } else {
+          console.warn('CQM walk-forward worker failed:', msg.message);
+          finish(new Map());
+        }
+      };
+      worker.onerror = (err) => {
+        console.warn('CQM walk-forward worker error:', err.message);
+        finish(new Map());
+      };
+      worker.postMessage({ points: cqmPricePoints });
+    } else {
+      fallbackTimer = window.setTimeout(() => {
+        try {
+          finish(buildWalkForwardRiskMap(cqmPricePoints));
+        } catch (err) {
+          console.warn('CQM walk-forward risk failed:', err);
+          finish(new Map());
+        }
+      }, 0);
     }
-    return map;
-  }, [cqmFit]);
 
-  // Compute start date from range selection or custom date
+    return () => {
+      cancelled = true;
+      worker?.terminate();
+      if (fallbackTimer) window.clearTimeout(fallbackTimer);
+    };
+  }, [cqmPricePoints, effCqmDca]);
+
+  // End of the simulation window. Defaults to the last available date ("today");
+  // a custom value is clamped to [ALL_START_DATE, last available date].
+  const endDate = useMemo(() => {
+    const last = data.length ? data[data.length - 1].Date : '';
+    if (!last) return customEndDate;
+    if (customEndDate && /^\d{4}-\d{2}-\d{2}$/.test(customEndDate)) {
+      if (customEndDate > last) return last;
+      if (customEndDate < ALL_START_DATE) return ALL_START_DATE;
+      return customEndDate;
+    }
+    return last;
+  }, [data, customEndDate]);
+
+  // Compute start date from range selection or custom date. Presets are anchored
+  // to the (possibly past) end date so "5Y" means the 5 years before endDate.
   const startDate = useMemo(() => {
     if (!data.length) return ALL_START_DATE;
     if (range === 'custom') return customDate;
     if (range === 'all') return ALL_START_DATE;
-    const last = data[data.length - 1];
-    const end = new Date(last.Date);
+    const end = new Date(endDate || data[data.length - 1].Date);
     const years = range === '5y' ? 5 : range === '4y' ? 4 : range === '3y' ? 3 : range === '2y' ? 2 : 1;
     const start = new Date(
       Date.UTC(end.getUTCFullYear() - years, end.getUTCMonth(), end.getUTCDate())
     );
     return start.toISOString().split('T')[0];
-  }, [data, range, customDate]);
+  }, [data, range, customDate, endDate]);
+
+  // Strategies to surface for the active variant (Lab shows everything).
+  const allowedStrategies = useMemo<Set<string> | null>(() => {
+    if (isCore) return new Set(['Baseline DCA', 'CORE DCA', 'CORE DCA + MACRO 3x']);
+    if (isCqm) return new Set(['Baseline DCA', 'CQM Risk DCA']);
+    return null;
+  }, [isCore, isCqm]);
 
   // Run backtest
   const results = useMemo<StrategyResult[]>(() => {
     if (!data.length) return [];
     const config: BacktestConfig = {
       startDate,
+      endDate,
       dcaAmount,
       frequency,
       offSignalMode,
-      macroAccel,
+      macroAccel: effMacroAccel,
       accelMultiplier: 3,
-      cqmDca: cqmDca && cqmRiskByDate.size > 0,
+      cqmDca: effCqmDca && cqmRiskByDate.size > 0 && !cqmRiskLoading,
       cqmRiskByDate: cqmRiskByDate.size > 0 ? cqmRiskByDate : undefined,
-      cqmTradeFraction,
+      cqmDynamicSizing: effCqmDynamicSizing,
+      cqmMaxCashFraction,
+      cqmSellThreshold,
+      cqmTradeFraction: effCqmTradeFraction,
+      cashAnnualYieldPct: cashYieldPct,
     };
-    return runBacktest(data, config);
-  }, [data, startDate, dcaAmount, frequency, offSignalMode, macroAccel, cqmDca, cqmRiskByDate, cqmTradeFraction]);
+    const all = runBacktest(data, config);
+    return allowedStrategies ? all.filter((r) => allowedStrategies.has(r.name)) : all;
+  }, [
+    data, startDate, endDate, dcaAmount, frequency, offSignalMode, effMacroAccel,
+    effCqmDca, cqmRiskByDate, cqmRiskLoading, effCqmDynamicSizing, cqmMaxCashFraction,
+    cqmSellThreshold, effCqmTradeFraction, cashYieldPct, allowedStrategies,
+  ]);
+
+  // For the CQM tab's tested-vs-baseline comparison tiles.
+  const cqmResult = useMemo(() => results.find((r) => r.name === 'CQM Risk DCA'), [results]);
+  const baselineResult = useMemo(() => results.find((r) => r.name === 'Baseline DCA'), [results]);
 
   // Build chart data by merging strategy series with signal data for regime shading
   const chartData = useMemo(() => {
@@ -214,6 +438,14 @@ const Backtest: React.FC<Props> = ({ data }) => {
       }
     }
 
+    // Merge per-day CQM Risk (0..1) so tooltips can surface it.
+    if (cqmRiskByDate.size > 0) {
+      for (const [date, risk] of cqmRiskByDate) {
+        const entry = dateMap.get(date);
+        if (entry) entry.cqmRisk = risk;
+      }
+    }
+
     // Merge each strategy's portfolio value and BTC held.
     // Replace 0 portfolio values with null so Recharts skips them on the
     // log-scale chart (log(0) = -Infinity breaks the entire line series).
@@ -231,9 +463,17 @@ const Backtest: React.FC<Props> = ({ data }) => {
     }
 
     return Array.from(dateMap.values()).sort((a: any, b: any) => a.ts - b.ts);
-  }, [results, data]);
+  }, [results, data, cqmRiskByDate]);
 
   const systemSpans = useMemo(() => buildSystemSpans(chartData), [chartData]);
+
+  // CQM variant shades the background by per-day CQM Risk instead of the
+  // CORE/MACRO regime (which is irrelevant to the CQM model).
+  const riskSpans = useMemo(
+    () => (isCqm ? buildRiskSpans(chartData, cqmRiskByDate) : []),
+    [isCqm, chartData, cqmRiskByDate],
+  );
+  const useRiskShading = isCqm && riskSpans.length > 0;
 
   // BTC price Y domain (right axis, log scale)
   const btcDomain = useMemo(() => {
@@ -278,6 +518,18 @@ const Backtest: React.FC<Props> = ({ data }) => {
     />
   );
 
+  const RiskTooltipRow = ({ payload }: { payload: any }) => {
+    const risk = payload?.[0]?.payload?.cqmRisk;
+    if (!isCqm || typeof risk !== 'number') return null;
+    const c = riskColor(riskBand(risk));
+    return (
+      <div className="mt-1 flex items-center justify-between gap-8 border-t border-slate-700/60 pt-1">
+        <span className="text-xs text-slate-300" style={{ color: c.fill }}>CQM Risk:</span>
+        <span className="text-xs font-mono font-bold text-slate-100">{(risk * 100).toFixed(1)}%</span>
+      </div>
+    );
+  };
+
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
       return (
@@ -292,6 +544,7 @@ const Backtest: React.FC<Props> = ({ data }) => {
                 </span>
               </div>
             ))}
+            <RiskTooltipRow payload={payload} />
           </div>
         </div>
       );
@@ -313,6 +566,7 @@ const Backtest: React.FC<Props> = ({ data }) => {
                 </span>
               </div>
             ))}
+            <RiskTooltipRow payload={payload} />
           </div>
         </div>
       );
@@ -335,12 +589,21 @@ const Backtest: React.FC<Props> = ({ data }) => {
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5 }}>
           <FlaskConical className="h-8 w-8 text-blue-400" />
           <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: -0.5 }}>
-            Backtest
+            {isCore ? 'CORE / MACRO Backtest' : isCqm ? 'CQM Backtest' : 'Backtest'}
           </Typography>
         </Box>
         <Typography variant="body2" color="text.secondary">
-          Compare how different DCA strategies would have performed using CoinStrat signals over historical data.
+          {isCore
+            ? 'How CORE accumulation (with the optional MACRO 3× accelerator) would have performed versus a plain baseline DCA.'
+            : isCqm
+            ? 'CQM Risk DCA deposits the same base amount as Baseline each period, then sizes trades dynamically from walk-forward Risk (no look-ahead): it deploys a risk-scaled fraction of its cash pile when Risk is low, holds between 50% and the sell threshold, and trims BTC above it. Sells are capped by holdings.'
+            : 'Compare how different DCA strategies would have performed using CoinStrat signals over historical data.'}
         </Typography>
+        {!isLab && (
+          <MuiLink component={RouterLink} to="/lab" sx={{ display: 'inline-block', mt: 1, fontSize: 13, fontWeight: 700 }}>
+            Compare all models in the Lab →
+          </MuiLink>
+        )}
       </Box>
 
       {/* Controls */}
@@ -384,6 +647,19 @@ const Backtest: React.FC<Props> = ({ data }) => {
                   InputLabelProps={{ shrink: true }}
                   inputProps={{
                     min: ALL_START_DATE,
+                    max: endDate || (data.length ? data[data.length - 1].Date : undefined),
+                  }}
+                  sx={{ width: 155 }}
+                />
+                <TextField
+                  type="date"
+                  size="small"
+                  label="End Date"
+                  value={endDate}
+                  onChange={(e) => setCustomEndDate(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                  inputProps={{
+                    min: startDate,
                     max: data.length ? data[data.length - 1].Date : undefined,
                   }}
                   sx={{ width: 155 }}
@@ -430,7 +706,28 @@ const Backtest: React.FC<Props> = ({ data }) => {
             />
           </Grid>
 
-          {/* Off-Signal Mode */}
+          {/* Cash yield on idle USD (applies to every strategy's cash balance) */}
+          <Grid item xs={6} sm="auto">
+            <TextField
+              label="Cash APY"
+              type="number"
+              size="small"
+              value={cashYieldPct}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value);
+                if (Number.isFinite(v) && v >= 0 && v <= 20) setCashYieldPct(v);
+              }}
+              InputProps={{
+                endAdornment: <InputAdornment position="end">%</InputAdornment>,
+              }}
+              inputProps={{ step: 0.5, min: 0, max: 20 }}
+              sx={{ width: 110 }}
+              title="Annual yield earned on idle cash (accrued daily). Set to a T-bill rate (e.g. 4%) so cash-holding strategies aren't unfairly penalized."
+            />
+          </Grid>
+
+          {/* Off-Signal Mode (CORE-based strategies only) */}
+          {!isCqm && (
           <Grid item xs={6} sm="auto">
             <FormControl size="small" sx={{ minWidth: 160 }}>
               <InputLabel>When Signal OFF</InputLabel>
@@ -445,8 +742,10 @@ const Backtest: React.FC<Props> = ({ data }) => {
               </Select>
             </FormControl>
           </Grid>
+          )}
 
-          {/* MACRO 3x Toggle */}
+          {/* MACRO 3x Toggle (CORE-based strategies only) */}
+          {!isCqm && (
           <Grid item xs={6} sm="auto">
             <Stack direction="row" alignItems="center" spacing={1}>
               <Switch
@@ -460,8 +759,10 @@ const Backtest: React.FC<Props> = ({ data }) => {
               </Typography>
             </Stack>
           </Grid>
+          )}
 
-          {/* CQM Risk DCA Toggle */}
+          {/* CQM Risk DCA Toggle (Lab only — locked on in the CQM model tab) */}
+          {isLab && (
           <Grid item xs={6} sm="auto">
             <Stack direction="row" alignItems="center" spacing={1}>
               <Switch
@@ -484,52 +785,161 @@ const Backtest: React.FC<Props> = ({ data }) => {
               </Typography>
             </Stack>
           </Grid>
+          )}
 
-          {/* CQM Trade Fraction (visible only when CQM is on) */}
-          {cqmDca && (
+          {/* CQM dynamic sizing knobs (tuned defaults; walk-forward risk) */}
+          {effCqmDca && effCqmDynamicSizing && (
+            <Grid item xs={12}>
+              <Stack spacing={0.5}>
+                <Typography variant="overline" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
+                  CQM Dynamic Sizing
+                </Typography>
+                <Stack direction="row" alignItems="center" spacing={2} useFlexGap flexWrap="wrap">
+                  <Stack direction="row" alignItems="center" spacing={0.5} useFlexGap flexWrap="wrap">
+                    <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
+                      Cash deploy @ R=0:
+                    </Typography>
+                    <ToggleButtonGroup
+                      exclusive
+                      value={cqmMaxCashFraction}
+                      onChange={(_, next) => {
+                        if (typeof next === 'number') setCqmMaxCashFraction(next);
+                      }}
+                      size="small"
+                      sx={{
+                        flexWrap: 'wrap',
+                        '& .MuiToggleButton-root.Mui-selected': {
+                          color: '#a855f7',
+                          borderColor: '#a855f7',
+                          backgroundColor: 'rgba(168, 85, 247, 0.12)',
+                        },
+                      }}
+                    >
+                      <ToggleButton value={0.04}>4%</ToggleButton>
+                      <ToggleButton value={0.05}>5%</ToggleButton>
+                      <ToggleButton value={0.06}>6%</ToggleButton>
+                      <ToggleButton value={0.07}>7%</ToggleButton>
+                      <ToggleButton value={0.08}>8%</ToggleButton>
+                    </ToggleButtonGroup>
+                  </Stack>
+                  <Stack direction="row" alignItems="center" spacing={0.5} useFlexGap flexWrap="wrap">
+                    <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
+                      Sell above:
+                    </Typography>
+                    <ToggleButtonGroup
+                      exclusive
+                      value={cqmSellThreshold}
+                      onChange={(_, next) => {
+                        if (typeof next === 'number') setCqmSellThreshold(next);
+                      }}
+                      size="small"
+                      sx={{
+                        flexWrap: 'wrap',
+                        '& .MuiToggleButton-root.Mui-selected': {
+                          color: '#a855f7',
+                          borderColor: '#a855f7',
+                          backgroundColor: 'rgba(168, 85, 247, 0.12)',
+                        },
+                      }}
+                    >
+                      <ToggleButton value={0.65}>65%</ToggleButton>
+                      <ToggleButton value={0.70}>70%</ToggleButton>
+                      <ToggleButton value={0.75}>75%</ToggleButton>
+                      <ToggleButton value={0.80}>80%</ToggleButton>
+                      <ToggleButton value={1}>Buy-only</ToggleButton>
+                    </ToggleButtonGroup>
+                  </Stack>
+                  {cqmRiskLoading && (
+                    <Stack direction="row" alignItems="center" spacing={0.75}>
+                      <CircularProgress size={14} sx={{ color: '#a855f7' }} />
+                      <Typography variant="caption" color="text.secondary">
+                        Computing walk-forward risk… {Math.round(cqmRiskProgress * 100)}%
+                      </Typography>
+                    </Stack>
+                  )}
+                </Stack>
+              </Stack>
+            </Grid>
+          )}
+
+          {/* Legacy flat reserve-scaling (Lab only) */}
+          {effCqmDca && !isCqm && (
             <Grid item xs={12} sm="auto">
               <Stack spacing={0.5}>
                 <Typography variant="overline" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
-                  CQM Trade Fraction
+                  Legacy Flat Fraction
                 </Typography>
-                <ToggleButtonGroup
-                  exclusive
-                  value={cqmTradeFraction}
-                  onChange={(_, next) => {
-                    if (typeof next === 'number') setCqmTradeFraction(next);
-                  }}
-                  size="small"
-                  sx={{
-                    flexWrap: 'wrap',
-                    '& .MuiToggleButton-root.Mui-selected': {
-                      color: '#a855f7',
-                      borderColor: '#a855f7',
-                      backgroundColor: 'rgba(168, 85, 247, 0.12)',
-                    },
-                    '& .MuiToggleButton-root.Mui-selected:hover': {
-                      backgroundColor: 'rgba(168, 85, 247, 0.18)',
-                    },
-                  }}
-                >
-                  <ToggleButton value={0.01}>1%</ToggleButton>
-                  <ToggleButton value={0.02}>2%</ToggleButton>
-                  <ToggleButton value={0.03}>3%</ToggleButton>
-                  <ToggleButton value={0.04}>4%</ToggleButton>
-                  <ToggleButton value={0.05}>5%</ToggleButton>
-                  <ToggleButton value={0.20}>20%</ToggleButton>
-                  <ToggleButton value={0.25}>25%</ToggleButton>
-                  <ToggleButton value={0.50}>50%</ToggleButton>
-                  <ToggleButton value={0.75}>75%</ToggleButton>
-                  <ToggleButton value={1.00}>100%</ToggleButton>
-                </ToggleButtonGroup>
+                <Stack direction="row" alignItems="center" spacing={1} useFlexGap flexWrap="wrap">
+                  <Switch
+                    checked={cqmFractionEnabled}
+                    onChange={(_, checked) => setCqmFractionEnabled(checked)}
+                    size="small"
+                    sx={{
+                      '& .MuiSwitch-switchBase.Mui-checked': { color: '#a855f7' },
+                      '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': {
+                        backgroundColor: '#a855f7',
+                      },
+                    }}
+                  />
+                  {cqmFractionEnabled ? (
+                    <ToggleButtonGroup
+                      exclusive
+                      value={cqmTradeFraction}
+                      onChange={(_, next) => {
+                        if (typeof next === 'number') setCqmTradeFraction(next);
+                      }}
+                      size="small"
+                      sx={{
+                        flexWrap: 'wrap',
+                        '& .MuiToggleButton-root.Mui-selected': {
+                          color: '#a855f7',
+                          borderColor: '#a855f7',
+                          backgroundColor: 'rgba(168, 85, 247, 0.12)',
+                        },
+                        '& .MuiToggleButton-root.Mui-selected:hover': {
+                          backgroundColor: 'rgba(168, 85, 247, 0.18)',
+                        },
+                      }}
+                    >
+                      <ToggleButton value={0.01}>1%</ToggleButton>
+                      <ToggleButton value={0.02}>2%</ToggleButton>
+                      <ToggleButton value={0.03}>3%</ToggleButton>
+                      <ToggleButton value={0.04}>4%</ToggleButton>
+                      <ToggleButton value={0.05}>5%</ToggleButton>
+                      <ToggleButton value={0.20}>20%</ToggleButton>
+                      <ToggleButton value={0.25}>25%</ToggleButton>
+                      <ToggleButton value={0.50}>50%</ToggleButton>
+                      <ToggleButton value={0.75}>75%</ToggleButton>
+                      <ToggleButton value={1.00}>100%</ToggleButton>
+                    </ToggleButtonGroup>
+                  ) : (
+                    <Typography variant="caption" color="text.secondary">
+                      Off — dynamic sizing (risk-scaled cash deploy + dead-zone sells)
+                    </Typography>
+                  )}
+                </Stack>
               </Stack>
             </Grid>
           )}
         </Grid>
       </Paper>
 
-      {/* Summary Cards */}
-      {results.length > 0 && (
+      {/* Summary — CQM tab uses comparison tiles (tested vs baseline); other
+          variants keep the per-strategy cards. */}
+      {cqmRiskLoading && isCqm ? (
+        <Paper sx={{ p: 3, mb: 2, textAlign: 'center' }}>
+          <Stack direction="row" alignItems="center" justifyContent="center" spacing={1.5}>
+            <CircularProgress size={22} sx={{ color: '#a855f7' }} />
+            <Typography variant="body2" color="text.secondary">
+              Computing walk-forward CQM risk (causal refits, no look-ahead)…
+              {' '}{Math.round(cqmRiskProgress * 100)}%
+            </Typography>
+          </Stack>
+        </Paper>
+      ) : results.length > 0 && (
+        isCqm && cqmResult && baselineResult ? (
+          <ComparisonTiles cqm={cqmResult} baseline={baselineResult} />
+        ) : (
         <Grid container spacing={2}>
           {results.map((r) => {
             const color = STRATEGY_COLORS[r.name] ?? '#94a3b8';
@@ -592,6 +1002,21 @@ const Backtest: React.FC<Props> = ({ data }) => {
                           tone="negative"
                         />
                       </Grid>
+                      <Grid item xs={6}>
+                        <MetricBox
+                          icon={<TrendingUp className="h-4 w-4" style={{ color }} />}
+                          label="IRR (annualized)"
+                          value={fmtPctOrNa(r.annualizedIrr * 100)}
+                          tone={r.annualizedIrr >= 0 ? 'positive' : 'negative'}
+                        />
+                      </Grid>
+                      <Grid item xs={6}>
+                        <MetricBox
+                          icon={<BarChart3 className="h-4 w-4" style={{ color }} />}
+                          label="Return / Max DD"
+                          value={Number.isFinite(r.returnOverMaxDrawdown) ? r.returnOverMaxDrawdown.toFixed(2) : 'n/a'}
+                        />
+                      </Grid>
                     </Grid>
                   </CardContent>
                 </Card>
@@ -599,6 +1024,7 @@ const Backtest: React.FC<Props> = ({ data }) => {
             );
           })}
         </Grid>
+        )
       )}
 
       {/* Chart 1: Portfolio Value */}
@@ -609,13 +1035,32 @@ const Backtest: React.FC<Props> = ({ data }) => {
               Portfolio Value Over Time
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-              Total portfolio value (BTC holdings at market price + cash reserves) for each strategy.
-              All strategies receive the same DCA deposits; CoinStrat holds cash as dry powder when CORE is OFF and deploys reserves on re-entry.
-              Max Drawdown is measured on portfolio value relative to cumulative deposits (not raw portfolio value, which ongoing deposits can inflate).
-              {cqmDca && cqmFit && (
-                <> CQM Risk DCA trades <code>(1 − 2 × Risk) × size</code> per period, where <code>size = max(base, {(cqmTradeFraction * 100).toFixed(0)}% × cash)</code> on BUYs and <code>size = max(base, {(cqmTradeFraction * 100).toFixed(0)}% × btc_value)</code> on SELLs — each side scales with its own reserve. The {(cqmTradeFraction * 100).toFixed(0)}% term lets the strategy redeploy accumulated dry powder when Risk falls and liquidate ~{(cqmTradeFraction * 100).toFixed(0)}% of the BTC position per period at cycle tops, instead of staying anchored to a flat USD base.</>
+              {isCqm ? (
+                <>
+                  CQM Risk DCA uses walk-forward risk (causal refits, no look-ahead) and
+                  dynamic sizing: deploy up to {(cqmMaxCashFraction * 100).toFixed(0)}% of the cash pile per
+                  period when Risk is low (tapering to 0 at 50%), hold in the dead zone (50%–{(cqmSellThreshold * 100).toFixed(0)}%),
+                  {cqmSellThreshold >= 1
+                    ? ' and never sell (buy-only).'
+                    : ` and sell above ${(cqmSellThreshold * 100).toFixed(0)}% risk.`}
+                  {' '}All strategies receive the same DCA deposits for a fair comparison.
+                </>
+              ) : (
+                <>
+                  Total portfolio value (BTC holdings at market price + cash reserves) for each strategy.
+                  All strategies receive the same DCA deposits; CoinStrat holds cash as dry powder when CORE is OFF and deploys reserves on re-entry.
+                  Max Drawdown is measured on portfolio value relative to cumulative deposits (not raw portfolio value, which ongoing deposits can inflate).
+                  {effCqmDca && effCqmDynamicSizing && (
+                    <> CQM Risk DCA uses dynamic sizing with walk-forward risk (see knobs above).</>
+                  )}
+                  {effCqmDca && !effCqmDynamicSizing && cqmFractionEnabled && (
+                    <> CQM Risk DCA uses legacy flat fraction scaling.</>
+                  )}
+                </>
               )}
-              {' '}Background shading shows the CoinStrat system state (CORE = accumulation permission; MACRO = 3× intensity modifier).
+              {' '}{useRiskShading
+                ? 'Background shading shows the daily CQM Risk band: green (cool, <25%) → lime (warm, 25–50%) → amber (hot, 50–75%) → red (euphoric, >75%).'
+                : 'Background shading shows the CoinStrat system state (CORE = accumulation permission; MACRO = 3× intensity modifier).'}
             </Typography>
           </Box>
 
@@ -640,22 +1085,41 @@ const Backtest: React.FC<Props> = ({ data }) => {
           <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                {systemSpans.map((s, i) => {
-                  const c = systemColor(s.value);
-                  return (
-                    <ReferenceArea
-                      key={`sys-${i}-${s.x1}`}
-                      yAxisId="pv"
-                      x1={s.x1}
-                      x2={s.x2}
-                      ifOverflow="hidden"
-                      fill={c.fill}
-                      fillOpacity={c.alpha}
-                      strokeOpacity={0}
-                    />
-                  );
-                })}
+                {useRiskShading
+                  ? riskSpans.map((s, i) => {
+                      const c = riskColor(s.band);
+                      return (
+                        <ReferenceArea
+                          key={`risk-${i}-${s.x1}`}
+                          yAxisId="pv"
+                          x1={s.x1}
+                          x2={s.x2}
+                          ifOverflow="hidden"
+                          fill={c.fill}
+                          fillOpacity={c.alpha}
+                          strokeOpacity={0}
+                        />
+                      );
+                    })
+                  : systemSpans.map((s, i) => {
+                      const c = systemColor(s.value);
+                      return (
+                        <ReferenceArea
+                          key={`sys-${i}-${s.x1}`}
+                          yAxisId="pv"
+                          x1={s.x1}
+                          x2={s.x2}
+                          ifOverflow="hidden"
+                          fill={c.fill}
+                          fillOpacity={c.alpha}
+                          strokeOpacity={0}
+                        />
+                      );
+                    })}
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+                {isCqm && (
+                  <ReferenceLine yAxisId="pv" y={0} stroke="#94a3b8" strokeDasharray="4 3" strokeWidth={1} />
+                )}
                 <XAxis
                   dataKey="ts"
                   type="number"
@@ -727,10 +1191,13 @@ const Backtest: React.FC<Props> = ({ data }) => {
         <Paper sx={{ p: { xs: 2, sm: 3 } }}>
           <Box sx={{ mb: 2.5 }}>
             <Typography variant="h6" sx={{ fontWeight: 800 }}>
-              BTC Holdings Over Time
+              BTC Holdings
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-              Cumulative BTC accumulated by each strategy over the backtest period.
+              {isCqm
+                ? 'BTC position over time. CQM DCA accumulates when Risk is low and trims above the sell threshold; sells are capped by holdings.'
+                : 'Cumulative BTC accumulated by each strategy over the backtest period.'}
+              {useRiskShading && ' Background shading shows the daily CQM Risk band.'}
             </Typography>
           </Box>
 
@@ -750,7 +1217,41 @@ const Backtest: React.FC<Props> = ({ data }) => {
           <Box sx={{ height: { xs: 300, sm: 360 }, width: '100%', minWidth: 0 }}>
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+                {useRiskShading
+                  ? riskSpans.map((s, i) => {
+                      const c = riskColor(s.band);
+                      return (
+                        <ReferenceArea
+                          key={`btc-risk-${i}-${s.x1}`}
+                          yAxisId="btcHoldings"
+                          x1={s.x1}
+                          x2={s.x2}
+                          ifOverflow="hidden"
+                          fill={c.fill}
+                          fillOpacity={c.alpha}
+                          strokeOpacity={0}
+                        />
+                      );
+                    })
+                  : systemSpans.map((s, i) => {
+                      const c = systemColor(s.value);
+                      return (
+                        <ReferenceArea
+                          key={`btc-sys-${i}-${s.x1}`}
+                          yAxisId="btcHoldings"
+                          x1={s.x1}
+                          x2={s.x2}
+                          ifOverflow="hidden"
+                          fill={c.fill}
+                          fillOpacity={c.alpha}
+                          strokeOpacity={0}
+                        />
+                      );
+                    })}
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+                {isCqm && (
+                  <ReferenceLine yAxisId="btcHoldings" y={0} stroke="#94a3b8" strokeDasharray="4 3" strokeWidth={1} />
+                )}
                 <XAxis
                   dataKey="ts"
                   type="number"
@@ -817,8 +1318,14 @@ const Backtest: React.FC<Props> = ({ data }) => {
         </Paper>
       )}
 
-      {/* Comparison Table */}
-      {results.length > 0 && (
+      {/* CQM Risk chart (CQM variant only) — same chart as models/cqm/charts,
+          windowed to the simulation interval for easy comparison. */}
+      {isCqm && (
+        <ChartsView data={data} sections={['cqm-risk']} embedded showRange={false} startDate={startDate} endDate={endDate} />
+      )}
+
+      {/* Comparison Table — redundant on the CQM tab (covered by the tiles). */}
+      {results.length > 0 && !isCqm && (
         <Paper sx={{ p: { xs: 2, sm: 3 } }}>
           <Box sx={{ mb: 2 }}>
             <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -850,6 +1357,11 @@ const Backtest: React.FC<Props> = ({ data }) => {
             </Table>
           </TableContainer>
         </Paper>
+      )}
+
+      {/* Trade log — every executed buy/sell for the CQM strategy. */}
+      {isCqm && cqmResult && cqmResult.trades.length > 0 && (
+        <TradesTable trades={cqmResult.trades} strategyName={cqmResult.name} />
       )}
     </Box>
   );
@@ -883,6 +1395,327 @@ function MetricBox(props: { icon: React.ReactNode; label: string; value: string;
   );
 }
 
+const MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
+
+// --- Trade log ---
+
+function fmtUsdExact(x: number): string {
+  if (!Number.isFinite(x)) return 'n/a';
+  const sign = x < 0 ? '-' : '';
+  return `${sign}$${Math.abs(x).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// Rounded USD (no decimals) for the on-screen trade log — these amounts are
+// large and the cents add noise. The CSV keeps full precision.
+function fmtUsdRound(x: number): string {
+  if (!Number.isFinite(x)) return 'n/a';
+  const sign = x < 0 ? '-' : '';
+  return `${sign}$${Math.abs(x).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+}
+
+function buildTradesCsv(trades: Trade[]): string {
+  const header = [
+    'date',
+    'side',
+    'btc_amount',
+    'usd_amount',
+    'btc_price',
+    'total_btc_held',
+    'total_usd_held',
+    'total_portfolio_value',
+  ];
+  const rows = trades.map((t) => [
+    t.date,
+    t.side,
+    t.btcAmount.toFixed(8),
+    t.usdAmount.toFixed(2),
+    t.price.toFixed(2),
+    t.btcHeld.toFixed(8),
+    t.cashBalance.toFixed(2),
+    t.portfolioValue.toFixed(2),
+  ]);
+  return [header, ...rows].map((r) => r.join(',')).join('\n');
+}
+
+function downloadCsv(filename: string, csv: string) {
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// Paginated, sortable trade log with CSV export. Trades are stored chronologically
+// by the engine; here we sort a shallow copy and slice the active page.
+function TradesTable({ trades, strategyName }: { trades: Trade[]; strategyName: string }) {
+  const [order, setOrder] = useState<'asc' | 'desc'>('desc');
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(50);
+
+  const sorted = useMemo(() => {
+    const copy = trades.slice();
+    copy.sort((a, b) => (order === 'asc' ? a.date.localeCompare(b.date) : b.date.localeCompare(a.date)));
+    return copy;
+  }, [trades, order]);
+
+  const pageRows = useMemo(
+    () => sorted.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage),
+    [sorted, page, rowsPerPage],
+  );
+
+  const toggleOrder = () => {
+    setOrder((o) => (o === 'asc' ? 'desc' : 'asc'));
+    setPage(0);
+  };
+
+  const handleDownload = () => {
+    // CSV always exports the full set in chronological (ascending) order.
+    const chronological = trades.slice().sort((a, b) => a.date.localeCompare(b.date));
+    downloadCsv(`${strategyName.replace(/\s+/g, '_').toLowerCase()}_trades.csv`, buildTradesCsv(chronological));
+  };
+
+  const cellSx = { fontFamily: MONO, whiteSpace: 'nowrap' as const };
+
+  return (
+    <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+      <Stack
+        direction={{ xs: 'column', sm: 'row' }}
+        justifyContent="space-between"
+        alignItems={{ xs: 'flex-start', sm: 'center' }}
+        spacing={1.5}
+        sx={{ mb: 2 }}
+      >
+        <Box>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            Trade Log
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            {trades.length.toLocaleString()} executed {trades.length === 1 ? 'trade' : 'trades'} for {strategyName}.
+          </Typography>
+        </Box>
+        <Stack direction="row" spacing={1}>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<ArrowUpDown className="h-4 w-4" />}
+            onClick={toggleOrder}
+          >
+            {order === 'desc' ? 'Newest first' : 'Oldest first'}
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<Download className="h-4 w-4" />}
+            onClick={handleDownload}
+          >
+            CSV
+          </Button>
+        </Stack>
+      </Stack>
+
+      <TableContainer>
+        <Table size="small" stickyHeader>
+          <TableHead>
+            <TableRow>
+              <TableCell sx={{ fontWeight: 900 }}>Date</TableCell>
+              <TableCell sx={{ fontWeight: 900 }}>Side</TableCell>
+              <TableCell align="right" sx={{ fontWeight: 900 }}>Amount (BTC)</TableCell>
+              <TableCell align="right" sx={{ fontWeight: 900 }}>Value (USD)</TableCell>
+              <TableCell align="right" sx={{ fontWeight: 900 }}>BTC Price</TableCell>
+              <TableCell align="right" sx={{ fontWeight: 900 }}>BTC Held</TableCell>
+              <TableCell align="right" sx={{ fontWeight: 900 }}>USD Held</TableCell>
+              <TableCell align="right" sx={{ fontWeight: 900 }}>Portfolio Value</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {pageRows.map((t, i) => {
+              const isBuy = t.side === 'buy';
+              return (
+                <TableRow hover key={`${t.date}-${i}-${t.side}`}>
+                  <TableCell sx={cellSx}>{t.date}</TableCell>
+                  <TableCell>
+                    <Chip
+                      label={isBuy ? 'Buy' : 'Sell'}
+                      size="small"
+                      sx={{
+                        fontWeight: 800,
+                        height: 20,
+                        color: isBuy ? '#16a34a' : '#dc2626',
+                        bgcolor: isBuy ? 'rgba(22,163,74,0.12)' : 'rgba(220,38,38,0.12)',
+                      }}
+                    />
+                  </TableCell>
+                  <TableCell align="right" sx={cellSx}>{t.btcAmount.toFixed(6)}</TableCell>
+                  <TableCell align="right" sx={cellSx}>{fmtUsdExact(t.usdAmount)}</TableCell>
+                  <TableCell align="right" sx={cellSx}>{fmtUsdRound(t.price)}</TableCell>
+                  <TableCell align="right" sx={{ ...cellSx, color: t.btcHeld < 0 ? 'error.main' : 'text.primary' }}>
+                    {t.btcHeld.toFixed(6)}
+                  </TableCell>
+                  <TableCell align="right" sx={cellSx}>{fmtUsdRound(t.cashBalance)}</TableCell>
+                  <TableCell align="right" sx={cellSx}>{fmtUsdRound(t.portfolioValue)}</TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </TableContainer>
+
+      <TablePagination
+        component="div"
+        count={sorted.length}
+        page={page}
+        onPageChange={(_e, p) => setPage(p)}
+        rowsPerPage={rowsPerPage}
+        onRowsPerPageChange={(e) => {
+          setRowsPerPage(parseInt(e.target.value, 10));
+          setPage(0);
+        }}
+        rowsPerPageOptions={[25, 50, 100, 250, 500]}
+      />
+    </Paper>
+  );
+}
+
+interface TileSpec {
+  label: string;
+  primary: string;
+  tone?: 'positive' | 'negative';
+  baseline?: string;
+  note?: string;
+}
+
+// CQM-tab summary: one tile per metric. The big centred value is the tested
+// strategy (CQM Risk DCA); a small muted value underneath is Baseline DCA for
+// reference. Percentages are coloured green/red by sign.
+function ComparisonTiles({ cqm, baseline }: { cqm: StrategyResult; baseline: StrategyResult }) {
+  const cqmColor = STRATEGY_COLORS['CQM Risk DCA'] ?? '#a855f7';
+  const baseColor = STRATEGY_COLORS['Baseline DCA'] ?? '#94a3b8';
+
+  const tiles: TileSpec[] = [
+    {
+      label: 'Total Return',
+      primary: fmtPct(cqm.totalReturn * 100),
+      tone: cqm.totalReturn >= 0 ? 'positive' : 'negative',
+      baseline: fmtPct(baseline.totalReturn * 100),
+    },
+    {
+      label: 'IRR (annualized)',
+      primary: fmtPctOrNa(cqm.annualizedIrr * 100),
+      tone: cqm.annualizedIrr >= 0 ? 'positive' : 'negative',
+      baseline: fmtPctOrNa(baseline.annualizedIrr * 100),
+    },
+    {
+      label: 'Max Drawdown',
+      primary: `-${(cqm.maxReturnDrawdown * 100).toFixed(1)}%`,
+      tone: 'negative',
+      baseline: `-${(baseline.maxReturnDrawdown * 100).toFixed(1)}%`,
+    },
+    {
+      label: 'Return / Max DD',
+      primary: Number.isFinite(cqm.returnOverMaxDrawdown) ? cqm.returnOverMaxDrawdown.toFixed(2) : 'n/a',
+      baseline: Number.isFinite(baseline.returnOverMaxDrawdown) ? baseline.returnOverMaxDrawdown.toFixed(2) : 'n/a',
+    },
+    {
+      label: 'Final Value',
+      primary: fmtUsd(cqm.finalPortfolioValue),
+      baseline: fmtUsd(baseline.finalPortfolioValue),
+    },
+    {
+      label: 'BTC Position',
+      primary: cqm.btcAccumulated.toFixed(4),
+      baseline: baseline.btcAccumulated.toFixed(4),
+    },
+    {
+      label: 'Cash Balance',
+      primary: fmtUsd(cqm.finalCashBalance),
+      baseline: fmtUsd(baseline.finalCashBalance),
+    },
+    {
+      label: 'Avg Idle Cash',
+      primary: fmtUsd(cqm.avgCashBalance),
+      baseline: fmtUsd(baseline.avgCashBalance),
+    },
+    {
+      label: 'Total Invested',
+      primary: fmtUsd(cqm.totalInvested),
+      note: 'Same for both (equal funding)',
+    },
+  ];
+
+  return (
+    <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+      <Box sx={{ mb: 2 }}>
+        <Typography variant="h6" sx={{ fontWeight: 800 }}>
+          CQM Risk DCA vs Baseline DCA
+        </Typography>
+        <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
+          <Stack direction="row" spacing={0.75} alignItems="center">
+            <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: cqmColor }} />
+            <Typography variant="caption" color="text.secondary">Big value — CQM Risk DCA (tested)</Typography>
+          </Stack>
+          <Stack direction="row" spacing={0.75} alignItems="center">
+            <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: baseColor }} />
+            <Typography variant="caption" color="text.secondary">Small value — Baseline DCA (reference)</Typography>
+          </Stack>
+        </Stack>
+      </Box>
+      <Grid container spacing={1.5}>
+        {tiles.map((t) => (
+          <Grid item xs={6} sm={4} md={2} key={t.label}>
+            <ComparisonTile spec={t} baselineColor={baseColor} />
+          </Grid>
+        ))}
+      </Grid>
+    </Paper>
+  );
+}
+
+function ComparisonTile({ spec, baselineColor }: { spec: TileSpec; baselineColor: string }) {
+  const { label, primary, tone, baseline, note } = spec;
+  const color = tone === 'positive' ? 'success.main' : tone === 'negative' ? 'error.main' : 'text.primary';
+  return (
+    <Box
+      sx={{
+        border: '1px solid',
+        borderColor: 'divider',
+        borderRadius: 2,
+        p: 1.5,
+        height: '100%',
+        minHeight: 128,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        textAlign: 'center',
+        bgcolor: 'rgba(2,6,23,0.10)',
+      }}
+    >
+      <Typography variant="overline" color="text.secondary" sx={{ fontSize: '0.6rem', lineHeight: 1.3 }}>
+        {label}
+      </Typography>
+      <Typography sx={{ fontWeight: 900, fontFamily: MONO, fontSize: '1.5rem', color, my: 'auto', py: 0.5 }}>
+        {primary}
+      </Typography>
+      {baseline !== undefined ? (
+        <Stack direction="row" spacing={0.75} alignItems="center" justifyContent="center">
+          <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: baselineColor, flexShrink: 0 }} />
+          <Typography variant="caption" color="text.secondary">Baseline</Typography>
+          <Typography variant="caption" sx={{ fontFamily: MONO, fontWeight: 700, color: baselineColor }}>
+            {baseline}
+          </Typography>
+        </Stack>
+      ) : (
+        <Typography variant="caption" color="text.secondary">
+          {note}
+        </Typography>
+      )}
+    </Box>
+  );
+}
+
 function CompRow(props: { label: string; values: string[] }) {
   return (
     <TableRow hover>
@@ -911,6 +1744,11 @@ function fmtUsd(x: number): string {
 function fmtPct(x: number): string {
   if (!Number.isFinite(x)) return 'n/a';
   return `${x.toFixed(1)}%`;
+}
+
+function fmtPctOrNa(x: number): string {
+  if (!Number.isFinite(x)) return 'n/a';
+  return `${x >= 0 ? '+' : ''}${x.toFixed(1)}%`;
 }
 
 export default Backtest;

@@ -3,7 +3,6 @@ import clsx from 'clsx';
 import {
   LayoutDashboard,
   Info,
-  Activity,
   FlaskConical,
   Github,
   User,
@@ -17,9 +16,12 @@ import {
   Workflow,
   Menu as MenuIcon,
   Newspaper,
+  Layers,
+  LineChart,
 } from 'lucide-react';
 import MemberDashboard from './views/MemberDashboard';
-import ChartsView from './views/ChartsView';
+import ModelsArea from './views/models/ModelsArea';
+import IndicatorsArea from './views/indicators/IndicatorsArea';
 import Home from './views/Home';
 import Backtest from './views/Backtest';
 import Profile from './views/Profile';
@@ -113,7 +115,7 @@ export interface SignalData {
   [key: string]: any;
 }
 
-type TabKey = 'dashboard' | 'charts' | 'backtest';
+type TabKey = 'dashboard' | 'models' | 'indicators' | 'lab';
 
 const App: React.FC = () => {
   const [data, setData] = useState<SignalData[]>([]);
@@ -143,9 +145,9 @@ const App: React.FC = () => {
   const tabs = useMemo(
     () => [
       { key: 'dashboard' as const, path: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-5 w-5" /> },
-      // Default to the System subpage under Charts
-      { key: 'charts' as const, path: '/charts/system', label: 'Charts', icon: <Activity className="h-5 w-5" /> },
-      { key: 'backtest' as const, path: '/backtest', label: 'Backtest', icon: <FlaskConical className="h-5 w-5" /> },
+      { key: 'models' as const, path: '/models', label: 'Models', icon: <Layers className="h-5 w-5" /> },
+      { key: 'indicators' as const, path: '/indicators', label: 'Indicators', icon: <LineChart className="h-5 w-5" /> },
+      { key: 'lab' as const, path: '/lab', label: 'Lab', icon: <FlaskConical className="h-5 w-5" /> },
     ],
     []
   );
@@ -153,14 +155,13 @@ const App: React.FC = () => {
   const activeTab: TabKey | false = useMemo(() => {
     const p = location.pathname;
     if (p === '/dashboard' || p.startsWith('/dashboard/')) return 'dashboard';
-    const found = tabs.find((t) => p === t.path);
-    if (found) return found.key;
-    // Treat any /charts/* route as the Charts tab
-    if (p.startsWith('/charts')) return 'charts';
+    if (p.startsWith('/models')) return 'models';
+    if (p.startsWith('/indicators')) return 'indicators';
+    if (p === '/lab' || p === '/backtest') return 'lab';
     // Home/docs/reference pages shouldn't highlight a bottom-nav item
     if (p === '/' || p.startsWith('/docs') || p.startsWith('/news') || p === '/api-docs' || p === '/strategy-builder') return false;
     return 'dashboard';
-  }, [location.pathname, tabs]);
+  }, [location.pathname]);
 
   const goToTab = (key: TabKey) => {
     const t = tabs.find((x) => x.key === key);
@@ -169,15 +170,16 @@ const App: React.FC = () => {
 
   const requiresMemberAccess = useMemo(() => {
     const p = location.pathname;
-    return p === '/dashboard'
-      || p.startsWith('/dashboard/')
-      || p === '/scores'
-      || p === '/signals';
+    return p === '/dashboard' || p.startsWith('/dashboard/');
   }, [location.pathname]);
 
   const isPublicDataRoute = useMemo(() => {
     const p = location.pathname;
-    return p === '/backtest' || p.startsWith('/charts');
+    return p === '/lab'
+      || p === '/backtest'
+      || p.startsWith('/models')
+      || p.startsWith('/indicators')
+      || p.startsWith('/charts');
   }, [location.pathname]);
 
   const authRedirectTo = requiresMemberAccess
@@ -214,6 +216,9 @@ const App: React.FC = () => {
             active: location.pathname === '/dashboard' || location.pathname.startsWith('/dashboard/'),
           }]
         : []),
+      { key: 'models', path: '/models', label: 'Models', active: location.pathname.startsWith('/models') },
+      { key: 'indicators', path: '/indicators', label: 'Indicators', active: location.pathname.startsWith('/indicators') },
+      { key: 'lab', path: '/lab', label: 'Lab', active: location.pathname === '/lab' || location.pathname === '/backtest' },
       ...(isAuthenticated
         ? [
             {
@@ -224,10 +229,8 @@ const App: React.FC = () => {
             },
           ]
         : []),
-      { key: 'docs', path: '/docs', label: 'Docs', active: docsActive },
       { key: 'news', path: '/news', label: 'News', active: location.pathname.startsWith('/news') },
-      { key: 'charts', path: '/charts/system', label: 'Charts', active: location.pathname.startsWith('/charts') },
-      { key: 'backtest', path: '/backtest', label: 'Backtest', active: location.pathname === '/backtest' },
+      { key: 'docs', path: '/docs', label: 'Docs', active: docsActive },
     ];
   }, [isAuthenticated, location.pathname, showDesktopDashboard]);
 
@@ -476,25 +479,36 @@ const App: React.FC = () => {
  
                     <MenuItem
                       component={Link}
-                      to="/charts/system"
+                      to="/models"
                       onClick={() => setMobilePublicNavEl(null)}
                       sx={{ color: '#dce2f7', py: 1.25 }}
                     >
                       <ListItemIcon sx={{ color: 'inherit', minWidth: 36 }}>
-                        <Activity size={18} />
+                        <Layers size={18} />
                       </ListItemIcon>
-                      <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Charts</ListItemText>
+                      <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Models</ListItemText>
                     </MenuItem>
                     <MenuItem
                       component={Link}
-                      to="/backtest"
+                      to="/indicators"
+                      onClick={() => setMobilePublicNavEl(null)}
+                      sx={{ color: '#dce2f7', py: 1.25 }}
+                    >
+                      <ListItemIcon sx={{ color: 'inherit', minWidth: 36 }}>
+                        <LineChart size={18} />
+                      </ListItemIcon>
+                      <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Indicators</ListItemText>
+                    </MenuItem>
+                    <MenuItem
+                      component={Link}
+                      to="/lab"
                       onClick={() => setMobilePublicNavEl(null)}
                       sx={{ color: '#dce2f7', py: 1.25 }}
                     >
                       <ListItemIcon sx={{ color: 'inherit', minWidth: 36 }}>
                         <FlaskConical size={18} />
                       </ListItemIcon>
-                      <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Backtest</ListItemText>
+                      <ListItemText primaryTypographyProps={{ fontWeight: 700 }}>Lab</ListItemText>
                     </MenuItem>
                     <Divider sx={{ borderColor: 'rgba(148,163,184,0.15)', my: 0.5 }} />
                     <MenuItem
@@ -617,16 +631,36 @@ const App: React.FC = () => {
           <Route path="/docs/signal-builder" element={<DocsSignalBuilder />} />
           <Route path="/news" element={<News />} />
           <Route path="/news/:slug" element={<NewsArticle />} />
-          <Route path="/signals" element={<Navigate to="/dashboard/signals" replace />} />
-          <Route path="/scores" element={<Navigate to="/dashboard/scores" replace />} />
+
+          {/* Legacy signal/score redirects -> core-macro model */}
+          <Route path="/signals" element={<Navigate to="/models/core-macro/signals" replace />} />
+          <Route path="/scores" element={<Navigate to="/models/core-macro/scores" replace />} />
+          <Route path="/dashboard/signals" element={<Navigate to="/models/core-macro/signals" replace />} />
+          <Route path="/dashboard/scores" element={<Navigate to="/models/core-macro/scores" replace />} />
           <Route
-            path="/dashboard/*"
+            path="/dashboard"
             element={gateMemberRoute(
               <MemberDashboard current={lastData as SignalData} history={data} />,
             )}
           />
-          <Route path="/charts/*" element={renderDataRoute(<ChartsView data={data} />)} />
-          <Route path="/backtest" element={renderDataRoute(<Backtest data={data} />)} />
+
+          {/* Legacy /charts/* redirects -> Models / Indicators */}
+          <Route path="/charts/system" element={<Navigate to="/models/core-macro/charts" replace />} />
+          <Route path="/charts/cqm" element={<Navigate to="/models/cqm/charts" replace />} />
+          <Route path="/charts/bottom" element={<Navigate to="/models/bottom/charts" replace />} />
+          <Route path="/charts/valuation" element={<Navigate to="/indicators/valuation" replace />} />
+          <Route path="/charts/liquidity" element={<Navigate to="/indicators/liquidity" replace />} />
+          <Route path="/charts/global" element={<Navigate to="/indicators/liquidity" replace />} />
+          <Route path="/charts/business" element={<Navigate to="/indicators/business" replace />} />
+          <Route path="/charts/usd" element={<Navigate to="/indicators/usd" replace />} />
+          <Route path="/charts" element={<Navigate to="/models" replace />} />
+          <Route path="/charts/*" element={<Navigate to="/models" replace />} />
+
+          {/* New model-centric structure */}
+          <Route path="/models/*" element={renderDataRoute(<ModelsArea data={data} onOpenAuth={openAuth} />)} />
+          <Route path="/indicators/*" element={renderDataRoute(<IndicatorsArea data={data} />)} />
+          <Route path="/lab" element={renderDataRoute(<Backtest data={data} />)} />
+          <Route path="/backtest" element={<Navigate to="/lab" replace />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/admin" element={<Admin />} />
           <Route path="/bot" element={<BotPage />} />

@@ -27,6 +27,12 @@ import {
   Typography,
 } from '@mui/material';
 import { Activity, Banknote, Pause, Play, RefreshCw, Save, Settings as SettingsIcon, TrendingUp } from 'lucide-react';
+import {
+  CQM_DEFAULT_BTC_SELL_FRACTION,
+  CQM_DEFAULT_MAX_CASH_FRACTION,
+  CQM_DEFAULT_SELL_THRESHOLD,
+  CQM_FAIR_RISK,
+} from '../../utils/cqmSizing';
 
 /**
  * CQM Risk DCA Bot admin panel (`/bot`).
@@ -53,6 +59,14 @@ interface StatusResponse {
     amount_gbp: number;
     signed_gbp: number;
     estimated_btc_size: number | null;
+  } | null;
+  virtual_ledger: {
+    cash_gbp: number;
+    btc_held: number;
+    deposits_gbp: number;
+    buys_gbp: number;
+    sells_gbp: number;
+    periods_accrued: number;
   } | null;
   frequency_guard: {
     can_execute: boolean;
@@ -254,13 +268,41 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
   const btcGbp = status?.product?.price ?? orders?.stats.current_btc_gbp ?? null;
   const btcValueGbp = balances && btcGbp ? balances.btc * btcGbp : null;
 
-  const targetLine = useMemo(() => {
-    if (!status || !status.risk || !status.target) return null;
-    const risk = status.risk.value;
+  /**
+   * Mirrors computeCqmDynamicTrade so the panel can explain *why* the target
+   * is what it is. The displayed amount itself always comes from the server.
+   */
+  const sizing = useMemo(() => {
+    if (!status?.risk || !status.virtual_ledger) return null;
+    const r = status.risk.value;
+    const base = status.settings.base_amount_gbp;
+    const cash = status.virtual_ledger.cash_gbp;
+    const btcHeld = status.virtual_ledger.btc_held;
+    const price = status.product?.price ?? null;
+
+    if (r < CQM_FAIR_RISK) {
+      const taper = (CQM_FAIR_RISK - r) / CQM_FAIR_RISK;
+      const cashPct = CQM_DEFAULT_MAX_CASH_FRACTION * taper;
+      const baseLeg = Math.max(0, base * (1 - 2 * r));
+      const cashLeg = cashPct * cash;
+      return { kind: 'buy' as const, taper, cashPct, baseLeg, cashLeg, cash };
+    }
+    if (r > CQM_DEFAULT_SELL_THRESHOLD) {
+      const btcValue = price != null ? btcHeld * price : null;
+      const sellScale = (r - CQM_DEFAULT_SELL_THRESHOLD) / (1 - CQM_DEFAULT_SELL_THRESHOLD);
+      const size = btcValue != null
+        ? Math.max(base, CQM_DEFAULT_BTC_SELL_FRACTION * btcValue)
+        : base;
+      return { kind: 'sell' as const, sellScale, size, btcValue };
+    }
+    return { kind: 'hold' as const };
+  }, [status]);
+
+  const targetHeadline = useMemo(() => {
+    if (!status?.target) return null;
     const tgt = status.target;
-    const riskPct = (risk * 100).toFixed(2);
-    const sign = tgt.signed_gbp >= 0 ? '+' : '−';
-    return `£${status.settings.base_amount_gbp.toFixed(2)} × (1 − 2 × ${riskPct}%) = ${sign}£${Math.abs(tgt.signed_gbp).toFixed(2)} (${tgt.side})`;
+    if (tgt.side === 'NONE') return 'No trade (hold)';
+    return `${tgt.side} £${tgt.amount_gbp.toFixed(2)}`;
   }, [status]);
 
   if (loading) {
@@ -356,6 +398,20 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
             value={status?.risk ? `${(status.risk.value * 100).toFixed(2)}%` : '—'}
             sub={status?.risk?.signal_date ? `signal date ${status.risk.signal_date}` : undefined}
           />
+          <KV
+            label="Strategy cash (ledger)"
+            value={status?.virtual_ledger ? `£${status.virtual_ledger.cash_gbp.toFixed(2)}` : '—'}
+            sub={status?.virtual_ledger
+              ? `£${status.virtual_ledger.deposits_gbp.toFixed(0)} deposited over ${status.virtual_ledger.periods_accrued} slots`
+              : undefined}
+          />
+          <KV
+            label="Strategy BTC (ledger)"
+            value={status?.virtual_ledger ? status.virtual_ledger.btc_held.toFixed(8) : '—'}
+            sub={status?.virtual_ledger && btcGbp != null
+              ? `≈ £${(status.virtual_ledger.btc_held * btcGbp).toFixed(2)}`
+              : undefined}
+          />
         </Stack>
 
         <Divider sx={{ mb: 2 }} />
@@ -367,7 +423,7 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
             </Typography>
             <Stack direction="row" alignItems="center" spacing={1.5}>
               <Typography variant="h6" sx={{ fontWeight: 800, fontFamily: 'monospace' }}>
-                {targetLine ?? '—'}
+                {targetHeadline ?? '—'}
               </Typography>
               {status?.target && (
                 <Chip
@@ -381,6 +437,29 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
                 />
               )}
             </Stack>
+            {sizing?.kind === 'buy' && status?.risk && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontFamily: 'monospace' }}>
+                buy = max(base leg, cash leg), capped at strategy cash
+                <br />
+                base leg £{sizing.baseLeg.toFixed(2)} = £{status.settings.base_amount_gbp.toFixed(0)} × (1 − 2 × {(status.risk.value * 100).toFixed(1)}%)
+                <br />
+                cash leg £{sizing.cashLeg.toFixed(2)} = {(sizing.cashPct * 100).toFixed(2)}% of £{sizing.cash.toFixed(2)} cash
+                ({(CQM_DEFAULT_MAX_CASH_FRACTION * 100).toFixed(0)}% × taper {(sizing.taper * 100).toFixed(0)}%)
+              </Typography>
+            )}
+            {sizing?.kind === 'sell' && status?.risk && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontFamily: 'monospace' }}>
+                sell = max(base, {(CQM_DEFAULT_BTC_SELL_FRACTION * 100).toFixed(0)}% of BTC value{sizing.btcValue != null ? ` £${sizing.btcValue.toFixed(2)}` : ''})
+                × scale {(sizing.sellScale * 100).toFixed(0)}%, capped at BTC held
+                <br />
+                scale = (Risk {(status.risk.value * 100).toFixed(1)}% − {(CQM_DEFAULT_SELL_THRESHOLD * 100).toFixed(0)}%) / {(100 - CQM_DEFAULT_SELL_THRESHOLD * 100).toFixed(0)}%
+              </Typography>
+            )}
+            {sizing?.kind === 'hold' && status?.risk && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontFamily: 'monospace' }}>
+                hold zone: {(CQM_FAIR_RISK * 100).toFixed(0)}% ≤ Risk {(status.risk.value * 100).toFixed(1)}% ≤ {(CQM_DEFAULT_SELL_THRESHOLD * 100).toFixed(0)}% — no buy or sell
+              </Typography>
+            )}
             {status?.target?.side === 'SELL' && status.target.estimated_btc_size != null && (
               <Typography variant="caption" color="text.secondary">
                 Estimated BTC to sell: {status.target.estimated_btc_size.toFixed(8)}
@@ -458,7 +537,13 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
         </Stack>
 
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.5, fontFamily: 'monospace' }}>
-          target_trade_gbp = base × (1 − 2 × Risk) · BUY when positive · SELL when negative · skip when |target| &lt; £1
+          Dynamic sizing on the strategy's virtual ledger (deposits + own orders, not exchange balances):
+          <br />
+          Risk &lt; {(CQM_FAIR_RISK * 100).toFixed(0)}% → BUY max(base × (1 − 2 × Risk), {(CQM_DEFAULT_MAX_CASH_FRACTION * 100).toFixed(0)}% × taper × cash), capped at cash
+          <br />
+          {(CQM_FAIR_RISK * 100).toFixed(0)}–{(CQM_DEFAULT_SELL_THRESHOLD * 100).toFixed(0)}% → HOLD ·
+          Risk &gt; {(CQM_DEFAULT_SELL_THRESHOLD * 100).toFixed(0)}% → SELL max(base, {(CQM_DEFAULT_BTC_SELL_FRACTION * 100).toFixed(0)}% of BTC) × scale, capped at BTC held ·
+          skip when &lt; £1
         </Typography>
 
         {settingsMessage && (
@@ -631,6 +716,11 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
             <KV
               label="Reference BTC-GBP"
               value={btcGbp != null ? `£${btcGbp.toLocaleString()}` : '—'}
+              mono
+            />
+            <KV
+              label="Strategy cash (ledger)"
+              value={status?.virtual_ledger ? `£${status.virtual_ledger.cash_gbp.toFixed(2)}` : '—'}
               mono
             />
             {status?.target?.side === 'SELL' && status.target.estimated_btc_size != null && (

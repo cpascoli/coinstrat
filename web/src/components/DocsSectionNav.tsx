@@ -13,8 +13,6 @@ export const DOCS_NAV_ITEMS: DocsNavItem[] = [
   { label: 'Docs Home', path: '/docs', icon: 'info' },
   { label: 'Architecture', path: '/docs/architecture', icon: 'rocket_launch' },
   { label: 'Data Feeds', path: '/docs/data', icon: 'database' },
-  { label: 'Scores', path: '/docs/scores', icon: 'query_stats' },
-  { label: 'Signals', path: '/docs/signals', icon: 'verified_user' },
   { label: 'Signal Builder', path: '/docs/signal-builder', icon: 'construction' },
 ];
 

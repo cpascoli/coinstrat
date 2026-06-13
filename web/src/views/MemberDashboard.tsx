@@ -1,123 +1,79 @@
-import React, { useMemo } from 'react';
-import { Link as RouterLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import {
-  Box,
-  List,
-  ListItemButton,
-  ListItemIcon,
-  ListItemText,
-  Paper,
-  Tab,
-  Tabs,
-} from '@mui/material';
-import { useTheme } from '@mui/material/styles';
-import useMediaQuery from '@mui/material/useMediaQuery';
-import { BarChart3, Binary, LayoutDashboard } from 'lucide-react';
+import React from 'react';
+import { Link as RouterLink } from 'react-router-dom';
+import { Box, Button, Chip, Paper, Stack, Typography } from '@mui/material';
+import { LayoutDashboard } from 'lucide-react';
 import { SignalData } from '../App';
-import Dashboard from './Dashboard';
-import LogicFlow from './LogicFlow';
-import ScoreBreakdown from './ScoreBreakdown';
-
-const SECTIONS = [
-  { segment: '' as const, label: 'Overview', path: '/dashboard', Icon: LayoutDashboard },
-  { segment: 'signals' as const, label: 'Signals', path: '/dashboard/signals', Icon: Binary },
-  { segment: 'scores' as const, label: 'Scores', path: '/dashboard/scores', Icon: BarChart3 },
-] as const;
+import { MODELS, type ModelState } from '../models/registry';
 
 export interface MemberDashboardProps {
   current: SignalData;
   history: SignalData[];
 }
 
-const MemberDashboard: React.FC<MemberDashboardProps> = ({ current, history }) => {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const theme = useTheme();
-  const isMdUp = useMediaQuery(theme.breakpoints.up('md'));
+function toneColor(tone: ModelState['tone']): { border: string; text: string } {
+  switch (tone) {
+    case 'pos':
+      return { border: '#22c55e', text: '#bbf7d0' };
+    case 'neg':
+      return { border: '#ef4444', text: '#fecaca' };
+    case 'neutral':
+      return { border: '#94a3b8', text: '#e2e8f0' };
+    default: {
+      const exhaustive: never = tone;
+      return exhaustive;
+    }
+  }
+}
 
-  const sectionIndex = useMemo(() => {
-    const p = location.pathname.replace(/\/$/, '') || '/dashboard';
-    if (p === '/dashboard/signals') return 1;
-    if (p === '/dashboard/scores') return 2;
-    return 0;
-  }, [location.pathname]);
-
-  const handleTabChange = (_: React.SyntheticEvent, idx: number) => {
-    navigate(SECTIONS[idx].path);
-  };
-
-  return (
-    <Box>
-      {!isMdUp && (
-        <Tabs
-          value={sectionIndex}
-          onChange={handleTabChange}
-          variant="fullWidth"
-          sx={{
-            mb: 2,
-            borderBottom: 1,
-            borderColor: 'divider',
-            '& .MuiTab-root': { fontWeight: 700, textTransform: 'none', minHeight: 48 },
-          }}
-        >
-          {SECTIONS.map(({ label }) => (
-            <Tab key={label} label={label} />
-          ))}
-        </Tabs>
-      )}
-
-      <Box sx={{ display: 'flex', gap: 3, alignItems: 'flex-start' }}>
-        {isMdUp && (
-          <Paper
-            variant="outlined"
-            sx={{
-              width: 220,
-              flexShrink: 0,
-              p: 0.5,
-              borderRadius: 2,
-              borderColor: 'rgba(148,163,184,0.24)',
-              bgcolor: 'background.paper',
-            }}
-          >
-            <List component="nav" dense disablePadding>
-              {SECTIONS.map((s, idx) => {
-                const selected = sectionIndex === idx;
-                return (
-                  <ListItemButton
-                    key={s.label}
-                    component={RouterLink}
-                    to={s.path}
-                    selected={selected}
-                    sx={{
-                      borderRadius: 1,
-                      '&.Mui-selected': { bgcolor: 'action.selected' },
-                    }}
-                  >
-                    <ListItemIcon sx={{ minWidth: 40, color: 'inherit' }}>
-                      <s.Icon size={20} strokeWidth={2} />
-                    </ListItemIcon>
-                    <ListItemText
-                      primary={s.label}
-                      primaryTypographyProps={{ fontWeight: 700 }}
-                    />
-                  </ListItemButton>
-                );
-              })}
-            </List>
-          </Paper>
-        )}
-
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Routes>
-            <Route index element={<Dashboard current={current} history={history} />} />
-            <Route path="signals" element={<LogicFlow current={current} />} />
-            <Route path="scores" element={<ScoreBreakdown current={current} />} />
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
-          </Routes>
-        </Box>
+/**
+ * Cross-model "today's state" roll-up: one card per model summarizing its current
+ * reading, with deep links into each model's deep dive.
+ */
+const MemberDashboard: React.FC<MemberDashboardProps> = ({ history }) => (
+  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, pb: 1.5, borderBottom: '1px solid', borderColor: 'divider' }}>
+      <LayoutDashboard className="h-8 w-8 text-blue-600" />
+      <Box>
+        <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: -0.5 }}>Dashboard</Typography>
+        <Typography variant="body2" color="text.secondary">
+          Where every CoinStrat model stands today.
+        </Typography>
       </Box>
     </Box>
-  );
-};
+
+    <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr', lg: '1fr 1fr 1fr' } }}>
+      {MODELS.map((model) => {
+        const state = model.currentState(history);
+        const c = state ? toneColor(state.tone) : null;
+        const Icon = model.Icon;
+        return (
+          <Paper key={model.id} sx={{ p: 2.5, display: 'flex', flexDirection: 'column', gap: 1.25, height: '100%' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
+              <Icon size={20} className="text-blue-400" />
+              <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>{model.name}</Typography>
+            </Box>
+            <Box>
+              {state && c
+                ? <Chip size="small" label={state.headline} variant="outlined" sx={{ borderColor: c.border, color: c.text, fontWeight: 700 }} />
+                : <Chip size="small" label="—" variant="outlined" />}
+            </Box>
+            {state && (
+              <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                {state.metrics.map((m) => (
+                  <Chip key={m.label} size="small" label={`${m.label}: ${m.value}`} sx={{ bgcolor: 'rgba(148,163,184,0.16)', color: '#cbd5e1' }} />
+                ))}
+              </Stack>
+            )}
+            <Box sx={{ flex: 1 }} />
+            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+              <Button component={RouterLink} to={`/models/${model.id}`} variant="contained" size="small" sx={{ fontWeight: 700 }}>Open</Button>
+              <Button component={RouterLink} to={`/models/${model.id}/charts`} variant="outlined" size="small" sx={{ fontWeight: 700 }}>Charts</Button>
+            </Stack>
+          </Paper>
+        );
+      })}
+    </Box>
+  </Box>
+);
 
 export default MemberDashboard;

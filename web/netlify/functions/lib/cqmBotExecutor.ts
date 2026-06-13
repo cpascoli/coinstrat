@@ -8,8 +8,13 @@
  *      cron at 00:00 UTC every day.
  *
  * Both callers use the same business logic: pause guard → frequency hard
- * guard → execution lease → CQM Risk → target sizing → BTC-GBP price →
- * pending row → market order → poll for fills → persist outcome.
+ * guard → execution lease → CQM Risk → BTC-GBP price → virtual ledger
+ * balances → dynamic target sizing → pending row → market order → poll for
+ * fills → persist outcome.
+ *
+ * Sizing uses the strategy's virtual balances (accrued base deposits + the
+ * bot's own executed orders), never the exchange balances, so funds outside
+ * the bot's mandate are untouched.
  *
  * Returns a discriminated `ExecutionResult` rather than HTTP responses so
  * each caller can adapt the result to its own envelope (JSON HTTP for the
@@ -26,6 +31,7 @@ import {
   computeTarget,
   getLastSubmittedOrder,
   loadSettings,
+  loadVirtualBalances,
   releaseExecutionLease,
   tryAcquireExecutionLease,
 } from './cqmBot';
@@ -153,18 +159,7 @@ async function executeWithLease(
     };
   }
 
-  const target = computeTarget(settings.base_amount_gbp, risk.risk);
-  if (target.side === 'NONE') {
-    await abandonLease();
-    return {
-      kind: 'skipped',
-      reason: 'no_trade_due',
-      message: 'Target trade is below the minimum (Risk ≈ 50%); nothing to do.',
-      details: { risk: risk.risk, signed_gbp: target.signedGbp },
-    };
-  }
-
-  // ---- BTC-GBP reference price (needed for SELL sizing + audit) ---------
+  // ---- BTC-GBP reference price (needed for dynamic sizing + audit) ------
   let product;
   try {
     product = await getProduct('BTC-GBP');
@@ -182,6 +177,32 @@ async function executeWithLease(
     return {
       kind: 'failed',
       message: 'Coinbase returned an invalid BTC-GBP price',
+    };
+  }
+
+  // ---- Virtual ledger balances + dynamic target sizing -------------------
+  // Balances come from the bot's own order ledger + accrued base deposits,
+  // never the exchange account (which can hold assets outside the mandate).
+  const ledger = await loadVirtualBalances(settings);
+  const target = computeTarget({
+    baseGbp: settings.base_amount_gbp,
+    risk: risk.risk,
+    cashGbp: ledger.cashGbp,
+    btcHeld: ledger.btcHeld,
+    btcGbp: btcGbpPrice,
+  });
+  if (target.side === 'NONE') {
+    await abandonLease();
+    return {
+      kind: 'skipped',
+      reason: 'no_trade_due',
+      message: 'No trade due (hold zone or below minimum); nothing to do.',
+      details: {
+        risk: risk.risk,
+        signed_gbp: target.signedGbp,
+        ledger_cash_gbp: ledger.cashGbp,
+        ledger_btc_held: ledger.btcHeld,
+      },
     };
   }
 
@@ -272,7 +293,7 @@ async function executeWithLease(
       base_filled: baseFilled,
       quote_filled: quoteFilled,
       fees_gbp: feesGbp,
-      raw_response: { submit: submitResp.response, fill: filled },
+      raw_response: { submit: submitResp.response, fill: filled, ledger },
     })
     .eq('id', orderRowId)
     .select('*')

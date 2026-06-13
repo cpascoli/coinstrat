@@ -20,10 +20,36 @@ import {
 
 interface Props {
   data: SignalData[];
+  /**
+   * When provided, ChartsView renders exactly these sections (in order) as a
+   * composable, embedded block: the page title and the section Tabs are hidden
+   * and the component is no longer driven by the URL. Used by the Models and
+   * Indicators areas to reuse the chart library. When omitted, the legacy
+   * route-driven single-section behavior is preserved.
+   */
+  sections?: ChartsSection[];
+  /** Hide the page title + section tab bar (set automatically when `sections` is used). */
+  embedded?: boolean;
+  /** Show the range (1Y/2Y/5Y/10Y/All) toggle. Defaults to true. */
+  showRange?: boolean;
+  /**
+   * Optional explicit start date (YYYY-MM-DD). When set, charts are windowed to
+   * `Date >= startDate`, overriding the internal range selector. Used by the CQM
+   * simulator so the embedded CQM Risk chart matches the simulation interval.
+   */
+  startDate?: string;
+  /**
+   * Optional explicit end date (YYYY-MM-DD, inclusive). Pairs with `startDate`
+   * to window charts to a closed interval (used by the CQM simulator).
+   */
+  endDate?: string;
 }
 
-type RangeKey = 'all' | '10y' | '5y' | '2y' | '1y';
-type ChartsSection = 'system' | 'cqm' | 'bottom' | 'valuation' | 'liquidity' | 'business' | 'usd';
+export type RangeKey = 'all' | '10y' | '5y' | '2y' | '1y';
+// 'cqm-risk' is a granular section that renders only the CQM Risk time-series
+// chart (used embedded in the CQM backtest simulator). It is not exposed in the
+// charts navigation.
+export type ChartsSection = 'system' | 'cqm' | 'cqm-risk' | 'bottom' | 'valuation' | 'liquidity' | 'business' | 'usd';
 type CqmBandScale = 'semi-log' | 'log-log';
 
 const CQM_QR_GENESIS_MS = new Date('2009-01-01').getTime();
@@ -272,14 +298,17 @@ function lookupRiskPctAtPrice(
   return Number.isFinite(best.riskPct) ? best.riskPct : null;
 }
 
-const ChartsView: React.FC<Props> = ({ data }) => {
+const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, showRange = true, startDate, endDate }) => {
   const [range, setRange] = useState<RangeKey>('all');
   const [cqmBandScale, setCqmBandScale] = useState<CqmBandScale>('semi-log');
   const [cqmBrushRange, setCqmBrushRange] = useState<{ startIndex: number; endIndex: number } | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
 
-  const section: ChartsSection = useMemo(() => {
+  const composed = Array.isArray(sections) && sections.length > 0;
+  const embedded = embeddedProp ?? composed;
+
+  const routeSection: ChartsSection = useMemo(() => {
     const m = location.pathname.match(/^\/charts\/([^/]+)/);
     const seg = (m?.[1] ?? 'system').toLowerCase();
     if (seg === 'system' || seg === 'cqm' || seg === 'bottom' || seg === 'valuation' || seg === 'liquidity' || seg === 'business' || seg === 'usd') return seg as ChartsSection;
@@ -287,7 +316,16 @@ const ChartsView: React.FC<Props> = ({ data }) => {
     return 'system';
   }, [location.pathname]);
 
+  const visibleSections = useMemo<Set<ChartsSection>>(
+    () => (composed ? new Set(sections) : new Set([routeSection])),
+    [composed, sections, routeSection],
+  );
+  const show = (s: ChartsSection) => visibleSections.has(s);
+  const section = routeSection;
+
   useEffect(() => {
+    // Composed/embedded mode is not URL-driven, so skip route normalization.
+    if (composed) return;
     // Normalize /charts and unknown subroutes -> /charts/system
     if (location.pathname === '/charts' || location.pathname === '/charts/') {
       navigate('/charts/system', { replace: true });
@@ -298,7 +336,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
     if (seg && seg !== 'system' && seg !== 'cqm' && seg !== 'bottom' && seg !== 'valuation' && seg !== 'liquidity' && seg !== 'global' && seg !== 'business' && seg !== 'usd') {
       navigate('/charts/system', { replace: true });
     }
-  }, [location.pathname, navigate]);
+  }, [location.pathname, navigate, composed]);
 
   const chartData = useMemo(() => {
     if (!data || data.length === 0) return [];
@@ -316,7 +354,14 @@ const ChartsView: React.FC<Props> = ({ data }) => {
             )
           );
 
-    const filtered = start ? data.filter((d) => new Date(d.Date) >= start) : data;
+    // An explicit `startDate`/`endDate` prop (used by the CQM simulator) takes
+    // precedence over the internal range selector so the chart matches the
+    // simulation window.
+    const filtered = (startDate || endDate)
+      ? data.filter((d) => (!startDate || d.Date >= startDate) && (!endDate || d.Date <= endDate))
+      : start
+        ? data.filter((d) => new Date(d.Date) >= start)
+        : data;
 
     return filtered.map(d => {
       let dateObj: Date;
@@ -342,7 +387,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
         BTC_OI_DRAWDOWN_90D_PCT: typeof d.BTC_OI_DRAWDOWN_90D === 'number' ? d.BTC_OI_DRAWDOWN_90D * 100 : null,
       };
     });
-  }, [data, range]);
+  }, [data, range, startDate, endDate]);
 
   if (!data || data.length === 0) {
     return (
@@ -560,6 +605,8 @@ const ChartsView: React.FC<Props> = ({ data }) => {
   // Fit on the full BTC history once; the fit is then evaluated against the
   // current range-filtered chartData for plotting.
   const cqmFit: CQMFit | null = useMemo(() => {
+    // Only fit when a CQM chart is actually shown (the fit is the heaviest compute).
+    if (!visibleSections.has('cqm') && !visibleSections.has('cqm-risk')) return null;
     if (!data || data.length < 365) return null;
     const points: { date: string; ts: number; price: number }[] = [];
     for (const d of data) {
@@ -577,7 +624,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       console.warn('CQM fit failed:', err);
       return null;
     }
-  }, [data]);
+  }, [data, visibleSections]);
 
   const cqmChartData = useMemo(() => {
     const withDays = (row: Record<string, unknown>) => ({
@@ -718,14 +765,18 @@ const ChartsView: React.FC<Props> = ({ data }) => {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, pb: 1.5, borderBottom: '1px solid', borderColor: 'divider' }}>
-        <Activity className="h-8 w-8 text-blue-600" />
-        <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: -0.5 }}>
-          Charts of Key Signals
-        </Typography>
-      </Box>
+      {!embedded && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, pb: 1.5, borderBottom: '1px solid', borderColor: 'divider' }}>
+          <Activity className="h-8 w-8 text-blue-600" />
+          <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: -0.5 }}>
+            Charts of Key Signals
+          </Typography>
+        </Box>
+      )}
 
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
+      {(!embedded || showRange) && (
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: embedded ? 'flex-end' : 'space-between', gap: 2, flexWrap: 'wrap' }}>
+        {!embedded && (
         <Tabs
           value={section}
           onChange={(_, v: ChartsSection) => navigate(`/charts/${v}`)}
@@ -741,7 +792,9 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           <Tab value="business" label="Business Cycle" sx={{ minHeight: 40 }} />
           <Tab value="usd" label="USD" sx={{ minHeight: 40 }} />
         </Tabs>
+        )}
 
+        {showRange && (
         <ToggleButtonGroup
           color="primary"
           exclusive
@@ -755,10 +808,12 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           <ToggleButton value="10y">10Y</ToggleButton>
           <ToggleButton value="all">All</ToggleButton>
         </ToggleButtonGroup>
+        )}
       </Box>
+      )}
 
       {/* System State: BTCUSD with CORE/MACRO background shading */}
-      {section === 'system' && (
+      {show('system') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -813,7 +868,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* Bottom Accumulation Score */}
-      {section === 'bottom' && (
+      {show('bottom') && (
       <>
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
@@ -933,7 +988,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* Main Chart: BTC + Liquidity Overlay + LIQ_SCORE background shading */}
-      {section === 'liquidity' && (
+      {show('liquidity') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1045,7 +1100,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* US Net Liquidity Inputs */}
-      {section === 'liquidity' && (
+      {show('liquidity') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1124,7 +1179,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* MVRV Valuation: BTCUSD shaded by MVRV bands */}
-      {section === 'valuation' && (
+      {show('valuation') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1181,7 +1236,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* MVRV ratio: dual-axis with key valuation thresholds */}
-      {section === 'valuation' && (
+      {show('valuation') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1223,7 +1278,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* Price Regime: BTCUSD vs 40W MA with regime shading */}
-      {section === 'valuation' && (
+      {show('valuation') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1276,7 +1331,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* Long-Term Holder SOPR */}
-      {section === 'valuation' && (
+      {show('valuation') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1318,7 +1373,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* Holder realized prices (STH / LTH cost basis vs spot) */}
-      {section === 'valuation' && (
+      {show('valuation') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1358,7 +1413,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* Percent Addresses in Profit — Euphoria Exhaustion exit logic */}
-      {section === 'valuation' && (
+      {show('valuation') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1417,7 +1472,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* NUPL — All Holders (derived from MVRV, used in VAL_SCORE) */}
-      {section === 'valuation' && (
+      {show('valuation') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1461,7 +1516,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* NUPL — Long-Term Holders Only (from BGeometrics lth_nupl) */}
-      {section === 'valuation' && (
+      {show('valuation') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1504,7 +1559,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* G3 Global Liquidity: BTC + G3 composite */}
-      {section === 'liquidity' && (
+      {show('liquidity') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1563,7 +1618,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* G3 Global Liquidity: components breakdown */}
-      {section === 'liquidity' && (
+      {show('liquidity') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1607,7 +1662,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* G3 Global Liquidity: YoY */}
-      {section === 'liquidity' && (
+      {show('liquidity') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1674,7 +1729,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* BTC over Business Cycle Score shading */}
-      {section === 'business' && (
+      {show('business') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1730,7 +1785,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* Business Cycle: inputs (moved below BTC + business cycle shading) */}
-      {section === 'business' && (
+      {show('business') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1785,7 +1840,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* ISM Manufacturing PMI */}
-      {section === 'business' && (
+      {show('business') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1825,7 +1880,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* USD Regime Inputs (DTWEXBGS proxy) */}
-      {section === 'usd' && (
+      {show('usd') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1942,7 +1997,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* DXY Persistence Regime: BTCUSD shaded by DXY_PERSIST */}
-      {section === 'usd' && (
+      {show('usd') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1993,7 +2048,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* CoinStrat Quantile Model — Price Bands */}
-      {section === 'cqm' && (
+      {show('cqm') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -2001,7 +2056,6 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
             Inspired by BTCAnalytica&apos;s Empirical Quantile Model. Risk uses QR 50% as fair value.
-            Toggle <b>Log-log</b> to plot the same series in the model&apos;s native coordinates: log(price) vs log(days since 2009).
           </Typography>
         </Box>
 
@@ -2024,10 +2078,10 @@ const ChartsView: React.FC<Props> = ({ data }) => {
         >
           <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
             <Chip size="small" variant="outlined" label="BTCUSD" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
-            <Chip size="small" variant="outlined" label="CQM 0.1% (solid floor)" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
-            <Chip size="small" variant="outlined" label="CQM 50% (solid median)" sx={{ borderColor: '#facc15', color: '#fef08a' }} />
-            <Chip size="small" variant="outlined" label="CQM 99.9% (solid ceiling)" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
-            <Chip size="small" variant="outlined" label="QR 0.1% / 50% / 99.9% (dotted)" sx={{ borderColor: '#e0a81f', color: '#fde68a' }} />
+            <Chip size="small" variant="outlined" label="CQM 0.1% (floor)" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
+            <Chip size="small" variant="outlined" label="CQM 50% (median)" sx={{ borderColor: '#facc15', color: '#fef08a' }} />
+            <Chip size="small" variant="outlined" label="CQM 99.9% (ceiling)" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
+            <Chip size="small" variant="outlined" label="QR 50% (dotted)" sx={{ borderColor: '#e0a81f', color: '#fde68a' }} />
           </Stack>
           <ToggleButtonGroup
             size="small"
@@ -2145,7 +2199,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* CoinStrat Quantile Model — Trend-Risk Composite */}
-      {section === 'cqm' && (
+      {show('cqm') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -2211,7 +2265,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* CoinStrat Quantile Model — Risk */}
-      {section === 'cqm' && (
+      {(show('cqm') || show('cqm-risk')) && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -2220,7 +2274,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
             CQM Risk maps log(price / QR 50% fair value) through the full-sample empirical residual distribution, with cycle-aware γ and upper-percentile knots.
             <br />
-            DCA rule: <code>daily_usd = base × (1 − 2 × Risk)</code>. Risk ≤ 0% → buy +base, Risk = 50% → flat, Risk ≥ 100% → sell base.
+            DCA rule: <code>daily_usd = base × (1 − 2 × Risk)</code>.
           </Typography>
         </Box>
 
@@ -2257,7 +2311,7 @@ const ChartsView: React.FC<Props> = ({ data }) => {
       )}
 
       {/* CoinStrat Quantile Model — Risk vs Price */}
-      {section === 'cqm' && cqmFit && cqmSnapshot && (
+      {show('cqm') && cqmFit && cqmSnapshot && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>

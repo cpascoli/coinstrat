@@ -19,7 +19,9 @@ import {
   computeTarget,
   getLastSubmittedOrder,
   loadSettings,
+  loadVirtualBalances,
   type BotOrder,
+  type VirtualBalances,
 } from './lib/cqmBot';
 import {
   CoinbaseApiError,
@@ -43,16 +45,19 @@ export const handler: Handler = async (event) => {
     const lastOrder = await getLastSubmittedOrder();
     const guard = computeFrequencyGuard(settings.frequency, lastOrder);
 
-    // Run Coinbase + CQM Risk in parallel; surface partial results on failure.
-    const [balancesResult, productResult, riskResult] = await Promise.allSettled([
+    // Run Coinbase + CQM Risk + ledger in parallel; surface partial results.
+    const [balancesResult, productResult, riskResult, ledgerResult] = await Promise.allSettled([
       getBtcGbpBalances(),
       getProduct('BTC-GBP'),
       computeLatestRisk(),
+      loadVirtualBalances(settings),
     ]);
 
     const balances = balancesResult.status === 'fulfilled' ? balancesResult.value : null;
     const product = productResult.status === 'fulfilled' ? productResult.value : null;
     const risk = riskResult.status === 'fulfilled' ? riskResult.value : null;
+    const ledger: VirtualBalances | null =
+      ledgerResult.status === 'fulfilled' ? ledgerResult.value : null;
 
     const errors: Record<string, string> = {};
     if (balancesResult.status === 'rejected') {
@@ -64,10 +69,23 @@ export const handler: Handler = async (event) => {
     if (riskResult.status === 'rejected') {
       errors.risk = normalizeError(riskResult.reason);
     }
+    if (ledgerResult.status === 'rejected') {
+      errors.ledger = normalizeError(ledgerResult.reason);
+    }
 
     const btcGbpPrice = product ? Number(product.price) : null;
+    // Mirror the executor: dynamic sizing from the virtual ledger when it is
+    // available, otherwise fall back to the legacy flat-fraction preview.
     const target = risk
-      ? computeTarget(settings.base_amount_gbp, risk.risk)
+      ? (ledger && btcGbpPrice
+          ? computeTarget({
+              baseGbp: settings.base_amount_gbp,
+              risk: risk.risk,
+              cashGbp: ledger.cashGbp,
+              btcHeld: ledger.btcHeld,
+              btcGbp: btcGbpPrice,
+            })
+          : computeTarget(settings.base_amount_gbp, risk.risk))
       : null;
     const targetBtcSize = (target && target.side === 'SELL' && btcGbpPrice && btcGbpPrice > 0)
       ? target.amountGbp / btcGbpPrice
@@ -105,6 +123,16 @@ export const handler: Handler = async (event) => {
             estimated_btc_size: targetBtcSize,
           }
         : null,
+      virtual_ledger: ledger
+        ? {
+            cash_gbp: ledger.cashGbp,
+            btc_held: ledger.btcHeld,
+            deposits_gbp: ledger.depositsGbp,
+            buys_gbp: ledger.buysGbp,
+            sells_gbp: ledger.sellsGbp,
+            periods_accrued: ledger.periodsAccrued,
+          }
+        : null,
       frequency_guard: {
         can_execute: settings.enabled
           && guard.canExecute
@@ -132,7 +160,7 @@ function guardReason(
   if (!enabled) return 'Strategy is paused';
   if (!risk) return 'CQM Risk unavailable';
   if (!target) return 'Target trade unavailable';
-  if (target.side === 'NONE') return 'Target trade is below the minimum (Risk ≈ 50%)';
+  if (target.side === 'NONE') return 'No trade due (hold zone or below minimum)';
   if (!guardOk) return 'Next scheduled slot has not been reached';
   return null;
 }

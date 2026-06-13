@@ -227,21 +227,69 @@ function forwardFillFields(daily: SignalRow[], fields: (keyof SignalRow)[]): voi
   }
 }
 
-async function fetchBtcTail(): Promise<DataPoint[]> {
-  const url =
-    `https://min-api.cryptocompare.com/data/v2/histoday` +
-    `?fsym=BTC&tsym=USD&limit=${LOOKBACK_DAYS}`;
+/** Kraken public OHLC: ~720 daily candles, no API key. Close at index 4. */
+async function fetchKrakenBtcDaily(): Promise<DataPoint[]> {
+  const url = 'https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=1440';
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`CryptoCompare BTC: HTTP ${res.status}`);
+  if (!res.ok) throw new Error(`Kraken BTC OHLC: HTTP ${res.status}`);
   const json = (await res.json()) as any;
-  const entries = json?.Data?.Data ?? [];
+  if (Array.isArray(json?.error) && json.error.length > 0) {
+    throw new Error(`Kraken BTC OHLC: ${json.error.join('; ')}`);
+  }
+  const result = json?.result ?? {};
+  const pairKey = Object.keys(result).find((k) => k !== 'last');
+  const candles: any[] = pairKey ? result[pairKey] ?? [] : [];
 
-  return entries
-    .filter((e: any) => typeof e.close === 'number' && e.close > 0)
-    .map((e: any) => ({
-      date: new Date(e.time * 1000).toISOString().split('T')[0],
-      value: e.close as number,
-    }));
+  return candles
+    .map((c) => ({
+      date: new Date(Number(c[0]) * 1000).toISOString().split('T')[0],
+      value: Number(c[4]),
+    }))
+    .filter((p) => Number.isFinite(p.value) && p.value > 0)
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/** Coinbase Exchange candles: ~300 daily candles, no API key, newest first. */
+async function fetchCoinbaseBtcDaily(): Promise<DataPoint[]> {
+  const url = 'https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400';
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Coinbase BTC candles: HTTP ${res.status}`);
+  const candles = (await res.json()) as any[];
+
+  return (Array.isArray(candles) ? candles : [])
+    // Candle layout: [time, low, high, open, close, volume]
+    .map((c) => ({
+      date: new Date(Number(c[0]) * 1000).toISOString().split('T')[0],
+      value: Number(c[4]),
+    }))
+    .filter((p) => Number.isFinite(p.value) && p.value > 0)
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
+ * Recent BTC-USD daily closes from keyless public exchange APIs.
+ *
+ * CryptoCompare's keyless min-api endpoint was retired (HTTP 401 "API key
+ * required" since Jun 2026), so the tail comes from Kraken with Coinbase as
+ * fallback. A total source failure returns [] instead of throwing, so the
+ * signal refresh degrades to "no new BTC rows" rather than aborting the
+ * whole run (macro fields keep updating and cached BTCUSD rows are kept).
+ */
+async function fetchBtcTail(): Promise<DataPoint[]> {
+  try {
+    return await fetchKrakenBtcDaily();
+  } catch (krakenErr) {
+    console.warn('[compute] Kraken BTC fetch failed; falling back to Coinbase.', krakenErr);
+    try {
+      return await fetchCoinbaseBtcDaily();
+    } catch (coinbaseErr) {
+      console.error(
+        '[compute] All BTC tail sources failed; continuing with cached BTCUSD only.',
+        coinbaseErr,
+      );
+      return [];
+    }
+  }
 }
 
 async function fetchBinanceFundingRates(fullHistory = false, cacheOnly = false): Promise<DataPoint[]> {
@@ -261,8 +309,9 @@ async function fetchBinanceOpenInterest(cacheOnly = false): Promise<DataPoint[]>
 }
 
 /**
- * Full BTC series: statically-bundled JSON history (2011-01-01 → 2025-10-19)
- * merged with a live CryptoCompare tail for any dates after the JSON's last entry.
+ * Full BTC series: statically-bundled JSON history merged with a live
+ * exchange tail (Kraken, Coinbase fallback) for dates after the JSON's
+ * last entry.
  *
  * The JSON is imported at build time by esbuild so there is no file-system
  * access at runtime — path resolution issues in Netlify Lambda are avoided

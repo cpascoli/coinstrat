@@ -6,6 +6,7 @@ import {
   scoreNewsCandidate,
   type NewsCandidate,
 } from './newsletter';
+import { generateAndStoreImage, removeStoredImage } from './aiImage';
 
 /**
  * Daily Bitcoin news article generator.
@@ -22,15 +23,6 @@ const openAiApiKey = process.env.OPENAI_API_KEY;
 const openAiModel = process.env.OPENAI_NEWS_MODEL || process.env.OPENAI_NEWSLETTER_MODEL || 'gpt-4.1-mini';
 
 const imageEnabled = (process.env.DAILY_NEWS_IMAGE ?? 'true').toLowerCase() !== 'false';
-const imageModel = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
-const imageQuality = process.env.OPENAI_IMAGE_QUALITY || 'medium';
-const IMAGE_SIZE = '1536x1024';
-const IMAGE_BUCKET = process.env.NEWS_IMAGE_BUCKET || 'news-images';
-const IMAGE_TIMEOUT_MS = 45000;
-// Brand-consistent style guard. Image models render text/logos/people poorly and
-// fabricated charts look misleading for news, so we explicitly exclude them.
-const IMAGE_STYLE =
-  'Bold pop art style: vivid saturated colors, halftone dots, strong outlines, high-contrast comic-book aesthetic. The image must be a single sophisticated visual metaphor for the one key takeaway of the article. No Bitcoin or cryptocurrency coin logos or coin symbols. No text, no words, no letters, no numbers, no brand logos, no charts, no graphs, no identifiable real people.';
 
 const NEWS_QUERIES = [
   'Bitcoin OR BTC (ETF OR treasury OR adoption OR mining OR regulation OR Lightning OR mempool OR macro) when:1d',
@@ -301,101 +293,6 @@ async function generateDailyArticle(packets: SourcePacket[], dateLabel: string):
   return { headline, summary, body, labels: labels.length > 0 ? labels : ['Bitcoin'], imagePrompt, imageAlt };
 }
 
-/**
- * Best-effort: generate an illustration for the article and store it in the
- * public Supabase Storage bucket. Returns the public URL + alt text, or null on
- * any failure (never throws — the article still publishes without an image).
- */
-function storagePathFromPublicUrl(url: string | null): string | null {
-  if (!url) return null;
-  const marker = `/object/public/${IMAGE_BUCKET}/`;
-  const idx = url.indexOf(marker);
-  if (idx === -1) return null;
-  const rest = url.slice(idx + marker.length).split('?')[0];
-  return rest || null;
-}
-
-async function generateArticleImage(
-  slug: string,
-  imagePrompt: string,
-  imageAlt: string,
-  headline: string,
-): Promise<{ url: string; alt: string; path: string } | null> {
-  if (!imageEnabled || !openAiApiKey) return null;
-
-  const prompt = (imagePrompt || `A sophisticated visual metaphor for the key takeaway of this Bitcoin news story: ${headline}`).trim();
-
-  // gpt-image-1 always returns b64 and rejects `response_format`; dall-e-3 needs
-  // `response_format: 'b64_json'` and a different size/quality vocabulary.
-  const isDallE = imageModel.includes('dall-e');
-  const requestBody = isDallE
-    ? {
-        model: imageModel,
-        prompt: `${prompt}\n\nStyle: ${IMAGE_STYLE}`,
-        size: '1792x1024',
-        quality: imageQuality === 'high' ? 'hd' : 'standard',
-        response_format: 'b64_json',
-        n: 1,
-      }
-    : {
-        model: imageModel,
-        prompt: `${prompt}\n\nStyle: ${IMAGE_STYLE}`,
-        size: IMAGE_SIZE,
-        quality: imageQuality,
-        n: 1,
-      };
-
-  try {
-    const response = await fetchWithTimeout('https://api.openai.com/v1/images/generations', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${openAiApiKey}`,
-      },
-      body: JSON.stringify(requestBody),
-    }, IMAGE_TIMEOUT_MS);
-
-    if (!response.ok) {
-      console.error('[dailyNews/image] OpenAI HTTP', response.status, normalizeWhitespace(await response.text()).slice(0, 300));
-      return null;
-    }
-
-    const json = await response.json() as any;
-    const b64 = json?.data?.[0]?.b64_json;
-    if (typeof b64 !== 'string' || !b64) {
-      console.error('[dailyNews/image] no image data returned');
-      return null;
-    }
-
-    const bytes = Buffer.from(b64, 'base64');
-    // Unique path per generation so the storage CDN can never serve a stale
-    // version of a regenerated image; the previous file is cleaned up by caller.
-    const path = `${slug}-${Date.now()}.png`;
-
-    const { error: uploadError } = await serviceSupabase.storage
-      .from(IMAGE_BUCKET)
-      .upload(path, bytes, { contentType: 'image/png', upsert: true, cacheControl: '31536000' });
-
-    if (uploadError) {
-      console.error('[dailyNews/image] upload failed', uploadError.message);
-      return null;
-    }
-
-    const { data } = serviceSupabase.storage.from(IMAGE_BUCKET).getPublicUrl(path);
-    const url = data?.publicUrl;
-    if (!url) return null;
-
-    return { url, alt: imageAlt || headline, path };
-  } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      console.error(`[dailyNews/image] timed out after ${IMAGE_TIMEOUT_MS}ms`);
-    } else {
-      console.error('[dailyNews/image]', error);
-    }
-    return null;
-  }
-}
-
 async function upsertArticle(args: {
   slug: string;
   article: GeneratedArticle;
@@ -485,15 +382,17 @@ export async function runDailyNewsGeneration(referenceDate?: Date): Promise<Dail
   // Publish the text first so a slow/failed image step never blocks the article.
   await upsertArticle({ slug, article, sources: finalSources, publishedAt });
 
-  const image = await generateArticleImage(slug, article.imagePrompt, article.imageAlt, article.headline);
+  const image = imageEnabled
+    ? await generateAndStoreImage({
+        pathPrefix: slug,
+        prompt: article.imagePrompt,
+        alt: article.imageAlt,
+        fallbackSubject: `this Bitcoin news story: ${article.headline}`,
+      })
+    : null;
   if (image) {
     await updateArticleImage(slug, image.url, image.alt);
-
-    const previousPath = storagePathFromPublicUrl(previousImageUrl);
-    if (previousPath && previousPath !== image.path) {
-      const { error: removeError } = await serviceSupabase.storage.from(IMAGE_BUCKET).remove([previousPath]);
-      if (removeError) console.warn('[dailyNews] previous image cleanup failed', removeError.message);
-    }
+    await removeStoredImage(previousImageUrl, image.path);
   }
 
   return {

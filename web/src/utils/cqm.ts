@@ -7,8 +7,14 @@
  * Production v1b fair-value model
  * --------------------------------
  * Scaled asymmetric QR fan (Cowen 2026 parabola in log10 price vs log-days
- * since 2009), uniform tail scale from 2022 → qrCalibrationDate (~$100.8K
- * QR 50% on 2026-05-28). No early-era $220 anchor boost.
+ * since 2009). The tail scale is auto-calibrated by default
+ * (`qrAutoCalibrate`): the QR 50% endpoint is pulled to the level where the
+ * trailing 3 years of prices have zero median log-residual, ramping in over
+ * the last 4 years. This replaces the hand-tuned anchor (~$100.8K on
+ * 2026-05-28), which remains available via `qrAutoCalibrate: false`.
+ * Auto-calibration only uses history up to the last input date, so
+ * walk-forward (causal) fits stay free of look-ahead. No early-era $220
+ * anchor boost.
  *
  * Solid chart bands at date t:
  *   solid_0.1%(t)  = tail-scaled asymmetric QR 0.1%
@@ -164,7 +170,20 @@ export interface CQMConfig {
   riskGateWeightPower?: number;
   /** Legacy gated risk: floor as a fraction of global risk when gate is active. */
   riskGateGlobalFloor?: number;
-  /** Tail-ramp endpoint: QR 50% is calibrated to this USD level on this date. */
+  /**
+   * Auto-recalibrate the QR fan tail (production default). The QR 50%
+   * endpoint is scaled so the median log-residual over the trailing
+   * `qrAutoCalTrailingDays` is zero, ramping in over `qrAutoCalRampYears`.
+   * Uses only history up to the last input date (causal). When enabled,
+   * the manual `qrCalibrationDate` / `qrCalibrationMedianUsd` /
+   * `qrScaleRampStartDate` anchors are ignored.
+   */
+  qrAutoCalibrate?: boolean;
+  /** Trailing window for the auto-calibration median residual (days). */
+  qrAutoCalTrailingDays?: number;
+  /** Auto-calibration tail scale ramps from 1.0 over this many years. */
+  qrAutoCalRampYears?: number;
+  /** Manual tail-ramp endpoint: QR 50% is calibrated to this USD level on this date. */
   qrCalibrationDate?: string;
   qrCalibrationMedianUsd?: number;
   /** Tail scale is 1.0 before this date, then ramps to the calibration endpoint. */
@@ -207,6 +226,9 @@ const DEFAULT_CONFIG: Required<CQMConfig> = {
   riskGateNearBuffer: 1.15,
   riskGateWeightPower: 2.0,
   riskGateGlobalFloor: 0.75,
+  qrAutoCalibrate: true,
+  qrAutoCalTrailingDays: 365 * 3,
+  qrAutoCalRampYears: 4,
   qrCalibrationDate: '2026-05-28',
   qrCalibrationMedianUsd: 100_800,
   qrScaleRampStartDate: '2022-01-01',
@@ -307,6 +329,16 @@ function fitQRMedian(
     if (delta < tol) break;
   }
   return { intercept, slope };
+}
+
+function medianOf(values: number[]): number {
+  const s = [...values].sort((a, b) => a - b);
+  const mid = s.length >> 1;
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+function isoDateUTC(ts: number): string {
+  return new Date(ts).toISOString().slice(0, 10);
 }
 
 function sortedCopy(arr: ArrayLike<number>): Float64Array {
@@ -636,6 +668,38 @@ function rollingMean(values: Float64Array, window: number, minPeriods: number): 
   return out;
 }
 
+/** Auto-cal needs at least this many trailing residuals before it engages. */
+const AUTO_CAL_MIN_RESIDUALS = 180;
+
+/**
+ * Trailing-median auto-calibration: scale the QR fan endpoint so the median
+ * log-residual over the trailing window is zero, anchored at the last input
+ * date with the ramp starting `qrAutoCalRampYears` earlier. Causal by
+ * construction. Returns null when there is too little recent history (the
+ * fan is then left unscaled).
+ */
+function computeAutoCalibration(
+  cleaned: PricePoint[],
+  rawMed: Float64Array,
+  cfg: Required<CQMConfig>,
+): { endScale: number; calDate: string; rampStartDate: string } | null {
+  const n = cleaned.length;
+  const last = cleaned[n - 1];
+  const cutoffTs = last.ts - cfg.qrAutoCalTrailingDays * DAY_MS;
+  const residuals: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (cleaned[i].ts < cutoffTs) continue;
+    if (!Number.isFinite(rawMed[i]) || rawMed[i] <= 0) continue;
+    residuals.push(Math.log(cleaned[i].price) - Math.log(rawMed[i]));
+  }
+  if (residuals.length < AUTO_CAL_MIN_RESIDUALS) return null;
+  return {
+    endScale: Math.exp(medianOf(residuals)),
+    calDate: last.date,
+    rampStartDate: isoDateUTC(last.ts - cfg.qrAutoCalRampYears * 365.25 * DAY_MS),
+  };
+}
+
 /** Tail-scaled asymmetric QR 0.1% / 50% / 99.9% (uniform scale on all quantiles). */
 function buildScaledQrBands(
   asymFit: AsymmetricQuantileFit,
@@ -653,19 +717,33 @@ function buildScaledQrBands(
     rawHigh[i] = bands.get(0.999) ?? NaN;
   }
 
-  const calTs = new Date(cfg.qrCalibrationDate).getTime();
-  let calIdx = n - 1;
-  for (let i = 0; i < n; i++) {
-    if (cleaned[i].ts <= calTs) calIdx = i;
+  let effCfg = cfg;
+  let endScale = 1;
+  if (cfg.qrAutoCalibrate) {
+    const auto = computeAutoCalibration(cleaned, rawMed, cfg);
+    if (auto) {
+      endScale = auto.endScale;
+      effCfg = {
+        ...cfg,
+        qrCalibrationDate: auto.calDate,
+        qrScaleRampStartDate: auto.rampStartDate,
+      };
+    }
+  } else {
+    const calTs = new Date(cfg.qrCalibrationDate).getTime();
+    let calIdx = n - 1;
+    for (let i = 0; i < n; i++) {
+      if (cleaned[i].ts <= calTs) calIdx = i;
+    }
+    endScale = cfg.qrCalibrationMedianUsd / rawMed[calIdx];
   }
-  const endScale = cfg.qrCalibrationMedianUsd / rawMed[calIdx];
 
   const qrLow = new Float64Array(n);
   const qrMed = new Float64Array(n);
   const qrHigh = new Float64Array(n);
   for (let i = 0; i < n; i++) {
     const ts = cleaned[i].ts;
-    const tailScale = qrTailRampFactor(ts, endScale, cfg);
+    const tailScale = qrTailRampFactor(ts, endScale, effCfg);
     qrLow[i] = rawLow[i] * tailScale;
     qrMed[i] = rawMed[i] * tailScale;
     qrHigh[i] = rawHigh[i] * tailScale;
