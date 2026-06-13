@@ -17,16 +17,30 @@ import {
   Paper,
   Select,
   Stack,
+  Tab,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
+  Tabs,
   TextField,
   Typography,
 } from '@mui/material';
-import { Activity, Banknote, Pause, Play, RefreshCw, Save, Settings as SettingsIcon, TrendingUp } from 'lucide-react';
+import { Activity, Banknote, LineChart as LineChartIcon, Pause, Play, RefreshCw, Save, Settings as SettingsIcon, TrendingUp } from 'lucide-react';
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  Line,
+  LineChart,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import {
   CQM_DEFAULT_BTC_SELL_FRACTION,
   CQM_DEFAULT_MAX_CASH_FRACTION,
@@ -154,6 +168,8 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
   const [frequency, setFrequency] = useState<Frequency>('daily');
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [chartTab, setChartTab] = useState(0);
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [executing, setExecuting] = useState(false);
@@ -208,6 +224,7 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
       if (!res.ok) throw new Error(data.error ?? 'Failed to save settings');
       setSettingsMessage('Strategy settings saved.');
       await loadAll();
+      setSettingsOpen(false);
     } catch (err: any) {
       setSettingsMessage(err?.message ?? 'Failed to save settings');
     } finally {
@@ -298,6 +315,76 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
     return { kind: 'hold' as const };
   }, [status]);
 
+  /**
+   * Equity curve derived purely from the bot's filled orders, marked-to-market
+   * at each order's BTC-GBP reference price (the only price we know at each
+   * fill) and a final point at the current price. The bot is treated as a
+   * closed account: gross invested in, BTC accumulated, realized cash from
+   * sells. Drawdown uses the value÷invested ratio so ongoing DCA inflows don't
+   * mask loss periods (same methodology as the backtest's return drawdown).
+   */
+  const equityCurve = useMemo(() => {
+    if (!orders) return [];
+    const filled = orders.orders
+      .filter((o) => o.coinbase_status === 'filled')
+      .slice()
+      .sort((a, b) => new Date(a.triggered_at).getTime() - new Date(b.triggered_at).getTime());
+    if (filled.length === 0) return [];
+
+    let btc = 0;
+    let gross = 0;
+    let realized = 0;
+    let peakRatio = -Infinity;
+    let lastPrice = 0;
+
+    const points: Array<{
+      ts: number;
+      invested: number;
+      portfolio: number;
+      pnl: number;
+      pnlPct: number;
+      drawdownPct: number;
+    }> = [];
+
+    const pushPoint = (ts: number, price: number) => {
+      const markPrice = Number.isFinite(price) && price > 0 ? price : lastPrice;
+      if (markPrice > 0) lastPrice = markPrice;
+      const portfolio = btc * markPrice + realized;
+      const pnl = portfolio - gross;
+      const pnlPct = gross > 0 ? (pnl / gross) * 100 : 0;
+      const ratio = gross > 0 ? portfolio / gross : 1;
+      if (ratio > peakRatio) peakRatio = ratio;
+      const drawdownPct = peakRatio > 0 ? ((ratio - peakRatio) / peakRatio) * 100 : 0;
+      points.push({ ts, invested: gross, portfolio, pnl, pnlPct, drawdownPct });
+    };
+
+    for (const o of filled) {
+      const base = o.base_filled != null ? Number(o.base_filled) : 0;
+      const quote = o.quote_filled != null ? Number(o.quote_filled) : 0;
+      const fees = o.fees_gbp != null ? Number(o.fees_gbp) : 0;
+      if (o.side === 'BUY') {
+        gross += quote + fees;
+        btc += base;
+      } else {
+        realized += quote - fees;
+        btc -= base;
+      }
+      pushPoint(new Date(o.triggered_at).getTime(), Number(o.btc_gbp_ref));
+    }
+
+    const todayPrice = orders.stats.current_btc_gbp;
+    if (todayPrice != null && todayPrice > 0) {
+      pushPoint(Date.now(), todayPrice);
+    }
+
+    return points;
+  }, [orders]);
+
+  const maxDrawdownPct = useMemo(
+    () => (equityCurve.length ? Math.min(...equityCurve.map((p) => p.drawdownPct)) : 0),
+    [equityCurve],
+  );
+
   const targetHeadline = useMemo(() => {
     if (!status?.target) return null;
     const tgt = status.target;
@@ -322,6 +409,56 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
           Some live data could not be fetched from Coinbase: {Object.entries(status.partial_errors).map(([k, v]) => `${k}: ${v}`).join(' · ')}
         </Alert>
       )}
+
+      {/* --- Cumulative Stats -------------------------------------------- */}
+      <Paper sx={{ p: 2.5 }}>
+        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+          <TrendingUp size={18} />
+          <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>Cumulative Stats</Typography>
+        </Stack>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
+          Computed purely from this bot's filled orders. Coinbase balances and other holdings on your account are NOT included.
+        </Typography>
+
+        <Stack direction="row" spacing={2} useFlexGap flexWrap="wrap">
+          <StatTile
+            label="BTC accumulated"
+            value={orders ? orders.stats.btc_accumulated.toFixed(8) : '—'}
+            color="#f59e0b"
+            sub={orders?.stats.bot_btc_value_gbp != null ? `≈ £${orders.stats.bot_btc_value_gbp.toFixed(2)}` : undefined}
+          />
+          <StatTile
+            label="Gross invested"
+            value={orders ? `£${orders.stats.gross_invested_gbp.toFixed(2)}` : '—'}
+            color="#22c55e"
+            sub={orders ? `bought £${orders.stats.total_bought_gbp.toFixed(2)} + £${orders.stats.total_fees_gbp.toFixed(2)} fees` : undefined}
+          />
+          <StatTile
+            label="Realized proceeds"
+            value={orders ? `£${orders.stats.realized_proceeds_gbp.toFixed(2)}` : '—'}
+            color="#ef4444"
+            sub={orders ? `sold £${orders.stats.total_sold_gbp.toFixed(2)} net of fees` : undefined}
+          />
+          <StatTile
+            label="Net invested"
+            value={orders ? `£${orders.stats.net_invested_gbp.toFixed(2)}` : '—'}
+            color="#60a5fa"
+            sub="gross − realized"
+          />
+          <StatTile
+            label="Bot portfolio value"
+            value={orders?.stats.bot_portfolio_value_gbp != null ? `£${orders.stats.bot_portfolio_value_gbp.toFixed(2)}` : '—'}
+            color="#a78bfa"
+            sub="BTC held + cash banked"
+          />
+          <StatTile
+            label="ROI"
+            value={orders?.stats.bot_roi_pct != null ? `${(orders.stats.bot_roi_pct * 100).toFixed(2)}%` : '—'}
+            color={(orders?.stats.bot_roi_pct ?? 0) >= 0 ? '#22c55e' : '#ef4444'}
+            sub="vs. gross invested"
+          />
+        </Stack>
+      </Paper>
 
       {/* --- Bot Status -------------------------------------------------- */}
       <Paper sx={{ p: 2.5 }}>
@@ -370,6 +507,18 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
               }
             >
               {status?.settings.enabled ? 'Pause' : 'Resume'}
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              color="inherit"
+              onClick={() => { setSettingsMessage(null); setSettingsOpen(true); }}
+              disabled={!status}
+              startIcon={<SettingsIcon size={14} />}
+              sx={{ textTransform: 'none', fontWeight: 700 }}
+              title="Edit strategy settings (base amount, frequency)"
+            >
+              Settings
             </Button>
             <Button
               size="small"
@@ -495,114 +644,151 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
         )}
       </Paper>
 
-      {/* --- Strategy Settings ------------------------------------------- */}
+      {/* --- Performance (tabbed charts derived from orders) ------------- */}
       <Paper sx={{ p: 2.5 }}>
-        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
-          <SettingsIcon size={18} />
-          <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>Strategy Settings</Typography>
+        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+          <LineChartIcon size={18} />
+          <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>Performance</Typography>
         </Stack>
-
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'flex-end' }}>
-          <TextField
-            label="Base amount (GBP)"
-            size="small"
-            type="number"
-            inputProps={{ min: 0, step: 1 }}
-            value={baseAmount}
-            onChange={(e) => setBaseAmount(e.target.value)}
-            sx={{ maxWidth: 200 }}
-          />
-          <FormControl size="small" sx={{ minWidth: 160 }}>
-            <InputLabel id="cqm-bot-frequency">Frequency</InputLabel>
-            <Select
-              labelId="cqm-bot-frequency"
-              label="Frequency"
-              value={frequency}
-              onChange={(e) => setFrequency(e.target.value as Frequency)}
-            >
-              <MenuItem value="daily">Daily</MenuItem>
-              <MenuItem value="weekly">Weekly</MenuItem>
-              <MenuItem value="monthly">Monthly</MenuItem>
-            </Select>
-          </FormControl>
-          <Button
-            variant="contained"
-            startIcon={savingSettings ? <CircularProgress size={14} color="inherit" /> : <Save size={14} />}
-            onClick={handleSaveSettings}
-            disabled={savingSettings || !Number(baseAmount)}
-            sx={{ textTransform: 'none', fontWeight: 700 }}
-          >
-            Save settings
-          </Button>
-        </Stack>
-
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.5, fontFamily: 'monospace' }}>
-          Dynamic sizing on the strategy's virtual ledger (deposits + own orders, not exchange balances):
-          <br />
-          Risk &lt; {(CQM_FAIR_RISK * 100).toFixed(0)}% → BUY max(base × (1 − 2 × Risk), {(CQM_DEFAULT_MAX_CASH_FRACTION * 100).toFixed(0)}% × taper × cash), capped at cash
-          <br />
-          {(CQM_FAIR_RISK * 100).toFixed(0)}–{(CQM_DEFAULT_SELL_THRESHOLD * 100).toFixed(0)}% → HOLD ·
-          Risk &gt; {(CQM_DEFAULT_SELL_THRESHOLD * 100).toFixed(0)}% → SELL max(base, {(CQM_DEFAULT_BTC_SELL_FRACTION * 100).toFixed(0)}% of BTC) × scale, capped at BTC held ·
-          skip when &lt; £1
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+          Derived from this bot's filled orders, marked at each fill's BTC-GBP reference price.
+          Drawdown is measured on the value ÷ invested ratio, so ongoing deposits don't mask loss periods.
         </Typography>
 
-        {settingsMessage && (
-          <Alert sx={{ mt: 2 }} severity="info" onClose={() => setSettingsMessage(null)}>{settingsMessage}</Alert>
+        {equityCurve.length === 0 ? (
+          <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: 'center' }}>
+            No filled orders yet. Charts appear once the bot has executed at least one trade.
+          </Typography>
+        ) : (
+          <>
+            <Tabs
+              value={chartTab}
+              onChange={(_e, v) => setChartTab(v)}
+              sx={{ minHeight: 36, mb: 1, '& .MuiTab-root': { minHeight: 36, textTransform: 'none', fontWeight: 700 } }}
+            >
+              <Tab label="ROI" />
+              <Tab label="Profit & Loss" />
+              <Tab label="Drawdown" />
+            </Tabs>
+
+            {chartTab === 0 && (
+              <Box>
+                <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1 }}>
+                  Return on gross invested capital over time
+                  {orders?.stats.bot_roi_pct != null && <> · now {(orders.stats.bot_roi_pct * 100).toFixed(2)}%</>}
+                </Typography>
+                <Box sx={{ height: { xs: 260, sm: 320 }, width: '100%', minWidth: 0 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={equityCurve} margin={{ top: 5, right: 16, left: 6, bottom: 5 }}>
+                      <defs>
+                        <linearGradient id="roiFill" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#22c55e" stopOpacity={0.4} />
+                          <stop offset="100%" stopColor="#22c55e" stopOpacity={0.03} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.15)" />
+                      <XAxis
+                        dataKey="ts"
+                        type="number"
+                        scale="time"
+                        domain={['dataMin', 'dataMax']}
+                        tickFormatter={fmtChartDate}
+                        tick={{ fontSize: 11, fill: '#94a3b8' }}
+                        minTickGap={40}
+                      />
+                      <YAxis
+                        tickFormatter={(v) => `${Number(v).toFixed(0)}%`}
+                        tick={{ fontSize: 11, fill: '#94a3b8' }}
+                        width={48}
+                      />
+                      <Tooltip content={<RoiTooltip />} />
+                      <ReferenceLine y={0} stroke="#94a3b8" strokeWidth={1} />
+                      <Area type="monotone" dataKey="pnlPct" name="ROI" stroke="#22c55e" strokeWidth={2} fill="url(#roiFill)" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </Box>
+              </Box>
+            )}
+
+            {chartTab === 1 && (
+              <Box>
+                <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1 }}>
+                  Portfolio value vs gross invested — the gap is profit &amp; loss
+                </Typography>
+                <Box sx={{ height: { xs: 260, sm: 320 }, width: '100%', minWidth: 0 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={equityCurve} margin={{ top: 5, right: 16, left: 6, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.15)" />
+                      <XAxis
+                        dataKey="ts"
+                        type="number"
+                        scale="time"
+                        domain={['dataMin', 'dataMax']}
+                        tickFormatter={fmtChartDate}
+                        tick={{ fontSize: 11, fill: '#94a3b8' }}
+                        minTickGap={40}
+                      />
+                      <YAxis
+                        tickFormatter={(v) => `£${Number(v).toLocaleString()}`}
+                        tick={{ fontSize: 11, fill: '#94a3b8' }}
+                        width={72}
+                      />
+                      <Tooltip content={<PnlTooltip />} />
+                      <Line type="monotone" dataKey="invested" name="Invested" stroke="#60a5fa" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="portfolio" name="Portfolio" stroke="#22c55e" strokeWidth={2} dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </Box>
+              </Box>
+            )}
+
+            {chartTab === 2 && (
+              <Box>
+                <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1 }}>
+                  Decline from the high-water mark · max {maxDrawdownPct.toFixed(1)}%
+                </Typography>
+                <Box sx={{ height: { xs: 260, sm: 320 }, width: '100%', minWidth: 0 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={equityCurve} margin={{ top: 5, right: 16, left: 6, bottom: 5 }}>
+                      <defs>
+                        <linearGradient id="ddFill" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#ef4444" stopOpacity={0.05} />
+                          <stop offset="100%" stopColor="#ef4444" stopOpacity={0.45} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.15)" />
+                      <XAxis
+                        dataKey="ts"
+                        type="number"
+                        scale="time"
+                        domain={['dataMin', 'dataMax']}
+                        tickFormatter={fmtChartDate}
+                        tick={{ fontSize: 11, fill: '#94a3b8' }}
+                        minTickGap={40}
+                      />
+                      <YAxis
+                        tickFormatter={(v) => `${Number(v).toFixed(0)}%`}
+                        tick={{ fontSize: 11, fill: '#94a3b8' }}
+                        width={48}
+                        domain={['dataMin', 0]}
+                      />
+                      <Tooltip content={<DrawdownTooltip />} />
+                      <ReferenceLine y={0} stroke="#94a3b8" strokeWidth={1} />
+                      <Area type="monotone" dataKey="drawdownPct" name="Drawdown" stroke="#ef4444" strokeWidth={2} fill="url(#ddFill)" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </Box>
+              </Box>
+            )}
+          </>
         )}
       </Paper>
 
-      {/* --- Order History + Stats --------------------------------------- */}
+      {/* --- Order History ----------------------------------------------- */}
       <Paper sx={{ p: 2.5 }}>
-        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-          <TrendingUp size={18} />
-          <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>Cumulative Stats</Typography>
-        </Stack>
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
-          Computed purely from this bot's filled orders. Coinbase balances and other holdings on your account are NOT included.
-        </Typography>
-
-        <Stack direction="row" spacing={2} useFlexGap flexWrap="wrap" sx={{ mb: 2 }}>
-          <StatTile
-            label="BTC accumulated"
-            value={orders ? orders.stats.btc_accumulated.toFixed(8) : '—'}
-            color="#f59e0b"
-            sub={orders?.stats.bot_btc_value_gbp != null ? `≈ £${orders.stats.bot_btc_value_gbp.toFixed(2)}` : undefined}
-          />
-          <StatTile
-            label="Gross invested"
-            value={orders ? `£${orders.stats.gross_invested_gbp.toFixed(2)}` : '—'}
-            color="#22c55e"
-            sub={orders ? `bought £${orders.stats.total_bought_gbp.toFixed(2)} + £${orders.stats.total_fees_gbp.toFixed(2)} fees` : undefined}
-          />
-          <StatTile
-            label="Realized proceeds"
-            value={orders ? `£${orders.stats.realized_proceeds_gbp.toFixed(2)}` : '—'}
-            color="#ef4444"
-            sub={orders ? `sold £${orders.stats.total_sold_gbp.toFixed(2)} net of fees` : undefined}
-          />
-          <StatTile
-            label="Net invested"
-            value={orders ? `£${orders.stats.net_invested_gbp.toFixed(2)}` : '—'}
-            color="#60a5fa"
-            sub="gross − realized"
-          />
-          <StatTile
-            label="Bot portfolio value"
-            value={orders?.stats.bot_portfolio_value_gbp != null ? `£${orders.stats.bot_portfolio_value_gbp.toFixed(2)}` : '—'}
-            color="#a78bfa"
-            sub="BTC held + cash banked"
-          />
-          <StatTile
-            label="ROI"
-            value={orders?.stats.bot_roi_pct != null ? `${(orders.stats.bot_roi_pct * 100).toFixed(2)}%` : '—'}
-            color={(orders?.stats.bot_roi_pct ?? 0) >= 0 ? '#22c55e' : '#ef4444'}
-            sub="vs. gross invested"
-          />
-        </Stack>
-
-        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-          <Banknote size={16} />
-          <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>Order History</Typography>
+        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
+          <Banknote size={18} />
+          <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>Order History</Typography>
           <Chip size="small" variant="outlined" label={`${orders?.orders.length ?? 0} orders · ${orders?.stats.filled_count ?? 0} filled`} />
         </Stack>
 
@@ -758,7 +944,132 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* --- Strategy Settings Dialog ------------------------------------ */}
+      <Dialog open={settingsOpen} onClose={() => !savingSettings && setSettingsOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 800 }}>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <SettingsIcon size={18} />
+            <span>Strategy Settings</span>
+          </Stack>
+        </DialogTitle>
+        <DialogContent>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'flex-end' }} sx={{ mt: 1 }}>
+            <TextField
+              label="Base amount (GBP)"
+              size="small"
+              type="number"
+              inputProps={{ min: 0, step: 1 }}
+              value={baseAmount}
+              onChange={(e) => setBaseAmount(e.target.value)}
+              sx={{ maxWidth: 200 }}
+            />
+            <FormControl size="small" sx={{ minWidth: 160 }}>
+              <InputLabel id="cqm-bot-frequency">Frequency</InputLabel>
+              <Select
+                labelId="cqm-bot-frequency"
+                label="Frequency"
+                value={frequency}
+                onChange={(e) => setFrequency(e.target.value as Frequency)}
+              >
+                <MenuItem value="daily">Daily</MenuItem>
+                <MenuItem value="weekly">Weekly</MenuItem>
+                <MenuItem value="monthly">Monthly</MenuItem>
+              </Select>
+            </FormControl>
+          </Stack>
+
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2, fontFamily: 'monospace' }}>
+            Dynamic sizing on the strategy's virtual ledger (deposits + own orders, not exchange balances):
+            <br />
+            Risk &lt; {(CQM_FAIR_RISK * 100).toFixed(0)}% → BUY max(base × (1 − 2 × Risk), {(CQM_DEFAULT_MAX_CASH_FRACTION * 100).toFixed(0)}% × taper × cash), capped at cash
+            <br />
+            {(CQM_FAIR_RISK * 100).toFixed(0)}–{(CQM_DEFAULT_SELL_THRESHOLD * 100).toFixed(0)}% → HOLD ·
+            Risk &gt; {(CQM_DEFAULT_SELL_THRESHOLD * 100).toFixed(0)}% → SELL max(base, {(CQM_DEFAULT_BTC_SELL_FRACTION * 100).toFixed(0)}% of BTC) × scale, capped at BTC held ·
+            skip when &lt; £1
+          </Typography>
+
+          {settingsMessage && (
+            <Alert sx={{ mt: 2 }} severity="info" onClose={() => setSettingsMessage(null)}>{settingsMessage}</Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSettingsOpen(false)} disabled={savingSettings} sx={{ textTransform: 'none' }}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={savingSettings ? <CircularProgress size={14} color="inherit" /> : <Save size={14} />}
+            onClick={handleSaveSettings}
+            disabled={savingSettings || !Number(baseAmount)}
+            sx={{ textTransform: 'none', fontWeight: 700 }}
+          >
+            Save settings
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
+  );
+};
+
+function fmtChartDate(ts: number): string {
+  return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function fmtGbp(value: number): string {
+  return `${value < 0 ? '−' : ''}£${Math.abs(value).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+}
+
+const TooltipCard: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
+  <Box sx={{ bgcolor: 'rgba(15,23,42,0.95)', border: '1px solid rgba(148,163,184,0.25)', borderRadius: 1, px: 1.5, py: 1 }}>
+    <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 700, display: 'block', mb: 0.5 }}>
+      {title}
+    </Typography>
+    {children}
+  </Box>
+);
+
+const TooltipRow: React.FC<{ label: string; value: string; color?: string }> = ({ label, value, color }) => (
+  <Stack direction="row" justifyContent="space-between" spacing={2}>
+    <Typography variant="caption" sx={{ color: '#cbd5e1' }}>{label}</Typography>
+    <Typography variant="caption" sx={{ color: color ?? '#f8fafc', fontWeight: 700, fontFamily: 'monospace' }}>{value}</Typography>
+  </Stack>
+);
+
+const PnlTooltip: React.FC<any> = ({ active, payload }) => {
+  if (!active || !payload?.length) return null;
+  const p = payload[0].payload as { ts: number; invested: number; portfolio: number; pnl: number; pnlPct: number };
+  return (
+    <TooltipCard title={new Date(p.ts).toLocaleDateString()}>
+      <TooltipRow label="Portfolio" value={fmtGbp(p.portfolio)} color="#22c55e" />
+      <TooltipRow label="Invested" value={fmtGbp(p.invested)} color="#60a5fa" />
+      <TooltipRow label="P&L" value={`${fmtGbp(p.pnl)} (${p.pnlPct >= 0 ? '+' : ''}${p.pnlPct.toFixed(2)}%)`} color={p.pnl >= 0 ? '#22c55e' : '#ef4444'} />
+    </TooltipCard>
+  );
+};
+
+const DrawdownTooltip: React.FC<any> = ({ active, payload }) => {
+  if (!active || !payload?.length) return null;
+  const p = payload[0].payload as { ts: number; drawdownPct: number };
+  return (
+    <TooltipCard title={new Date(p.ts).toLocaleDateString()}>
+      <TooltipRow label="Drawdown" value={`${p.drawdownPct.toFixed(2)}%`} color="#ef4444" />
+    </TooltipCard>
+  );
+};
+
+const RoiTooltip: React.FC<any> = ({ active, payload }) => {
+  if (!active || !payload?.length) return null;
+  const p = payload[0].payload as { ts: number; pnlPct: number; pnl: number };
+  return (
+    <TooltipCard title={new Date(p.ts).toLocaleDateString()}>
+      <TooltipRow
+        label="ROI"
+        value={`${p.pnlPct >= 0 ? '+' : ''}${p.pnlPct.toFixed(2)}%`}
+        color={p.pnlPct >= 0 ? '#22c55e' : '#ef4444'}
+      />
+      <TooltipRow label="P&L" value={fmtGbp(p.pnl)} color={p.pnl >= 0 ? '#22c55e' : '#ef4444'} />
+    </TooltipCard>
   );
 };
 

@@ -3,6 +3,13 @@
   publish = "dist"
   functions = "netlify/functions"
 
+# Local `netlify dev`: Vite is pinned to 3000 in vite.config.ts, so point
+# Netlify Dev at that port (its Vite auto-detection otherwise waits on 5173).
+[dev]
+  command = "npm run dev"
+  targetPort = 3000
+  port = 8888
+
 # Bundle the full BTC daily history so serverless functions can read it at runtime.
 [functions]
   included_files = ["public/data/btc_daily.json"]

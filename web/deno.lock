@@ -15,7 +15,9 @@
         "npm:@emotion/styled@^11.11.5",
         "npm:@mui/icons-material@^5.15.20",
         "npm:@mui/material@^5.15.20",
+        "npm:@netlify/blobs@^10.7.0",
         "npm:@netlify/functions@^2.4.1",
+        "npm:@supabase/supabase-js@^2.98.0",
         "npm:@types/node-fetch@^2.6.9",
         "npm:@types/node@^20.10.0",
         "npm:@types/react-dom@^18.2.15",
@@ -31,10 +33,13 @@
         "npm:react-router-dom@^6.28.0",
         "npm:react@^18.2.0",
         "npm:recharts@^2.10.3",
+        "npm:resend@^6.9.3",
+        "npm:stripe@^20.4.0",
         "npm:tailwind-merge@2",
         "npm:tailwindcss@^3.3.5",
         "npm:typescript@^5.2.2",
-        "npm:vite@5"
+        "npm:vite@5",
+        "npm:vitest@^2.1.9"
       ]
     }
   }

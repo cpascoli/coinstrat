@@ -244,6 +244,9 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
   const [cqmRiskProgress, setCqmRiskProgress] = useState(0); // 0..1
   // Annual yield on idle cash (APY %), accrued daily across all strategies.
   const [cashYieldPct, setCashYieldPct] = useState<number>(0);
+  // CQM Risk chart: 'walkforward' = the causal risk that drives the sim;
+  // 'lookback' = the full-sample fit shown on models/cqm/charts (hindsight).
+  const [riskChartMode, setRiskChartMode] = useState<'walkforward' | 'lookback'>('walkforward');
 
   // --- Per-model variant -------------------------------------------------
   // Locks the simulator to a single model's strategies and hides the
@@ -475,6 +478,21 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
   );
   const useRiskShading = isCqm && riskSpans.length > 0;
 
+  // Per-day walk-forward risk series (the exact values driving the sim),
+  // windowed to the simulation interval, for the CQM Risk chart.
+  const wfRiskData = useMemo(
+    () =>
+      chartData
+        .filter((d: any) => Number.isFinite(d.cqmRisk))
+        .map((d: any) => ({
+          ts: d.ts,
+          fullDate: d.fullDate,
+          riskPct: (d.cqmRisk as number) * 100,
+          btcPrice: d.btcPrice,
+        })),
+    [chartData],
+  );
+
   // BTC price Y domain (right axis, log scale)
   const btcDomain = useMemo(() => {
     const vals = chartData
@@ -572,6 +590,34 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
       );
     }
     return null;
+  };
+
+  const WfRiskTooltip = ({ active, payload }: any) => {
+    if (!active || !payload || !payload.length) return null;
+    const row = payload[0]?.payload ?? {};
+    const risk = typeof row.riskPct === 'number' ? row.riskPct : null;
+    const c = risk != null ? riskColor(riskBand(risk / 100)) : { fill: '#a855f7' };
+    return (
+      <div className="rounded-lg border border-slate-700/60 bg-slate-950/90 p-4 shadow-xl">
+        <p className="mb-2 font-bold text-slate-100">{row.fullDate}</p>
+        <div className="space-y-1">
+          <div className="flex items-center justify-between gap-8">
+            <span className="text-xs" style={{ color: c.fill }}>Walk-forward Risk:</span>
+            <span className="text-xs font-mono font-bold text-slate-100">
+              {risk != null ? `${risk.toFixed(1)}%` : '—'}
+            </span>
+          </div>
+          {typeof row.btcPrice === 'number' && (
+            <div className="flex items-center justify-between gap-8">
+              <span className="text-xs text-slate-300">BTCUSD:</span>
+              <span className="text-xs font-mono font-bold text-slate-100">
+                ${row.btcPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
   };
 
   if (!data || data.length === 0) {
@@ -931,7 +977,7 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
           <Stack direction="row" alignItems="center" justifyContent="center" spacing={1.5}>
             <CircularProgress size={22} sx={{ color: '#a855f7' }} />
             <Typography variant="body2" color="text.secondary">
-              Computing walk-forward CQM risk (causal refits, no look-ahead)…
+              Computing walk-forward CQM risk…
               {' '}{Math.round(cqmRiskProgress * 100)}%
             </Typography>
           </Stack>
@@ -1037,7 +1083,7 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
             <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
               {isCqm ? (
                 <>
-                  CQM Risk DCA uses walk-forward risk (causal refits, no look-ahead) and
+                  CQM Risk DCA uses walk-forward risk (no look-ahead) and
                   dynamic sizing: deploy up to {(cqmMaxCashFraction * 100).toFixed(0)}% of the cash pile per
                   period when Risk is low (tapering to 0 at 50%), hold in the dead zone (50%–{(cqmSellThreshold * 100).toFixed(0)}%),
                   {cqmSellThreshold >= 1
@@ -1058,8 +1104,10 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
                   )}
                 </>
               )}
-              {' '}{useRiskShading
-                ? 'Background shading shows the daily CQM Risk band: green (cool, <25%) → lime (warm, 25–50%) → amber (hot, 50–75%) → red (euphoric, >75%).'
+              {' '}{isCqm
+                ? (useRiskShading
+                    ? 'Background shading shows the daily walk-forward CQM Risk band: green (cool, <25%) → lime (warm, 25–50%) → amber (hot, 50–75%) → red (euphoric, >75%).'
+                    : 'Background risk shading appears once the walk-forward risk finishes computing.')
                 : 'Background shading shows the CoinStrat system state (CORE = accumulation permission; MACRO = 3× intensity modifier).'}
             </Typography>
           </Box>
@@ -1085,7 +1133,7 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
           <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                {useRiskShading
+                {isCqm
                   ? riskSpans.map((s, i) => {
                       const c = riskColor(s.band);
                       return (
@@ -1197,7 +1245,9 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
               {isCqm
                 ? 'BTC position over time. CQM DCA accumulates when Risk is low and trims above the sell threshold; sells are capped by holdings.'
                 : 'Cumulative BTC accumulated by each strategy over the backtest period.'}
-              {useRiskShading && ' Background shading shows the daily CQM Risk band.'}
+              {isCqm && (useRiskShading
+                ? ' Background shading shows the daily walk-forward CQM Risk band.'
+                : ' Background risk shading appears once the walk-forward risk finishes computing.')}
             </Typography>
           </Box>
 
@@ -1217,7 +1267,7 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
           <Box sx={{ height: { xs: 300, sm: 360 }, width: '100%', minWidth: 0 }}>
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                {useRiskShading
+                {isCqm
                   ? riskSpans.map((s, i) => {
                       const c = riskColor(s.band);
                       return (
@@ -1318,10 +1368,124 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
         </Paper>
       )}
 
-      {/* CQM Risk chart (CQM variant only) — same chart as models/cqm/charts,
-          windowed to the simulation interval for easy comparison. */}
+      {/* CQM Risk chart (CQM variant only). Toggle between the walk-forward
+          risk that actually drives the simulation (causal, no look-ahead) and
+          the full-sample "lookback" fit shown on models/cqm/charts (hindsight).
+          Both are windowed to the simulation interval for easy comparison. */}
       {isCqm && (
-        <ChartsView data={data} sections={['cqm-risk']} embedded showRange={false} startDate={startDate} endDate={endDate} />
+        <Box>
+          <Stack
+            direction="row"
+            alignItems="center"
+            justifyContent="flex-end"
+            spacing={1}
+            sx={{ mb: 1 }}
+          >
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
+              Risk model
+            </Typography>
+            <ToggleButtonGroup
+              size="small"
+              exclusive
+              value={riskChartMode}
+              onChange={(_e, v) => v && setRiskChartMode(v)}
+            >
+              <ToggleButton value="walkforward" sx={{ textTransform: 'none', py: 0.25 }}>
+                Walk-forward
+              </ToggleButton>
+              <ToggleButton value="lookback" sx={{ textTransform: 'none', py: 0.25 }}>
+                Lookback
+              </ToggleButton>
+            </ToggleButtonGroup>
+          </Stack>
+
+          {riskChartMode === 'lookback' ? (
+            <ChartsView data={data} sections={['cqm-risk']} embedded showRange={false} startDate={startDate} endDate={endDate} />
+          ) : (
+            <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+              <Box sx={{ mb: 2.5 }}>
+                <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                  CQM Risk (walk-forward)
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                  The model is refit on past data only (no look-ahead), so these are the exact daily
+                  Risk values that drive the simulation above — what a live bot could have known at
+                  the time. Switch to “Lookback” to compare against the full-sample fit.
+                </Typography>
+              </Box>
+
+              {cqmRiskLoading ? (
+                <Stack direction="row" alignItems="center" justifyContent="center" spacing={1.5} sx={{ py: 8 }}>
+                  <CircularProgress size={22} sx={{ color: '#a855f7' }} />
+                  <Typography variant="body2" color="text.secondary">
+                    Computing walk-forward CQM risk… {Math.round(cqmRiskProgress * 100)}%
+                  </Typography>
+                </Stack>
+              ) : wfRiskData.length === 0 ? (
+                <Typography variant="body2" color="text.secondary" sx={{ py: 8, textAlign: 'center' }}>
+                  Enable CQM Risk DCA to compute the walk-forward risk series.
+                </Typography>
+              ) : (
+                <>
+                  <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+                    <Chip size="small" variant="outlined" label="0–25% Buy zone" sx={{ borderColor: '#22c55e', color: '#bbf7d0' }} />
+                    <Chip size="small" variant="outlined" label="25–50% Accumulate" sx={{ borderColor: '#84cc16', color: '#d9f99d' }} />
+                    <Chip size="small" variant="outlined" label="50–75% Trim" sx={{ borderColor: '#f59e0b', color: '#fde68a' }} />
+                    <Chip size="small" variant="outlined" label="75–100% Sell zone" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
+                    <Chip size="small" variant="outlined" label="BTCUSD (log)" sx={{ borderColor: '#e5e7eb', color: '#e5e7eb' }} />
+                  </Stack>
+
+                  <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={wfRiskData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
+                        <ReferenceArea yAxisId="risk" y1={0} y2={25} fill="#22c55e" fillOpacity={0.16} strokeOpacity={0} />
+                        <ReferenceArea yAxisId="risk" y1={25} y2={50} fill="#84cc16" fillOpacity={0.14} strokeOpacity={0} />
+                        <ReferenceArea yAxisId="risk" y1={50} y2={75} fill="#f59e0b" fillOpacity={0.14} strokeOpacity={0} />
+                        <ReferenceArea yAxisId="risk" y1={75} y2={100} fill="#ef4444" fillOpacity={0.16} strokeOpacity={0} />
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+                        <XAxis
+                          dataKey="ts"
+                          type="number"
+                          domain={['dataMin', 'dataMax']}
+                          scale="time"
+                          tickFormatter={xTickFormatter}
+                          tickCount={tickCount}
+                          minTickGap={24}
+                          tick={{ fontSize: 10, fill: '#94a3b8' }}
+                          axisLine={false}
+                          tickLine={false}
+                        />
+                        <YAxis
+                          yAxisId="btc"
+                          scale="log"
+                          domain={[btcDomain.y1, btcDomain.y2]}
+                          tick={{ fontSize: 10, fill: '#94a3b8' }}
+                          axisLine={false}
+                          tickLine={false}
+                          tickFormatter={(val) => (typeof val === 'number' ? `$${Math.round(val).toLocaleString()}` : '')}
+                        />
+                        <YAxis
+                          yAxisId="risk"
+                          orientation="right"
+                          domain={[0, 100]}
+                          tick={{ fontSize: 10, fill: '#94a3b8' }}
+                          axisLine={false}
+                          tickLine={false}
+                          tickFormatter={(v) => (typeof v === 'number' ? `${v.toFixed(0)}%` : '')}
+                        />
+                        <ReferenceLine yAxisId="risk" y={50} stroke="#94a3b8" strokeDasharray="6 3" strokeWidth={1.2} />
+                        <Tooltip content={<WfRiskTooltip />} />
+                        {renderChartBrush()}
+                        <Line yAxisId="btc" type="monotone" dataKey="btcPrice" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.4} dot={false} isAnimationActive={false} opacity={0.45} />
+                        <Line yAxisId="risk" type="monotone" dataKey="riskPct" name="Walk-forward Risk %" stroke="#a855f7" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </Box>
+                </>
+              )}
+            </Paper>
+          )}
+        </Box>
       )}
 
       {/* Comparison Table — redundant on the CQM tab (covered by the tiles). */}
