@@ -237,7 +237,8 @@ const Admin: React.FC = () => {
   const [rebuilding, setRebuilding] = useState(false);
   const [patchingMvrv, setPatchingMvrv] = useState(false);
   const [patchingSthLthRp, setPatchingSthLthRp] = useState(false);
-  const signalPatchBusy = patchingMvrv || patchingSthLthRp;
+  const [recomputing, setRecomputing] = useState(false);
+  const signalPatchBusy = patchingMvrv || patchingSthLthRp || recomputing;
   const [scheduledAlertsLoading, setScheduledAlertsLoading] = useState(true);
   const [scheduledAlertsRunning, setScheduledAlertsRunning] = useState(false);
   const [scheduledAlertsStatus, setScheduledAlertsStatus] = useState<ScheduledAlertsStatus | null>(null);
@@ -262,8 +263,9 @@ const Admin: React.FC = () => {
   const [ctaLabel, setCtaLabel] = useState('Open Dashboard');
   const [ctaHref, setCtaHref] = useState('https://coinstrat.xyz/dashboard');
   const [curatedLinks, setCuratedLinks] = useState<CuratedLink[]>([emptyCuratedLink(0)]);
+  const [customRecipients, setCustomRecipients] = useState('');
   const [newsletterMessage, setNewsletterMessage] = useState<{
-    severity: 'success' | 'error';
+    severity: 'success' | 'error' | 'info';
     text: string;
   } | null>(null);
 
@@ -633,6 +635,42 @@ const Admin: React.FC = () => {
     }
   };
 
+  const handleRecomputeDerived = async () => {
+    if (!window.confirm(
+      'This recomputes every derived signal field across the full cached history (scores, regimes, DXY/PRICE_REGIME intermediates, Bottom Accumulation Score) using the current logic, then rewrites the cache.\n\nIt does not re-fetch raw APIs, so it is fast. Use this after deploying changes to the scoring/compute logic. Continue?',
+    )) return;
+
+    setRecomputing(true);
+    setRefreshResult(null);
+    setError(null);
+
+    try {
+      const res = await fetch('/api/v1/signals/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ mode: 'patch_bottom_scores' }),
+      });
+      const text = await res.text();
+      const parsed = parseJsonOrApiFailure(res.status, text);
+      if (!parsed.ok) {
+        setError(parsed.message);
+        return;
+      }
+      const data = parsed.data as { error?: string; patched?: number; total?: number; cached_at?: string | null };
+      if (!res.ok) {
+        setError(data.error ?? `Recompute failed (HTTP ${res.status})`);
+      } else {
+        setRefreshResult(`Derived fields recomputed — ${data.patched ?? '?'} of ${data.total ?? '?'} rows rewritten.`);
+        setCacheInfo((prev) => ({ ...prev, cachedAt: data.cached_at ?? prev.cachedAt, stale: false }));
+      }
+      await fetchCacheInfo();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setRecomputing(false);
+    }
+  };
+
   const handleRunScheduledAlerts = async () => {
     setScheduledAlertsRunning(true);
     setScheduledAlertsResult(null);
@@ -692,11 +730,65 @@ const Admin: React.FC = () => {
     }
   };
 
+  const composeNewsletterInBackground = async () => {
+    // Compose runs OpenAI + image generation, which exceeds Netlify's 26s
+    // synchronous cap, so it runs in a background function. We fire it and poll
+    // the job status until it finishes (or errors).
+    setNewsletterMessage({
+      severity: 'info',
+      text: 'Composing draft… this runs in the background and can take up to a minute.',
+    });
+
+    const trigger = await fetch('/.netlify/functions/admin-newsletter-background', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({
+        weekOf: selectedWeek,
+        editor_note: editorNote,
+        cta_label: ctaLabel,
+        cta_href: ctaHref,
+      }),
+    });
+
+    if (!(trigger.status === 202 || trigger.ok)) {
+      throw new Error(`Failed to start compose job (HTTP ${trigger.status}).`);
+    }
+
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const deadline = Date.now() + 180_000; // 3 minutes
+    // Give the background function a moment to write its initial status.
+    await sleep(3_000);
+
+    while (Date.now() < deadline) {
+      const res = await fetch(
+        `/api/admin/newsletter?composeStatus=${encodeURIComponent(selectedWeek)}`,
+        { headers: authHeaders(), cache: 'no-store' },
+      );
+      const data = await res.json().catch(() => ({}));
+      const job = data?.job as { status?: string; error?: string } | null | undefined;
+
+      if (job?.status === 'done') return;
+      if (job?.status === 'error') {
+        throw new Error(job.error ?? 'Newsletter compose failed.');
+      }
+      await sleep(4_000);
+    }
+
+    throw new Error('Compose is taking longer than expected — it may still finish in the background. Refresh in a minute.');
+  };
+
   const handleNewsletterAction = async (action: 'compose' | 'send' | 'send_test') => {
     setNewsletterBusy(true);
     setNewsletterMessage(null);
 
     try {
+      if (action === 'compose') {
+        await composeNewsletterInBackground();
+        setNewsletterMessage({ severity: 'success', text: 'Newsletter draft composed successfully.' });
+        await fetchNewsletter(selectedWeek);
+        return;
+      }
+
       const payload = {
         action,
         issueId: newsletterIssue?.id,
@@ -722,9 +814,6 @@ const Admin: React.FC = () => {
       }
 
       switch (action) {
-        case 'compose':
-          setNewsletterMessage({ severity: 'success', text: 'Newsletter draft composed successfully.' });
-          break;
         case 'send':
           setNewsletterMessage({
             severity: 'success',
@@ -741,6 +830,55 @@ const Admin: React.FC = () => {
           break;
       }
 
+      await fetchNewsletter(selectedWeek);
+    } catch (err: any) {
+      setNewsletterMessage({ severity: 'error', text: err.message });
+    } finally {
+      setNewsletterBusy(false);
+    }
+  };
+
+  // Re-send the current composed issue to specific addresses (e.g. people who
+  // missed a broadcast). Uses `test` mode, so it never re-blasts subscribers or
+  // changes the issue's broadcast status.
+  const handleSendToRecipients = async () => {
+    const recipients = customRecipients
+      .split(/[\s,;]+/)
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+
+    if (recipients.length === 0) {
+      setNewsletterMessage({ severity: 'error', text: 'Enter at least one email address.' });
+      return;
+    }
+
+    setNewsletterBusy(true);
+    setNewsletterMessage(null);
+
+    try {
+      const res = await fetch('/api/admin/newsletter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({
+          action: 'send_test',
+          issueId: newsletterIssue?.id,
+          weekOf: selectedWeek,
+          recipients,
+        }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error ?? 'Send failed.');
+      }
+
+      setNewsletterMessage({
+        severity: 'success',
+        text: `Sent to ${data.result.sent}/${data.result.total} address(es)${
+          data.result.failed > 0 ? ` (${data.result.failed} failed)` : ''
+        }.`,
+      });
+      setCustomRecipients('');
       await fetchNewsletter(selectedWeek);
     } catch (err: any) {
       setNewsletterMessage({ severity: 'error', text: err.message });
@@ -883,6 +1021,9 @@ const Admin: React.FC = () => {
       <Tabs
         value={tabIdx}
         onChange={(_, value) => setTabIdx(value)}
+        variant="scrollable"
+        scrollButtons="auto"
+        allowScrollButtonsMobile
         sx={{ mb: 2, '& .MuiTab-root': { fontWeight: 700, textTransform: 'none' } }}
       >
         <Tab label={`Registered Users (${users.length})`} />
@@ -1124,6 +1265,34 @@ const Admin: React.FC = () => {
                   size="small"
                   variant="outlined"
                 />
+              </Stack>
+
+              <Stack
+                direction={{ xs: 'column', sm: 'row' }}
+                spacing={1}
+                useFlexGap
+                flexWrap="wrap"
+                alignItems={{ sm: 'center' }}
+              >
+                <TextField
+                  label="Re-send to specific addresses"
+                  placeholder="email1@example.com, email2@example.com"
+                  value={customRecipients}
+                  onChange={(event) => setCustomRecipients(event.target.value)}
+                  size="small"
+                  disabled={newsletterBusy || newsletterLoading || !newsletterIssue?.id}
+                  InputLabelProps={{ shrink: true }}
+                  sx={{ flex: 1, minWidth: 280 }}
+                />
+                <Button
+                  variant="outlined"
+                  disabled={newsletterBusy || newsletterLoading || !newsletterIssue?.id || !customRecipients.trim()}
+                  onClick={handleSendToRecipients}
+                  startIcon={<Send size={14} />}
+                  sx={{ textTransform: 'none', fontWeight: 700 }}
+                >
+                  Send to addresses
+                </Button>
               </Stack>
             </Stack>
           </Paper>
@@ -1651,6 +1820,16 @@ const Admin: React.FC = () => {
                   sx={{ textTransform: 'none', fontWeight: 700 }}
                 >
                   {patchingSthLthRp ? 'Patching…' : 'Patch Holder RP'}
+                </Button>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  disabled={rebuilding || refreshing || signalPatchBusy}
+                  onClick={handleRecomputeDerived}
+                  startIcon={recomputing ? <CircularProgress size={14} color="inherit" /> : <RefreshCw size={14} />}
+                  sx={{ textTransform: 'none', fontWeight: 700 }}
+                >
+                  {recomputing ? 'Recomputing…' : 'Recompute derived'}
                 </Button>
                 <Button
                   variant="outlined"

@@ -13,6 +13,7 @@ import btcDailyRaw from '../../../public/data/btc_daily.json';
 import { fetchBmpAddressesInProfit } from './bmpAddressesInProfit';
 import { getCachedFundingRateSeries, getCachedOpenInterestSeries } from './derivativesCache';
 import { fetchFredSeriesBatch } from './fredClient';
+import { scoreBottomAccumulation } from '../../../src/utils/bottomScore';
 
 // ── Types ───────────────────────────────────────────────────────────────
 
@@ -79,125 +80,6 @@ function rollingMin(arr: number[], window: number): number[] {
     result.push(vals.length ? Math.min(...vals) : NaN);
   }
   return result;
-}
-
-function scoreBottomAccumulation(d: any) {
-  const price = Number(d.BTCUSD);
-  const sthRp = Number(d.STH_REALIZED_PRICE);
-  const lthRp = Number(d.LTH_REALIZED_PRICE);
-  const ma40w = Number(d.BTC_MA40W);
-  const lthSopr = Number(d.LTH_SOPR);
-  const sip = Number(d.SIP);
-  const drawdown = Number(d.BTC_DRAWDOWN_FROM_365D_HIGH);
-  const funding7d = Number(d.BTC_FUNDING_7D_AVG);
-  const oiDrawdown90d = Number(d.BTC_OI_DRAWDOWN_90D);
-  const low60 = Number(d.BTC_60D_LOW);
-  const low30 = Number(d.BTC_30D_LOW);
-  const priorLow30 = Number(d.BTC_PRIOR_30D_LOW);
-  const daysSinceLow60 = Number(d.BTC_DAYS_SINCE_60D_LOW);
-  const roc30 = Number(d.BTC_ROC30);
-  const roc90 = Number(d.BTC_ROC90);
-
-  const onchainValue = Math.min(20,
-    (d.VAL_SCORE >= 3 ? 12 : d.VAL_SCORE >= 2 ? 9 : d.VAL_SCORE >= 1 ? 4 : 0) +
-    (Number.isFinite(price) && Number.isFinite(sthRp) && sthRp > 0
-      ? price <= sthRp ? 4 : price <= sthRp * 1.1 ? 2 : 0
-      : 0) +
-    (Number.isFinite(price) && Number.isFinite(lthRp) && lthRp > 0
-      ? price <= lthRp ? 4 : price <= lthRp * 1.25 ? 2 : 0
-      : 0)
-  );
-
-  const legacyCapitulation = Math.min(20,
-    (Number.isFinite(lthSopr) ? lthSopr < 0.98 ? 9 : lthSopr < 1 ? 7 : lthSopr < 1.03 ? 3 : 0 : 0) +
-    (Number.isFinite(sip) ? sip < 65 ? 6 : sip < 75 ? 4 : sip < 85 ? 2 : 0 : 0) +
-    (Number.isFinite(drawdown) ? drawdown <= -0.55 ? 5 : drawdown <= -0.4 ? 3 : drawdown <= -0.25 ? 1 : 0 : 0)
-  );
-  const holderStress = Math.min(15,
-    (Number.isFinite(lthSopr) ? lthSopr < 0.98 ? 7 : lthSopr < 1 ? 5 : lthSopr < 1.03 ? 2 : 0 : 0) +
-    (Number.isFinite(sip) ? sip < 65 ? 4 : sip < 75 ? 3 : sip < 85 ? 1 : 0 : 0) +
-    (Number.isFinite(drawdown) ? drawdown <= -0.55 ? 4 : drawdown <= -0.4 ? 3 : drawdown <= -0.25 ? 1 : 0 : 0)
-  );
-  const derivativesStress = Math.min(5,
-    (Number.isFinite(funding7d) ? funding7d < -0.0001 ? 3 : funding7d <= 0 ? 2 : funding7d < 0.0001 ? 1 : 0 : 0) +
-    (Number.isFinite(oiDrawdown90d) ? oiDrawdown90d <= -0.35 ? 2 : oiDrawdown90d <= -0.2 ? 1 : 0 : 0)
-  );
-  const capitulation = (Number.isFinite(funding7d) || Number.isFinite(oiDrawdown90d))
-    ? Math.min(20, holderStress + derivativesStress)
-    : legacyCapitulation;
-
-  const liquidityTurn = Math.min(20,
-    (d.LIQ_SCORE >= 2 ? 9 : d.LIQ_SCORE >= 1 ? 5 : 0) +
-    (Number.isFinite(d.US_LIQ_13W_DELTA) && d.US_LIQ_13W_DELTA > 0 ? 4 : 0) +
-    (Number.isFinite(d.G3_YOY) ? d.G3_YOY > 0 ? 4 : d.G3_YOY > -2 ? 2 : 0 : 0) +
-    (d.DXY_SCORE >= 2 ? 3 : d.DXY_SCORE >= 1 ? 2 : 0)
-  );
-
-  const macroRisk = Math.min(20,
-    (d.BIZ_CYCLE_SCORE >= 2 ? 10 : d.BIZ_CYCLE_SCORE >= 1 ? 7 : 2) +
-    (Number.isFinite(d.SAHM) && d.SAHM < 0.5 ? 4 : 0) +
-    (Number.isFinite(d.YC_M) ? d.YC_M >= 0 ? 3 : d.YC_M > -0.75 ? 1 : 0 : 0) +
-    (Number.isFinite(d.ISM_PMI) ? d.ISM_PMI >= 50 ? 3 : d.ISM_PMI >= 45 ? 1 : 0 : 0)
-  );
-
-  const setupDrawdownDepth = Number.isFinite(drawdown)
-    ? drawdown <= -0.55 ? 3 : drawdown <= -0.4 ? 2 : drawdown <= -0.25 ? 1 : 0
-    : 0;
-  const setupBelowMa40w = Number.isFinite(price) && Number.isFinite(ma40w) && ma40w > 0
-    ? price <= ma40w * 0.8 ? 3 : price <= ma40w * 0.9 ? 2 : price < ma40w ? 1 : 0
-    : 0;
-  const setupBelowSthRp = Number.isFinite(price) && Number.isFinite(sthRp) && sthRp > 0
-    ? price <= sthRp * 0.85 ? 3 : price <= sthRp * 0.95 ? 2 : price < sthRp ? 1 : 0
-    : 0;
-  const setupNegativeMomentum = Number.isFinite(roc30) && Number.isFinite(roc90)
-    ? (roc30 < 0 && roc90 < 0 ? 1 : 0)
-    : 0;
-  const priceSetup = Math.min(10, setupDrawdownDepth + setupBelowMa40w + setupBelowSthRp + setupNegativeMomentum);
-
-  const heldAboveLocalLow =
-    Number.isFinite(price) &&
-    Number.isFinite(low60) &&
-    low60 > 0 &&
-    Number.isFinite(daysSinceLow60) &&
-    daysSinceLow60 >= 30 &&
-    price >= low60 * 1.08;
-  const lowsStoppedBreaking =
-    Number.isFinite(low30) &&
-    Number.isFinite(priorLow30) &&
-    priorLow30 > 0 &&
-    low30 >= priorLow30 * 0.98;
-  const baseStabilization = heldAboveLocalLow && lowsStoppedBreaking && Number.isFinite(roc30) && roc30 > 0
-    ? 2
-    : (heldAboveLocalLow || lowsStoppedBreaking ? 1 : 0);
-
-  const priceRepair = Math.min(10,
-    (Number.isFinite(price) && Number.isFinite(ma40w) && ma40w > 0
-      ? price >= ma40w ? 3 : price >= ma40w * 0.9 ? 2 : price >= ma40w * 0.8 ? 1 : 0
-      : 0) +
-    (Number.isFinite(price) && Number.isFinite(sthRp) && sthRp > 0
-      ? price >= sthRp ? 3 : price >= sthRp * 0.95 ? 2 : price >= sthRp * 0.9 ? 1 : 0
-      : 0) +
-    (Number.isFinite(roc30) && roc30 > 0 ? 1 : 0) +
-    (Number.isFinite(roc90) && roc90 > 0 ? 1 : 0) +
-    baseStabilization
-  );
-  const priceStructure = priceSetup + priceRepair;
-
-  const total = onchainValue + capitulation + liquidityTurn + macroRisk + priceStructure;
-  const band =
-    total >= 85 ? 'Capitulation Opportunity' :
-    total >= 70 ? 'Strong Accumulation' :
-    total >= 50 ? 'Accumulate Slowly' :
-    total >= 25 ? 'Watch' :
-    'Avoid';
-  const deployment =
-    total >= 85 ? '75-100%' :
-    total >= 70 ? '50-75%' :
-    total >= 50 ? '25-40%' :
-    total >= 25 ? '0-10%' :
-    '0%';
-
-  return { onchainValue, capitulation, liquidityTurn, macroRisk, priceSetup, priceRepair, priceStructure, total, band, deployment };
 }
 
 // ── Server-side data fetching (recent tail only) ────────────────────────
@@ -696,7 +578,15 @@ export async function refreshSignals(
   daily.forEach((d, i) => {
     d.DXY_SCORE_RAW = d.DXY_SCORE;
     const p = dxyPersist[i] >= 20 / 30 ? 1 : 0;
+    d.DXY_PERSIST = p;
     d.DXY_SCORE = p ? d.DXY_SCORE_RAW : 0;
+    // Persist the intermediates the Scores USD card + DXY charts display.
+    const roc = dxyROC20[i];
+    if (typeof roc === 'number' && !isNaN(roc)) d.DXY_ROC20 = roc;
+    const m50 = dxyMA50[i];
+    if (typeof m50 === 'number' && !isNaN(m50)) d.DXY_MA50 = m50;
+    const m200 = dxyMA200[i];
+    if (typeof m200 === 'number' && !isNaN(m200)) d.DXY_MA200 = m200;
   });
 
   // -- Cycle Score --
@@ -810,7 +700,10 @@ export async function refreshSignals(
     return Number.isFinite(p) && Number.isFinite(ma) && p >= ma ? 1 : 0;
   });
   const regPersist = rollingMean(rawOn, 30);
-  daily.forEach((d, i) => { d.PRICE_REGIME_ON = regPersist[i] >= 20 / 30 ? 1 : 0; });
+  daily.forEach((d, i) => {
+    d.PRICE_REGIME = rawOn[i];
+    d.PRICE_REGIME_ON = regPersist[i] >= 20 / 30 ? 1 : 0;
+  });
 
   // 7. Final aggregates (CORE, MACRO, ACCUM) ──────────────────────────
 
@@ -888,10 +781,9 @@ export async function refreshSignals(
   });
 
   // 8. Strip bulky intermediate fields ─────────────────────────────────
+  // (DXY_SCORE_RAW is intentionally kept — the Scores USD card displays it.)
 
-  const strip = [
-    'DXY_SCORE_RAW',
-  ];
+  const strip: string[] = [];
   for (const d of daily) { for (const k of strip) delete d[k]; }
 
   // 9. Return only new rows ────────────────────────────────────────────
