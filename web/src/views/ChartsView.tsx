@@ -17,6 +17,7 @@ import {
   type CQMPoint,
   snapshotAt,
 } from '../utils/cqm';
+import { buildRiskGradientStops } from '../utils/cqmRiskGradient';
 
 interface Props {
   data: SignalData[];
@@ -28,6 +29,13 @@ interface Props {
    * route-driven single-section behavior is preserved.
    */
   sections?: ChartsSection[];
+  /**
+   * When provided, render exactly the charts whose stable id is in this list
+   * (regardless of section), in file order. Takes precedence over `sections`.
+   * Used by the model Factors pages to show only the charts that contribute to
+   * a specific factor's score. Charts without an id are never matched.
+   */
+  chartIds?: string[];
   /** Hide the page title + section tab bar (set automatically when `sections` is used). */
   embedded?: boolean;
   /** Show the range (1Y/2Y/5Y/10Y/All) toggle. Defaults to true. */
@@ -298,14 +306,18 @@ function lookupRiskPctAtPrice(
   return Number.isFinite(best.riskPct) ? best.riskPct : null;
 }
 
-const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, showRange = true, startDate, endDate }) => {
+const ChartsView: React.FC<Props> = ({ data, sections, chartIds, embedded: embeddedProp, showRange = true, startDate, endDate }) => {
   const [range, setRange] = useState<RangeKey>('all');
   const [cqmBandScale, setCqmBandScale] = useState<CqmBandScale>('semi-log');
   const [cqmBrushRange, setCqmBrushRange] = useState<{ startIndex: number; endIndex: number } | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
 
-  const composed = Array.isArray(sections) && sections.length > 0;
+  const chartIdFilter = useMemo(
+    () => (Array.isArray(chartIds) && chartIds.length > 0 ? new Set(chartIds) : null),
+    [chartIds],
+  );
+  const composed = (Array.isArray(sections) && sections.length > 0) || chartIdFilter !== null;
   const embedded = embeddedProp ?? composed;
 
   const routeSection: ChartsSection = useMemo(() => {
@@ -320,7 +332,11 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
     () => (composed ? new Set(sections) : new Set([routeSection])),
     [composed, sections, routeSection],
   );
-  const show = (s: ChartsSection) => visibleSections.has(s);
+  // When a chart-id filter is active, render only charts whose id is listed
+  // (cross-section, used by the Factors pages). Otherwise fall back to
+  // section-level visibility. Charts pass their stable id as the 2nd argument.
+  const show = (s: ChartsSection, id?: string) =>
+    chartIdFilter ? id != null && chartIdFilter.has(id) : visibleSections.has(s);
   const section = routeSection;
 
   useEffect(() => {
@@ -414,6 +430,13 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
         // Liquidity levels (WALCL, TGA, RRP, US_LIQ) are in "millions" -> show trillions
         const trillionsKeys = new Set(['WALCL', 'WTREGEN', 'RRPONTSYD', 'US_LIQ']);
         if (trillionsKeys.has(name)) return `$${(v / 1e6).toFixed(2)}T`;
+
+        // Funding rates are tiny; show 3 decimals so e.g. -0.005% is not rounded
+        // to -0.00%. Normalize negative zero (-0.000% -> 0.000%).
+        if (name.includes('Funding')) {
+          const r = Number(v.toFixed(3));
+          return `${(r === 0 ? 0 : r).toFixed(3)}%`;
+        }
 
         // Percent series
         if (name.includes('YOY') || name.includes('ROC') || name.includes('%')) return `${v.toFixed(2)}%`;
@@ -634,16 +657,10 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
     if (!cqmFit) return (chartData as any[]).map(withDays);
     const cqmMap = new Map<number, CQMPoint>();
     for (const s of cqmFit.signals) cqmMap.set(s.ts, s);
-    return (chartData as any[]).map((d, i, arr) => {
+    return (chartData as any[]).map((d) => {
       const cqm = cqmMap.get(d.ts);
       if (!cqm) return withDays(d);
       const riskPct = cqm.risk * 100;
-      const bucket = cqmRiskBucket(riskPct);
-      const prevBucket = i > 0 ? cqmRiskBucket((cqmMap.get(arr[i - 1]?.ts)?.risk ?? NaN) * 100) : null;
-      const nextBucket = i < arr.length - 1 ? cqmRiskBucket((cqmMap.get(arr[i + 1]?.ts)?.risk ?? NaN) * 100) : null;
-      const inBucket = (target: CqmRiskBucket) => (
-        bucket === target || prevBucket === target || nextBucket === target
-      );
       return {
         ...withDays(d),
         CQM_LOWER: cqm.solidLower,
@@ -653,10 +670,6 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
         CQM_QR_MEDIAN: cqm.qrDashedMedian,
         CQM_QR_HIGH: cqm.qrDashedHigh,
         CQM_RISK_PCT: riskPct,
-        CQM_RISK_COOL: inBucket('COOL') ? riskPct : null,
-        CQM_RISK_WARM: inBucket('WARM') ? riskPct : null,
-        CQM_RISK_HOT: inBucket('HOT') ? riskPct : null,
-        CQM_RISK_EUPHORIC: inBucket('EUPHORIC') ? riskPct : null,
         CQM_TR_LOWER: cqm.trendRiskLower,
         CQM_TR_MEDIAN: cqm.trendRiskMedian,
         CQM_TR_UPPER: cqm.trendRiskUpper,
@@ -719,6 +732,21 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
     const floorTs = Date.UTC(2014, 0, 1);
     return (cqmChartData as any[]).filter((d) => Number(d.ts) >= floorTs);
   }, [cqmChartData]);
+
+  // Gradient stops for the CQM Risk line, derived from the visible series'
+  // min/max so the green→red colours map to true risk values (SVG gradients
+  // map to the path bounding box, not the 0–100 axis).
+  const cqmRiskGradientStops = useMemo(() => {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const d of cqmBandsData as any[]) {
+      const v = Number(d.CQM_RISK_PCT);
+      if (!Number.isFinite(v)) continue;
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+    return buildRiskGradientStops(lo, hi);
+  }, [cqmBandsData]);
 
   const cqmYearTicks = useMemo(() => {
     const rows = cqmBandsData as any[];
@@ -813,7 +841,7 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
       )}
 
       {/* System State: BTCUSD with CORE/MACRO background shading */}
-      {show('system') && (
+      {show('system', 'system-state') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -868,7 +896,7 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
       )}
 
       {/* Bottom Accumulation Score */}
-      {show('bottom') && (
+      {show('bottom', 'bottom-score') && (
       <>
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
@@ -918,6 +946,10 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
           </ResponsiveContainer>
         </Box>
       </Paper>
+      </>
+      )}
+
+      {show('bottom', 'funding') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -951,7 +983,9 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
           </ResponsiveContainer>
         </Box>
       </Paper>
+      )}
 
+      {show('bottom', 'oi') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -984,11 +1018,10 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
           </ResponsiveContainer>
         </Box>
       </Paper>
-      </>
       )}
 
       {/* Main Chart: BTC + Liquidity Overlay + LIQ_SCORE background shading */}
-      {show('liquidity') && (
+      {show('liquidity', 'us-net-liquidity') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1100,7 +1133,7 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
       )}
 
       {/* US Net Liquidity Inputs */}
-      {show('liquidity') && (
+      {show('liquidity', 'us-net-liquidity-inputs') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1179,7 +1212,7 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
       )}
 
       {/* MVRV Valuation: BTCUSD shaded by MVRV bands */}
-      {show('valuation') && (
+      {show('valuation', 'val-score') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1236,7 +1269,7 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
       )}
 
       {/* MVRV ratio: dual-axis with key valuation thresholds */}
-      {show('valuation') && (
+      {show('valuation', 'mvrv') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1278,7 +1311,7 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
       )}
 
       {/* Price Regime: BTCUSD vs 40W MA with regime shading */}
-      {show('valuation') && (
+      {show('valuation', 'price-regime') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1331,7 +1364,7 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
       )}
 
       {/* Long-Term Holder SOPR */}
-      {show('valuation') && (
+      {show('valuation', 'lth-sopr') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1373,7 +1406,7 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
       )}
 
       {/* Holder realized prices (STH / LTH cost basis vs spot) */}
-      {show('valuation') && (
+      {show('valuation', 'holder-realized') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1413,7 +1446,7 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
       )}
 
       {/* Percent Addresses in Profit — Euphoria Exhaustion exit logic */}
-      {show('valuation') && (
+      {show('valuation', 'addresses-in-profit') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1472,7 +1505,7 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
       )}
 
       {/* NUPL — All Holders (derived from MVRV, used in VAL_SCORE) */}
-      {show('valuation') && (
+      {show('valuation', 'nupl') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1516,7 +1549,7 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
       )}
 
       {/* NUPL — Long-Term Holders Only (from BGeometrics lth_nupl) */}
-      {show('valuation') && (
+      {show('valuation', 'lth-nupl') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1559,7 +1592,7 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
       )}
 
       {/* G3 Global Liquidity: BTC + G3 composite */}
-      {show('liquidity') && (
+      {show('liquidity', 'g3-assets') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1618,7 +1651,7 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
       )}
 
       {/* G3 Global Liquidity: components breakdown */}
-      {show('liquidity') && (
+      {show('liquidity', 'g3-components') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1662,7 +1695,7 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
       )}
 
       {/* G3 Global Liquidity: YoY */}
-      {show('liquidity') && (
+      {show('liquidity', 'g3-yoy') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1729,7 +1762,7 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
       )}
 
       {/* BTC over Business Cycle Score shading */}
-      {show('business') && (
+      {show('business', 'biz-cycle') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1785,7 +1818,7 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
       )}
 
       {/* Business Cycle: inputs (moved below BTC + business cycle shading) */}
-      {show('business') && (
+      {show('business', 'biz-cycle-inputs') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1840,7 +1873,7 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
       )}
 
       {/* ISM Manufacturing PMI */}
-      {show('business') && (
+      {show('business', 'ism-pmi') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1880,7 +1913,7 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
       )}
 
       {/* USD Regime Inputs (DTWEXBGS proxy) */}
-      {show('usd') && (
+      {show('usd', 'dxy-regime') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1997,7 +2030,7 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
       )}
 
       {/* DXY Persistence Regime: BTCUSD shaded by DXY_PERSIST */}
-      {show('usd') && (
+      {show('usd', 'dxy-persistence') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 2.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -2222,6 +2255,13 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
         <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
           <ResponsiveContainer width="100%" height="100%">
             <LineChart key={`cqm-risk-${range}`} data={cqmBandsData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
+              <defs>
+                <linearGradient id="cqmRiskLineGradient" x1="0" y1="0" x2="0" y2="1">
+                  {cqmRiskGradientStops.map((s, i) => (
+                    <stop key={i} offset={`${(s.offset * 100).toFixed(2)}%`} stopColor={s.color} />
+                  ))}
+                </linearGradient>
+              </defs>
               <ReferenceArea yAxisId="risk" y1={0} y2={25} fill="#22c55e" fillOpacity={0.16} strokeOpacity={0} />
               <ReferenceArea yAxisId="risk" y1={25} y2={50} fill="#84cc16" fillOpacity={0.14} strokeOpacity={0} />
               <ReferenceArea yAxisId="risk" y1={50} y2={75} fill="#f59e0b" fillOpacity={0.14} strokeOpacity={0} />
@@ -2233,10 +2273,7 @@ const ChartsView: React.FC<Props> = ({ data, sections, embedded: embeddedProp, s
               <ReferenceLine yAxisId="risk" y={50} stroke="#94a3b8" strokeDasharray="6 3" strokeWidth={1.2} />
               <Tooltip content={<CustomTooltip />} />
               {renderChartBrush()}
-              <Line yAxisId="risk" type="monotone" dataKey="CQM_RISK_COOL" name="CQM Risk %" stroke="#22c55e" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
-              <Line yAxisId="risk" type="monotone" dataKey="CQM_RISK_WARM" name="CQM Risk %" stroke="#84cc16" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
-              <Line yAxisId="risk" type="monotone" dataKey="CQM_RISK_HOT" name="CQM Risk %" stroke="#f59e0b" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
-              <Line yAxisId="risk" type="monotone" dataKey="CQM_RISK_EUPHORIC" name="CQM Risk %" stroke="#ef4444" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
+              <Line yAxisId="risk" type="monotone" dataKey="CQM_RISK_PCT" name="CQM Risk %" stroke="url(#cqmRiskLineGradient)" strokeWidth={2.6} dot={false} isAnimationActive={false} connectNulls />
               <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.4} dot={false} isAnimationActive={false} opacity={0.45} />
             </LineChart>
           </ResponsiveContainer>

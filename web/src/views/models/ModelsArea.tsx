@@ -128,15 +128,20 @@ const ModelOverview: React.FC<{ model: ModelDef; data: SignalData[]; onOpenAuth?
   }
 
   const state = model.currentState(data);
+  const Extra = model.OverviewExtra;
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
-        <Typography variant="h6" sx={{ fontWeight: 800, mb: 1 }}>Current state</Typography>
-        <Stack direction="row" spacing={1.5} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
-          <StateBadge state={state} />
-        </Stack>
-        <StateMetrics state={state} />
-      </Paper>
+      {Extra && current ? (
+        <Extra current={current} history={data} />
+      ) : (
+        <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+          <Typography variant="h6" sx={{ fontWeight: 800, mb: 1 }}>Current state</Typography>
+          <Stack direction="row" spacing={1.5} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+            <StateBadge state={state} />
+          </Stack>
+          <StateMetrics state={state} />
+        </Paper>
+      )}
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Typography variant="h6" sx={{ fontWeight: 800, mb: 1 }}>About this model</Typography>
         {model.summary.map((p, i) => (
@@ -212,6 +217,28 @@ const ModelFactors: React.FC<{ model: ModelDef; data: SignalData[] }> = ({ model
   );
 };
 
+const ModelChartTabs: React.FC<{ tabs: NonNullable<ModelDef['chartTabs']>; data: SignalData[] }> = ({ tabs, data }) => {
+  const [active, setActive] = React.useState(0);
+  const current = tabs[Math.min(active, tabs.length - 1)];
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <Tabs
+        value={Math.min(active, tabs.length - 1)}
+        onChange={(_, v: number) => setActive(v)}
+        variant="scrollable"
+        scrollButtons="auto"
+        allowScrollButtonsMobile
+        sx={{ borderBottom: 1, borderColor: 'divider', '& .MuiTab-root': { fontWeight: 700, textTransform: 'none' } }}
+      >
+        {tabs.map((t) => (
+          <Tab key={t.label} label={t.label} />
+        ))}
+      </Tabs>
+      <ChartsView data={data} chartIds={current.chartIds} embedded />
+    </Box>
+  );
+};
+
 const ModelLayout: React.FC<AreaProps> = ({ data, onOpenAuth }) => {
   const { modelId } = useParams();
   const location = useLocation();
@@ -260,9 +287,27 @@ const ModelLayout: React.FC<AreaProps> = ({ data, onOpenAuth }) => {
 
       <Routes>
         <Route index element={<ModelOverview model={model} data={data} onOpenAuth={onOpenAuth} />} />
-        <Route path="charts" element={<ChartsView data={data} sections={model.chartSections} embedded />} />
+        <Route
+          path="charts"
+          element={
+            model.chartTabs && model.chartTabs.length ? (
+              <ModelChartTabs tabs={model.chartTabs} data={data} />
+            ) : (
+              <ChartsView data={data} sections={model.chartSections} embedded />
+            )
+          }
+        />
         {model.factorGroups && (
-          <Route path="factors" element={<ModelFactors model={model} data={data} />} />
+          <Route
+            path="factors"
+            element={
+              model.FactorsComponent ? (
+                <model.FactorsComponent data={data} />
+              ) : (
+                <ModelFactors model={model} data={data} />
+              )
+            }
+          />
         )}
         {model.backtestVariant && (
           <Route path="backtest" element={<Backtest data={data} variant={model.backtestVariant} />} />

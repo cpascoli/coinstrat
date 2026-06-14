@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { SignalData } from '../App';
-import { Binary, ShieldCheck, Zap, ToggleRight } from 'lucide-react';
+import { Binary, ShieldCheck, Zap } from 'lucide-react';
 import {
   Box,
   Card,
@@ -20,7 +20,6 @@ interface Props {
 const LogicFlow: React.FC<Props> = ({ current }) => {
   const coreStatus = current.CORE_ON === 1;
   const macroStatus = current.MACRO_ON === 1;
-  const accumStatus = current.ACCUM_ON === 1;
 
   const macroScoreSum = useMemo(() => current.LIQ_SCORE + current.BIZ_CYCLE_SCORE, [current.LIQ_SCORE, current.BIZ_CYCLE_SCORE]);
 
@@ -30,105 +29,14 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
         <Stack spacing={0.75}>
           <Stack direction="row" alignItems="center" spacing={1.5}>
             <Binary className="h-8 w-8 shrink-0 text-blue-400" />
-            <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: -0.5 }}>
-              Signal Synthesis
+            <Typography variant="body2" color="text.secondary" sx={{ pl: { xs: 0, sm: '44px' } }}>
+              How the latest data points are evaluated into CORE, MACRO, and ACCUM from the valuation, trend, and macro rule sets.
             </Typography>
           </Stack>
-          <Typography variant="body2" color="text.secondary" sx={{ pl: { xs: 0, sm: '44px' } }}>
-            How the latest data points are evaluated into CORE, MACRO, and ACCUM from the valuation, trend, and macro rule sets.
-          </Typography>
         </Stack>
       </Box>
 
       <Grid container spacing={2.5}>
-        <Grid item xs={12}>
-          <Card
-            sx={{
-              borderColor: accumStatus ? 'success.main' : 'error.main',
-              borderWidth: 2,
-              borderStyle: 'solid',
-              backgroundImage: accumStatus
-                ? 'radial-gradient(700px circle at 20% 0%, rgba(34,197,94,0.10), transparent 50%)'
-                : 'radial-gradient(700px circle at 20% 0%, rgba(239,68,68,0.10), transparent 50%)',
-            }}
-          >
-            <CardHeader
-              avatar={<ToggleRight className="h-7 w-7 text-blue-300" />}
-              title={<Typography sx={{ fontWeight: 900 }}>Final Permission (ACCUM)</Typography>}
-              subheader="Final permission to deploy capital. MACRO only modifies DCA intensity (3×) when CORE is already ON."
-              action={
-                <Chip
-                  label={accumStatus ? 'ON' : 'OFF'}
-                  color={accumStatus ? 'success' : 'error'}
-                  variant="filled"
-                  size="small"
-                />
-              }
-            />
-            <Divider />
-            <CardContent>
-              <Grid container spacing={1.25} alignItems="stretch">
-                <Grid item xs={12} md={4}>
-                  <Card variant="outlined" sx={{ height: '100%' }}>
-                    <CardContent>
-                      <Typography variant="overline" color="text.secondary">
-                        CORE ENGINE
-                      </Typography>
-                      <Typography variant="h6" sx={{ fontWeight: 900, mt: 0.5 }}>
-                        {coreStatus ? 'ENABLED' : 'DISABLED'}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                        Valuation/regime-led baseline accumulation.
-                      </Typography>
-                    </CardContent>
-                  </Card>
-                </Grid>
-
-                <Grid item xs={12} md={4}>
-                  <Card variant="outlined" sx={{ height: '100%' }}>
-                    <CardContent>
-                      <Typography variant="overline" color="text.secondary">
-                        MACRO ACCELERATOR
-                      </Typography>
-                      <Typography variant="h6" sx={{ fontWeight: 900, mt: 0.5 }}>
-                        {macroStatus ? 'ENABLED' : 'DISABLED'}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                        Intensity modifier: 3× DCA when active alongside CORE.
-                      </Typography>
-                    </CardContent>
-                  </Card>
-                </Grid>
-
-                <Grid item xs={12} md={4}>
-                  <Card
-                    variant="outlined"
-                    sx={{
-                      height: '100%',
-                      borderColor: accumStatus ? 'success.main' : 'error.main',
-                      backgroundColor: accumStatus ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)',
-                    }}
-                  >
-                    <CardContent>
-                      <Typography variant="overline" color="text.secondary">
-                        RESULT
-                      </Typography>
-                      <Typography variant="h4" sx={{ fontWeight: 950, mt: 0.5 }}>
-                        {accumStatus ? 'ON' : 'OFF'}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                        {accumStatus
-                          ? (macroStatus ? 'Permission granted — accelerated (3×) accumulation.' : 'Permission granted to accumulate (base rate).')
-                          : 'Capital protection: pause buys.'}
-                      </Typography>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              </Grid>
-            </CardContent>
-          </Card>
-        </Grid>
-
         <Grid item xs={12} lg={6}>
           <Card>
             <CardHeader
@@ -199,7 +107,7 @@ const LogicFlow: React.FC<Props> = ({ current }) => {
                     <MetricChip title="Price Regime" label="PRICE_REGIME" value={current.PRICE_REGIME_ON} />
                   </Grid>
                   <Grid item xs={4}>
-                    <MetricChip title="Percent Addresses in Profit" label="% Addrs" value={typeof current.SIP === 'number' ? `${current.SIP.toFixed(1)}%` : '–'} />
+                    <MetricChip title="Perc Addr in Profit" label="% Addrs" value={typeof current.SIP === 'number' ? `${current.SIP.toFixed(1)}%` : '–'} />
                   </Grid>
                   { // show euphoria flag if SIP is not exhausted
                     current.SIP_EXHAUSTED === 0 && (

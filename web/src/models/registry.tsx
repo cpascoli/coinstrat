@@ -11,6 +11,8 @@ import CoreMacroDocs from '../views/models/docs/CoreMacroDocs';
 import BottomDocs from '../views/models/docs/BottomDocs';
 import CqmDocs from '../views/models/docs/CqmDocs';
 import CqmOverview from '../views/models/CqmOverview';
+import BottomScorePanel from '../views/models/BottomScorePanel';
+import BottomFactors from '../views/models/BottomFactors';
 
 export type ModelId = 'core-macro' | 'bottom' | 'cqm';
 
@@ -45,13 +47,36 @@ export interface ModelDef {
   summary: string[];
   chartSections: ChartsSection[];
   factorGroups?: FactorGroup[];
+  /**
+   * Optional custom Factors view. When set, it replaces the generic
+   * chart-per-group `ModelFactors` layout (e.g. the Bottom Score uses a
+   * scoring-focused breakdown with charts available on demand).
+   */
+  FactorsComponent?: React.FC<{ data: SignalData[] }>;
   /** When set, the model exposes a Backtest tab locked to this simulator variant. */
   backtestVariant?: BacktestVariant;
   /** Optional custom Overview (core-macro reuses the rich member Dashboard). */
   OverviewComponent?: React.FC<{ current: SignalData; history: SignalData[] }>;
+  /**
+   * Optional panel rendered at the top of the default Overview (when there is no
+   * custom `OverviewComponent`). Lets a model surface a rich, model-specific
+   * snapshot above the generic "About this model" block.
+   */
+  OverviewExtra?: React.FC<{ current: SignalData; history: SignalData[] }>;
   overviewGated?: boolean;
   signals?: { gated: boolean; Component: React.FC<{ current: SignalData }> };
   scores?: { gated: boolean; Component: React.FC<{ current: SignalData }> };
+  /**
+   * Optional preferred tab order. Tabs present in this list are emitted first in
+   * the given order; any remaining (applicable) tabs keep their default order.
+   */
+  tabOrder?: ModelTab['id'][];
+  /**
+   * Optional sub-tabs for the Charts tab. When set, the Charts page renders a
+   * tab bar and shows only the charts (by stable id, see ChartsView) for the
+   * active group instead of one long scroll of every section.
+   */
+  chartTabs?: { label: string; chartIds: string[] }[];
   Docs: React.FC;
   currentState: (rows: SignalData[]) => ModelState | null;
 }
@@ -62,7 +87,7 @@ function lastRow(rows: SignalData[]): SignalData | null {
 
 const coreMacroModel: ModelDef = {
   id: 'core-macro',
-  name: 'CORE + MACRO Signals',
+  name: 'CORE + MACRO',
   shortName: 'CORE/MACRO',
   tagline: 'The original accumulation engine: a valuation/price CORE switch gated by a liquidity, business-cycle and USD MACRO regime.',
   status: 'live',
@@ -71,18 +96,20 @@ const coreMacroModel: ModelDef = {
     'CORE is driven by valuation (VAL_SCORE) and the price regime; MACRO combines the liquidity and business-cycle regimes with a persistence-filtered USD gate.',
     'Together they form the master accumulation switches that pace deployment across the cycle.',
   ],
-  chartSections: ['system'],
+  chartSections: ['system', 'valuation', 'liquidity', 'business', 'usd'],
   backtestVariant: 'core-macro',
-  factorGroups: [
-    { label: 'Valuation & on-chain', blurb: 'Inputs to VAL_SCORE / the CORE switch.', sections: ['valuation'] },
-    { label: 'Liquidity', blurb: 'Inputs to the MACRO liquidity regime.', sections: ['liquidity'] },
-    { label: 'Business cycle', blurb: 'Inputs to the MACRO business-cycle regime.', sections: ['business'] },
-    { label: 'US Dollar', blurb: 'The persistence-filtered USD gate.', sections: ['usd'] },
-  ],
   OverviewComponent: Dashboard,
   overviewGated: false,
   signals: { gated: true, Component: LogicFlow },
   scores: { gated: true, Component: ScoreBreakdown },
+  tabOrder: ['overview', 'signals', 'scores', 'charts', 'backtest', 'docs'],
+  chartTabs: [
+    { label: 'Valuation', chartIds: ['val-score', 'mvrv', 'nupl', 'lth-nupl', 'lth-sopr', 'addresses-in-profit', 'holder-realized'] },
+    { label: 'Price', chartIds: ['system-state', 'price-regime'] },
+    { label: 'Liquidity', chartIds: ['us-net-liquidity', 'us-net-liquidity-inputs', 'g3-assets', 'g3-components', 'g3-yoy'] },
+    { label: 'Business Cycle', chartIds: ['biz-cycle', 'biz-cycle-inputs', 'ism-pmi'] },
+    { label: 'USD', chartIds: ['dxy-regime', 'dxy-persistence'] },
+  ],
   Docs: CoreMacroDocs,
   currentState: (rows) => {
     const d = lastRow(rows);
@@ -115,6 +142,8 @@ const bottomModel: ModelDef = {
     'Higher scores indicate deeper value and stronger accumulation setups; the band and deployment range translate the score into action.',
   ],
   chartSections: ['bottom'],
+  OverviewExtra: BottomScorePanel,
+  FactorsComponent: BottomFactors,
   factorGroups: [
     { label: 'On-chain value', blurb: 'Valuation vs realized prices.', sections: ['valuation'], scoreField: 'BOTTOM_ONCHAIN_SCORE', scoreMax: 20 },
     { label: 'Capitulation', blurb: 'Holder stress and derivatives.', sections: ['valuation'], scoreField: 'BOTTOM_CAPITULATION_SCORE', scoreMax: 20 },
@@ -122,6 +151,7 @@ const bottomModel: ModelDef = {
     { label: 'Macro risk', blurb: 'Business-cycle backdrop.', sections: ['business'], scoreField: 'BOTTOM_MACRO_SCORE', scoreMax: 20 },
     { label: 'Price structure', blurb: 'Drawdown, trend and repair.', sections: ['system'], scoreField: 'BOTTOM_STRUCTURE_SCORE', scoreMax: 20 },
   ],
+  tabOrder: ['overview', 'factors', 'charts', 'docs'],
   Docs: BottomDocs,
   currentState: (rows) => {
     const d = lastRow(rows);
@@ -180,6 +210,8 @@ const cqmModel: ModelDef = {
           { label: 'Risk', value: `${riskPct.toFixed(1)}%` },
           { label: 'Price', value: `$${Math.round(snap.price).toLocaleString()}` },
           { label: 'QR 50%', value: `$${Math.round(snap.qrDashedMedian).toLocaleString()}` },
+          { label: 'QR 99.9%', value: `$${Math.round(snap.solidUpper).toLocaleString()}` },
+          { label: 'QR 0.1%', value: `$${Math.round(snap.solidLower).toLocaleString()}` },
         ],
       };
     } catch {
@@ -217,5 +249,11 @@ export function modelTabs(model: ModelDef): ModelTab[] {
   if (model.signals) tabs.push({ id: 'signals', label: 'Signals', segment: 'signals', gated: model.signals.gated });
   if (model.scores) tabs.push({ id: 'scores', label: 'Scores', segment: 'scores', gated: model.scores.gated });
   tabs.push({ id: 'docs', label: 'Docs', segment: 'docs', gated: false });
+
+  if (model.tabOrder && model.tabOrder.length) {
+    const rank = new Map(model.tabOrder.map((id, i) => [id, i]));
+    const at = (t: ModelTab) => rank.get(t.id) ?? model.tabOrder!.length;
+    return [...tabs].sort((a, b) => at(a) - at(b));
+  }
   return tabs;
 }
