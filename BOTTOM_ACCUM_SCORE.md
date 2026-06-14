@@ -11,6 +11,18 @@ It answers a different question from `CORE_ON`:
 
 The score should not override `CORE_ON`. It is a sizing and context layer for investors who want to stage capital into weakness instead of relying only on a binary signal.
 
+## Implementation (single source of truth)
+
+The model is implemented and documented in exactly one place:
+`web/src/utils/bottomScore.ts`. It exports the declarative factor spec
+(`BOTTOM_FACTORS`, with every tiered rule) and the derived
+`scoreBottomAccumulation()`. The signal engine
+(`web/src/services/engine.ts`), the server-side compute pipeline
+(`web/netlify/functions/lib/compute.ts`) and the Factors UI
+(`web/src/views/models/BottomFactors.tsx`) all import from it, so the live
+signal, charts and Factors page can never diverge. Change the thresholds there
+and everything follows.
+
 ## Model Design
 
 The score is built from four 0-20 components and two 0-10 price components.
