@@ -222,18 +222,29 @@ const ModelChartTabs: React.FC<{ tabs: NonNullable<ModelDef['chartTabs']>; data:
   const current = tabs[Math.min(active, tabs.length - 1)];
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      <Tabs
-        value={Math.min(active, tabs.length - 1)}
-        onChange={(_, v: number) => setActive(v)}
-        variant="scrollable"
-        scrollButtons="auto"
-        allowScrollButtonsMobile
-        sx={{ borderBottom: 1, borderColor: 'divider', '& .MuiTab-root': { fontWeight: 700, textTransform: 'none' } }}
-      >
-        {tabs.map((t) => (
-          <Tab key={t.label} label={t.label} />
-        ))}
-      </Tabs>
+      {/* Visually separate the chart sub-tabs from the model-level tabs above. */}
+      <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2 }, bgcolor: 'rgba(2,6,23,0.20)' }}>
+        <Typography variant="overline" sx={{ fontWeight: 800, letterSpacing: '0.12em', color: 'text.secondary' }}>
+          Chart explorer
+        </Typography>
+        <Tabs
+          value={Math.min(active, tabs.length - 1)}
+          onChange={(_, v: number) => setActive(v)}
+          variant="scrollable"
+          scrollButtons="auto"
+          allowScrollButtonsMobile
+          sx={{ borderBottom: 1, borderColor: 'divider', mt: 0.5, '& .MuiTab-root': { fontWeight: 700, textTransform: 'none' } }}
+        >
+          {tabs.map((t) => (
+            <Tab key={t.label} label={t.label} />
+          ))}
+        </Tabs>
+        {current.blurb && (
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
+            {current.blurb}
+          </Typography>
+        )}
+      </Paper>
       <ChartsView data={data} chartIds={current.chartIds} embedded />
     </Box>
   );

@@ -76,9 +76,10 @@ export interface ModelDef {
   /**
    * Optional sub-tabs for the Charts tab. When set, the Charts page renders a
    * tab bar and shows only the charts (by stable id, see ChartsView) for the
-   * active group instead of one long scroll of every section.
+   * active group instead of one long scroll of every section. `blurb` is a one
+   * line description of the group shown under the sub-tabs.
    */
-  chartTabs?: { label: string; chartIds: string[] }[];
+  chartTabs?: { label: string; chartIds: string[]; blurb?: string }[];
   Docs: React.FC;
   currentState: (rows: SignalData[]) => ModelState | null;
 }
@@ -106,11 +107,12 @@ const coreMacroModel: ModelDef = {
   scores: { gated: true, Component: ScoreBreakdown },
   tabOrder: ['overview', 'signals', 'scores', 'charts', 'backtest', 'docs'],
   chartTabs: [
-    { label: 'Valuation', chartIds: ['val-score', 'mvrv', 'nupl', 'lth-nupl', 'lth-sopr', 'addresses-in-profit', 'holder-realized'] },
-    { label: 'Price', chartIds: ['system-state', 'price-regime'] },
-    { label: 'Liquidity', chartIds: ['us-net-liquidity', 'us-net-liquidity-inputs', 'g3-assets', 'g3-components', 'g3-yoy'] },
-    { label: 'Business Cycle', chartIds: ['biz-cycle', 'biz-cycle-inputs', 'ism-pmi'] },
-    { label: 'USD', chartIds: ['dxy-regime', 'dxy-persistence'] },
+    { label: 'System', chartIds: ['system-state'], blurb: 'BTC price with CORE + MACRO regime shading — the model\u2019s combined state across the cycle.' },
+    { label: 'Valuation', chartIds: ['val-score', 'mvrv', 'nupl', 'lth-nupl', 'lth-sopr', 'addresses-in-profit', 'holder-realized'], blurb: 'On-chain valuation inputs to VAL_SCORE: MVRV, NUPL and holder cost-bases.' },
+    { label: 'Price', chartIds: ['price-regime'], blurb: 'Trend structure: BTC versus its 40-week moving average regime.' },
+    { label: 'Liquidity', chartIds: ['us-net-liquidity', 'us-net-liquidity-inputs', 'g3-assets', 'g3-components', 'g3-yoy'], blurb: 'Net US and G3 liquidity — the MACRO liquidity input.' },
+    { label: 'Business Cycle', chartIds: ['biz-cycle', 'biz-cycle-inputs', 'ism-pmi'], blurb: 'Expansion vs recession nowcast: Sahm rule, yield curve and ISM PMI.' },
+    { label: 'USD', chartIds: ['dxy-regime', 'dxy-persistence'], blurb: 'Broad-dollar regime and its persistence filter — the MACRO gate.' },
   ],
   Docs: CoreMacroDocs,
   currentState: (rows) => {
