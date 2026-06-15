@@ -34,6 +34,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import type { SignalData } from '../App';
 import { getRecommendation, type RecommendationAction } from '../lib/recommendation';
+import { MODELS } from '../models/registry';
 
 interface HomeProps {
   hasFreeAccess?: boolean;
@@ -612,62 +613,7 @@ const Home: React.FC<HomeProps> = ({
           </div>
         </section>
 
-        <section className="mx-auto mb-32 max-w-7xl px-6">
-          <div className="mb-16 text-center">
-            <h3 className="font-headline mb-4 text-4xl font-black tracking-tight md:text-5xl">The Two Core Layers</h3>
-            <p className="mx-auto max-w-xl text-on-surface-variant">
-              Different market conditions require different levels of conviction. <br /> We split our strategy into two distinct signal layers.
-            </p>
-          </div>
-          <div className="grid gap-8 md:grid-cols-2">
-            <div className="group relative overflow-hidden rounded-3xl border border-outline-variant/10 bg-surface-container p-10">
-              <div className="absolute right-0 top-0 p-8 opacity-10 transition-opacity group-hover:opacity-20">
-                <span className="material-symbols-outlined text-7xl">timer</span>
-              </div>
-              <h4 className="font-headline mb-4 text-3xl font-black text-primary">CORE Accumulation</h4>
-              <p className="mb-8 text-lg leading-relaxed text-on-surface-variant">
-                This is the base signal. It focuses on on-chain valuation and the trend condition and determines whether accumulation is allowed.
-              </p>
-              <ul className="mb-8 space-y-4">
-                <li className="flex items-center gap-3 text-sm font-bold uppercase tracking-widest text-on-surface/70">
-                  <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-                  Market valuation in deep value zone
-                </li>
-                <li className="flex items-center gap-3 text-sm font-bold uppercase tracking-widest text-on-surface/70">
-                  <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-                  Long-term holders capitulating
-                </li>
-                <li className="flex items-center gap-3 text-sm font-bold uppercase tracking-widest text-on-surface/70">
-                  <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-                  Supportive trend condition
-                </li>
-              </ul>
-            </div>
-            <div className="group relative overflow-hidden rounded-3xl border border-outline-variant/10 bg-surface-container p-10">
-              <div className="absolute right-0 top-0 p-8 opacity-10 transition-opacity group-hover:opacity-20">
-                <span className="material-symbols-outlined text-7xl">rocket_launch</span>
-              </div>
-              <h4 className="font-headline mb-4 text-3xl font-black text-secondary">MACRO Acceleration</h4>
-              <p className="mb-8 text-lg leading-relaxed text-on-surface-variant">
-                It triggers when liquidity and busines cycle align for rapid expansion to signal accelerated accumulation.
-              </p>
-              <ul className="mb-8 space-y-4">
-                <li className="flex items-center gap-3 text-sm font-bold uppercase tracking-widest text-on-surface/70">
-                  <span className="h-1.5 w-1.5 rounded-full bg-secondary" />
-                  Fed Balance Sheet expansion
-                </li>
-                <li className="flex items-center gap-3 text-sm font-bold uppercase tracking-widest text-on-surface/70">
-                  <span className="h-1.5 w-1.5 rounded-full bg-secondary" />
-                  Business cycle recovery
-                </li>
-                <li className="flex items-center gap-3 text-sm font-bold uppercase tracking-widest text-on-surface/70">
-                  <span className="h-1.5 w-1.5 rounded-full bg-secondary" />
-                  Weak dollar regime
-                </li>
-              </ul>
-            </div>
-          </div>
-        </section>
+        <HomeModels />
 
         <HomePricing hasFreeAccess={hasFreeAccess} isAuthenticated={isAuthenticated} onOpenAuth={onOpenAuth} />
         <HomeFaq />
@@ -862,6 +808,86 @@ const HomeWhatIs: React.FC = () => (
   </section>
 );
 
+const HomeModels: React.FC = () => {
+  // Registry-driven so new models appear automatically; featured models lead.
+  const ordered = [...MODELS].sort((a, b) => Number(Boolean(b.featured)) - Number(Boolean(a.featured)));
+  return (
+    <section className="mx-auto mb-32 max-w-7xl px-6">
+      <div className="mb-16 text-center">
+        <h2 className="mb-4 text-xs font-bold uppercase tracking-[0.3em] text-primary">The Model Suite</h2>
+        <h3 className="font-headline mb-4 text-4xl font-black tracking-tight md:text-5xl">Many models. One engine.</h3>
+        <p className="mx-auto max-w-2xl text-on-surface-variant">
+          CoinStrat isn&apos;t a single indicator — it&apos;s a growing suite of Bitcoin accumulation models, each reading the
+          cycle through a different lens. Use one, or combine them to cross-check conviction.
+        </p>
+      </div>
+
+      <div className="grid gap-8 md:grid-cols-3">
+        {ordered.map((model) => {
+          const Icon = model.Icon;
+          const featured = Boolean(model.featured);
+          return (
+            <Link
+              key={model.id}
+              to={`/models/${model.id}`}
+              className={clsx(
+                'group relative flex flex-col overflow-hidden rounded-3xl border bg-surface-container p-10 transition-all duration-300 hover:-translate-y-1',
+                featured
+                  ? 'border-secondary/40 shadow-[0_0_40px_-12px_rgba(77,224,130,0.35)] hover:border-secondary/60'
+                  : 'border-outline-variant/10 hover:border-primary/40',
+              )}
+            >
+              <div className="mb-6 flex items-center gap-3">
+                <div
+                  className={clsx(
+                    'flex h-12 w-12 items-center justify-center rounded-xl transition-all',
+                    featured ? 'bg-secondary/15 text-secondary' : 'bg-primary/10 text-primary',
+                  )}
+                >
+                  <Icon className="h-6 w-6" />
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border border-outline-variant/20 bg-surface-container-high/50 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-[0.15em] text-on-surface-variant">
+                    {model.shortName}
+                  </span>
+                  {featured && (
+                    <span className="rounded-full border border-secondary/40 bg-secondary/10 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-[0.15em] text-secondary">
+                      Flagship
+                    </span>
+                  )}
+                  {model.status === 'beta' && (
+                    <span className="rounded-full border border-outline-variant/30 bg-surface-container-high/50 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-[0.15em] text-on-surface-variant">
+                      Beta
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <h4 className="font-headline mb-3 text-2xl font-black tracking-tight">{model.name}</h4>
+              <p className="mb-8 flex-grow leading-relaxed text-on-surface-variant">{model.tagline}</p>
+
+              <span className="inline-flex items-center gap-1 font-headline font-bold text-primary">
+                Explore {model.shortName}
+                <span className="material-symbols-outlined text-lg transition-transform group-hover:translate-x-1">arrow_forward</span>
+              </span>
+            </Link>
+          );
+        })}
+      </div>
+
+      <div className="mt-12 text-center">
+        <Link
+          to="/models"
+          className="inline-flex items-center gap-2 rounded-xl border border-outline-variant/30 bg-surface-container px-8 py-4 font-bold transition-all hover:border-primary/50"
+        >
+          <Layers size={18} className="text-outline" />
+          View all models
+        </Link>
+      </div>
+    </section>
+  );
+};
+
 function GlassBullet({ tone, text }: { tone: 'primary' | 'secondary' | 'tertiary'; text: string }) {
   const color = tone === 'primary' ? 'text-primary' : tone === 'secondary' ? 'text-secondary' : 'text-tertiary';
   return (
@@ -901,18 +927,23 @@ const HOME_FAQ_ITEMS: { q: string; a: React.ReactNode }[] = [
     ),
   },
   {
-    q: "What's behind the CoinStrat signal?",
+    q: "What's behind the CoinStrat signals?",
     a: (
       <>
-        A <strong className="text-on-surface">transparent engine</strong>, not a black box.{' '}
-        <strong className="text-on-surface">CORE</strong> is a state machine driven by on-chain valuation and price regime: 
-        entry, hold, and exit rules are explicit. 
-        {' '}
-        <strong className="text-on-surface">MACRO</strong> layers liquidity, business cycle, and
-        dollar strength to modulate intensity when CORE is already on. 
-        Factor scores (liquidity, cycle, dollar, valuation) are broken down in the app. 
+        A <strong className="text-on-surface">suite of transparent models</strong>, not a black box. Each reads the cycle
+        through a different lens:{' '}
+        <strong className="text-on-surface">CORE + MACRO</strong> is a state machine on valuation and price regime, with a
+        liquidity / business-cycle / dollar overlay that modulates intensity;{' '}
+        <strong className="text-on-surface">Bottom Accumulation Score</strong> is a 0–100 composite of on-chain value,
+        capitulation, liquidity, macro and price structure; and the{' '}
+        <strong className="text-on-surface">CoinStrat Quantile Model (CQM)</strong> maps price to a 0–100% cycle risk via
+        quantile-regression fair value. Every input, score and rule is broken down in the app.
         <br />
-        Open {' '} <strong className="text-on-surface">Dashboard → Signals and Scores</strong> to see the live logic, and read the{' '}
+        Browse the{' '}
+        <Link to="/models" className="font-semibold text-primary underline-offset-2 hover:underline">
+          Models
+        </Link>{' '}
+        and read the{' '}
         <Link to="/docs" className="font-semibold text-primary underline-offset-2 hover:underline">
           Docs
         </Link>{' '}
@@ -921,14 +952,27 @@ const HOME_FAQ_ITEMS: { q: string; a: React.ReactNode }[] = [
     ),
   },
   {
+    q: 'Which model should I use?',
+    a: (
+      <>
+        Whichever fits how you think about the cycle — they’re complementary, not competing.{' '}
+        <strong className="text-on-surface">CQM</strong> is our most sophisticated, giving a continuous 0–100% risk read that
+        scales DCA up in value and down in euphoria. <strong className="text-on-surface">CORE + MACRO</strong> is the
+        original on/off accumulation switch with a macro accelerator, and the{' '}
+        <strong className="text-on-surface">Bottom Accumulation Score</strong> grades how attractive conditions are for staged
+        buying near lows. Many users watch all three and lean in when they agree.
+      </>
+    ),
+  },
+  {
     q: 'Why go Pro?',
     a: (
       <>
-        <strong className="text-on-surface">Free is the full CORE model</strong>: dashboard, charts, backtest context, and the
-        weekly email. <strong className="text-on-surface">Pro is the power layer</strong> for who wants to define their own rules:
-        {` `}
-        <strong className="text-on-surface">Signal Builder</strong> (AI-powered strategy builder), email alerts, API access, and OpenClaw so
-        you can wire signals into your own workflows. Upgrade when you’re ready to design and automate.
+        <strong className="text-on-surface">Free gives you every model</strong> — dashboards, charts, factor scores, backtest
+        context, and the weekly email. <strong className="text-on-surface">Pro is the power layer</strong> for people who want
+        to define their own rules:{' '}
+        <strong className="text-on-surface">Signal Builder</strong> (AI-powered strategy builder), email alerts, API access, and
+        OpenClaw so you can wire signals into your own workflows. Upgrade when you’re ready to design and automate.
       </>
     ),
   },

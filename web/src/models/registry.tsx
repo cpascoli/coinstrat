@@ -44,6 +44,8 @@ export interface ModelDef {
   tagline: string;
   status: 'live' | 'beta';
   Icon: LucideIcon;
+  /** Highlight this model on the public homepage suite (e.g. the flagship model). */
+  featured?: boolean;
   summary: string[];
   chartSections: ChartsSection[];
   factorGroups?: FactorGroup[];
@@ -178,6 +180,7 @@ const cqmModel: ModelDef = {
   tagline: 'A quantile-regression fair-value model that maps BTC price to a 0–100% cycle risk, with quantile bands and a risk-vs-price curve.',
   status: 'live',
   Icon: Waves,
+  featured: true,
   summary: [
     'CQM fits quantile bands across BTC history and converts the latest price into a fair-value risk between 0% (deep value) and 100% (euphoric).',
     'Risk drives the CQM Risk-Weighted DCA strategy: buy more when risk is low, trim when risk is high.',
