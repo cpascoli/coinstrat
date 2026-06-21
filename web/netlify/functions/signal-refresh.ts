@@ -6,6 +6,7 @@ import {
   patchBtcusdInCache,
   patchMVRVInCache,
   patchSthLthRealizedPriceInCache,
+  patchTreasuryYieldsInCache,
   patchBottomScoresInCache,
   patchCqmInCache,
 } from './lib/signalRefreshRunner';
@@ -31,6 +32,10 @@ import { refreshDerivativesCache } from './lib/derivativesCache';
  *  3b. Body { "mode": "patch_sth_lth_rp" } → back-fill STH/LTH/aggregate realized
  *      price from BGeometrics full JSON for every cached row where those fields are
  *      null (fixes historical gaps when the series was added after seeding).
+ *
+ *  3b2. Body { "mode": "patch_treasury_yields" } → back-fill the 10Y / 3M
+ *      Treasury yields (FRED DGS10 / DGS3MO) on every cached row where they are
+ *      null (fast two-fetch fix when those fields were added after seeding).
  *
  *  3c. Body { "mode": "patch_bottom_scores" } → recompute the existing cache
  *      range with current logic and back-fill BOTTOM_* score fields.
@@ -95,6 +100,11 @@ export const handler: Handler = async (event) => {
 
     if (mode === 'patch_sth_lth_rp') {
       const result = await patchSthLthRealizedPriceInCache();
+      return { statusCode: 200, body: JSON.stringify(result) };
+    }
+
+    if (mode === 'patch_treasury_yields') {
+      const result = await patchTreasuryYieldsInCache();
       return { statusCode: 200, body: JSON.stringify(result) };
     }
 

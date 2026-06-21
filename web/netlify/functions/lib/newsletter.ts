@@ -2,7 +2,13 @@ import { randomBytes } from 'node:crypto';
 import { Resend } from 'resend';
 import { signalsStore } from './store';
 import { serviceSupabase } from './auth';
-import { buildCqmWeeklyBlockFromRows, type CqmWeeklyBlock } from './cqmSnapshot';
+import {
+  buildCqmWeeklyBlockFromRows,
+  computeCqmPriceLadder,
+  readCqmPriceLadderBlob,
+  type CqmPriceLadder,
+  type CqmWeeklyBlock,
+} from './cqmSnapshot';
 import { generateAndStoreImage, removeStoredImage } from './aiImage';
 
 export type NewsletterIssueStatus = 'draft' | 'scheduled' | 'sending' | 'sent' | 'failed';
@@ -30,6 +36,10 @@ export interface NewsletterSection {
   title: string;
   body: string;
   bullets: string[];
+  /** Optional trusted HTML rendered after the bullets (not escaped). */
+  htmlBlock?: string;
+  /** Optional plain-text lines appended after the bullets in the text email. */
+  textLines?: string[];
 }
 
 export interface NewsletterDraft {
@@ -142,6 +152,7 @@ export interface WeeklyContext {
   deltas: Record<string, number | null>;
   bottomAccum: BottomAccumWeeklyBlock;
   cqm: CqmWeeklyBlock;
+  cqmPriceLadder: CqmPriceLadder | null;
   stateChanges: string[];
   highlights: string[];
 }
@@ -179,10 +190,37 @@ interface SendIssueInput {
   settings: NewsletterSettings;
   mode: 'broadcast' | 'test';
   testRecipient?: string | null;
+  /**
+   * Explicit recipient list for `test` mode (e.g. re-sending to specific people
+   * who missed a broadcast). Takes precedence over `testRecipient`. Logged as a
+   * `test` delivery — it never marks the issue as broadcast/sent.
+   */
+  testRecipients?: string[] | null;
 }
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 const fromEmail = process.env.RESEND_FROM_EMAIL || 'digest@coinstrat.xyz';
+
+/**
+ * Resend's default send limit is 5 requests/second. We send in small batches
+ * with a pause between them to stay comfortably under that ceiling, and retry
+ * individual messages that still come back rate-limited (429).
+ */
+const RESEND_BATCH_SIZE = 4;
+const RESEND_BATCH_INTERVAL_MS = 1100;
+const RESEND_MAX_RETRIES = 4;
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+function isRateLimitError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const e = error as { statusCode?: number; name?: string; message?: string };
+  return (
+    e.statusCode === 429 ||
+    e.name === 'rate_limit_exceeded' ||
+    /rate limit|too many requests/i.test(e.message ?? '')
+  );
+}
 const appUrl = process.env.VITE_APP_URL || 'https://coinstrat.xyz';
 const openAiApiKey = process.env.OPENAI_API_KEY;
 const openAiModel = process.env.OPENAI_NEWSLETTER_MODEL || process.env.OPENAI_NEWS_MODEL || 'gpt-4.1-mini';
@@ -1232,6 +1270,18 @@ export async function buildWeeklyContext(weekOf: string): Promise<WeeklyContext>
   const cqm = buildCqmWeeklyBlockFromRows(current, previousRow);
   stateChanges.push(...bottomAccum.stateChanges, ...cqm.stateChanges);
 
+  // "Price map" ladder (BTC price at each risk level), mirroring models/cqm.
+  // Prefer the blob the daily refresh precomputes; fall back to an inline fit
+  // only when it has not been materialised yet (e.g. right after deploy).
+  let cqmPriceLadder = await readCqmPriceLadderBlob();
+  if (!cqmPriceLadder) {
+    const ladderPoints = rows
+      .filter((r) => typeof r.BTCUSD === 'number' && (r.BTCUSD as number) > 0 && r.Date <= current.Date)
+      .map((r) => ({ date: r.Date, ts: new Date(`${r.Date}T00:00:00Z`).getTime(), price: Number(r.BTCUSD) }))
+      .filter((p) => Number.isFinite(p.ts));
+    cqmPriceLadder = computeCqmPriceLadder(ladderPoints);
+  }
+
   const bottomScoreText = typeof bottomAccum.current.score === 'number'
     ? `${bottomAccum.current.score}/100 (${bottomAccum.current.band ?? 'n/a'})`
     : 'n/a';
@@ -1321,9 +1371,69 @@ export async function buildWeeklyContext(weekOf: string): Promise<WeeklyContext>
     },
     bottomAccum,
     cqm,
+    cqmPriceLadder,
     stateChanges,
     highlights,
   };
+}
+
+/** Zone colours for the CQM price-map ladder (anchored at 0/25/50/75/100% risk). */
+const CQM_ZONE_COLORS: Record<number, string> = {
+  0: '#22c55e',
+  25: '#84cc16',
+  50: '#f59e0b',
+  75: '#ef4444',
+  100: '#dc2626',
+};
+
+/**
+ * Email-safe "Price map at today's fit" block mirroring the models/cqm overview:
+ * a row of BTC prices by risk level plus a zone bar. Returns trusted HTML and
+ * plain-text lines, or null when the ladder could not be computed.
+ */
+function buildCqmPriceMap(
+  ladder: CqmPriceLadder | null,
+): { html: string; textLines: string[] } | null {
+  if (!ladder || ladder.levels.length === 0) return null;
+
+  const fmtUsd = (v: number): string =>
+    Number.isFinite(v) ? `$${Math.round(v).toLocaleString('en-US')}` : '—';
+
+  const cells = ladder.levels
+    .map((lv) => {
+      const pct = Math.round(lv.risk * 100);
+      const color = CQM_ZONE_COLORS[pct] ?? '#94a3b8';
+      return `<td style="padding:8px 4px;text-align:center;background:rgba(148,163,184,0.08);border:1px solid #1e293b;">
+              <div style="font-size:11px;font-weight:800;color:${color};">${pct}% risk</div>
+              <div style="font-size:13px;font-weight:700;color:#e2e8f0;font-family:ui-monospace,monospace;">${fmtUsd(lv.price)}</div>
+            </td>`;
+    })
+    .join('');
+
+  const html = `
+        <div style="margin-top:14px;border-top:1px solid #1e293b;padding-top:12px;">
+          <div style="font-size:13px;font-weight:800;color:#f8fafc;margin-bottom:4px;">Price map at today's fit</div>
+          <p style="margin:0 0 10px;color:#94a3b8;font-size:12px;line-height:1.6;">Holding the QR 50% fair value fixed, these are the BTC prices that map to each risk level right now. BTC is ${fmtUsd(ladder.price)} at ${ladder.riskPct.toFixed(1)}% risk.</p>
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;table-layout:fixed;">
+            <tr>${cells}</tr>
+          </table>
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;table-layout:fixed;margin-top:6px;">
+            <tr>
+              <td style="font-size:0;line-height:0;height:8px;background:#22c55e;border-radius:4px 0 0 4px;">&nbsp;</td>
+              <td style="font-size:0;line-height:0;height:8px;background:#84cc16;">&nbsp;</td>
+              <td style="font-size:0;line-height:0;height:8px;background:#f59e0b;">&nbsp;</td>
+              <td style="font-size:0;line-height:0;height:8px;background:#ef4444;">&nbsp;</td>
+              <td style="font-size:0;line-height:0;height:8px;background:#dc2626;border-radius:0 4px 4px 0;">&nbsp;</td>
+            </tr>
+          </table>
+        </div>`;
+
+  const textLines = [
+    "Price map at today's fit (BTC price by risk level):",
+    ...ladder.levels.map((lv) => `  ${Math.round(lv.risk * 100)}% risk -> ${fmtUsd(lv.price)}`),
+  ];
+
+  return { html, textLines };
 }
 
 function fallbackDraft(
@@ -1369,12 +1479,7 @@ function fallbackDraft(
   ];
 
   const cqmBullets = [
-    typeof cqmRiskPct === 'number'
-      ? `CQM Risk: ${cqmRiskPct.toFixed(1)}% (${formatDelta((cqm.deltas.risk ?? 0) * 100, 1, ' pp')} vs. last week) · Score: ${formatNumber((cqm.current?.score ?? 0) * 100, 2)}%`
-      : 'CQM Risk: unavailable this week.',
-    cqm.current
-      ? `BTC ${formatCurrency(cqm.current.price)} vs QR median ${formatCurrency(cqm.current.qrDashedMedian)} (${cqm.current.price >= cqm.current.qrDashedMedian ? 'above' : 'below'} fair-value trend)`
-      : 'QR band context: n/a',
+    dynamicCqmRiskSentence(cqm),
     cqm.dcaHint
       ? `At ${formatGbp(cqm.dcaHint.baseGbp)}/day base → ${formatGbp(cqm.dcaHint.impliedBuyGbp)}/day implied buy${
         typeof cqm.dcaHint.previousBuyGbp === 'number'
@@ -1382,8 +1487,9 @@ function fallbackDraft(
           : ''
       }`
       : 'DCA sizing example: n/a',
-    dynamicCqmRiskSentence(cqm),
   ];
+
+  const cqmPriceMap = buildCqmPriceMap(context.cqmPriceLadder);
 
   const stableState = [
     dynamicCoreSentence(current.CORE_ON),
@@ -1410,14 +1516,16 @@ function fallbackDraft(
         bullets: changedThisWeek,
       },
       {
+        title: 'Quantile model & DCA sizing',
+        body: `The CoinStrat Quantile Model uses fair-value risk to scale daily DCA sizing. View the full model at ${appUrl}/models/cqm`,
+        bullets: cqmBullets,
+        htmlBlock: cqmPriceMap?.html,
+        textLines: cqmPriceMap?.textLines,
+      },
+      {
         title: 'Bottom deployment gauge',
         body: 'The Bottom Accumulation Score estimates how attractive the current zone is for staging sidelined capital over the next weeks or months. It does not override CORE_ON — it is a sizing and context layer.',
         bullets: bottomDeploymentBullets,
-      },
-      {
-        title: 'Quantile model & DCA sizing',
-        body: `The CoinStrat Quantile Model uses fair-value risk to scale daily DCA sizing. View the full chart at ${appUrl}/charts/cqm.`,
-        bullets: cqmBullets,
       },
       {
         title: 'Regime posture',
@@ -1660,6 +1768,7 @@ function renderNewsletterContent(issue: {
           ${section.bullets.map((bullet) => `<li style="margin:0 0 8px;">${escapeHtml(bullet)}</li>`).join('')}
         </ul>
       ` : ''}
+      ${section.htmlBlock ?? ''}
     </div>
   `).join('');
 
@@ -1741,6 +1850,7 @@ function renderNewsletterContent(issue: {
       section.title,
       section.body,
       ...section.bullets.map((bullet) => `- ${bullet}`),
+      ...(section.textLines ?? []),
       '',
     ]),
     ...(issue.draft.curatedLinks.length > 0
@@ -1765,6 +1875,43 @@ function renderNewsletterContent(issue: {
     html,
     text: lines.join('\n'),
   };
+}
+
+export type ComposeJobStatus = 'running' | 'done' | 'error';
+
+export interface ComposeJob {
+  status: ComposeJobStatus;
+  weekOf: string;
+  startedAt: number;
+  finishedAt?: number;
+  issueId?: string;
+  error?: string;
+}
+
+const COMPOSE_JOB_BLOB_PREFIX = 'newsletter_compose_job:';
+
+/**
+ * Track the state of an async compose run so the admin UI can poll for
+ * completion. Compose runs in a background function (15-min budget) because the
+ * OpenAI + image pipeline exceeds the 26s synchronous-function cap.
+ */
+export async function setComposeJob(weekOf: string, job: ComposeJob): Promise<void> {
+  try {
+    await signalsStore().setJSON(`${COMPOSE_JOB_BLOB_PREFIX}${weekOf}`, job);
+  } catch (err) {
+    console.error('[newsletter] Failed to persist compose job status:', err);
+  }
+}
+
+export async function getComposeJob(weekOf: string): Promise<ComposeJob | null> {
+  try {
+    const job = await signalsStore().get(`${COMPOSE_JOB_BLOB_PREFIX}${weekOf}`, { type: 'json' }) as
+      | ComposeJob
+      | null;
+    return job ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export async function composeNewsletterIssue(input: ComposeIssueInput): Promise<NewsletterIssueRecord> {
@@ -1941,7 +2088,16 @@ export async function sendNewsletterIssue(input: SendIssueInput) {
   const deliveryMode = input.mode;
 
   const recipients = input.mode === 'test'
-    ? [normalizeEmail(input.testRecipient ?? '')].filter(Boolean)
+    ? Array.from(
+      new Set(
+        (input.testRecipients && input.testRecipients.length > 0
+          ? input.testRecipients
+          : [input.testRecipient ?? '']
+        )
+          .map(normalizeEmail)
+          .filter(Boolean),
+      ),
+    )
     : await collectRecipients(input.settings.audience_mode);
 
   if (recipients.length === 0) {
@@ -1973,28 +2129,55 @@ export async function sendNewsletterIssue(input: SendIssueInput) {
   let failed = 0;
   const errors: string[] = [];
 
-  for (let i = 0; i < recipients.length; i += 25) {
-    const batch = recipients.slice(i, i + 25);
-    const results = await Promise.allSettled(
-      batch.map((email) => resend.emails.send({
+  const sendOne = async (email: string): Promise<void> => {
+    for (let attempt = 0; ; attempt += 1) {
+      // The Resend SDK resolves (does NOT throw) on API-level errors, returning
+      // `{ data: null, error }`, so we inspect `error` explicitly.
+      const { error } = await resend.emails.send({
         from: formatFromAddress(input.settings),
         to: email,
         replyTo: input.settings.reply_to?.trim() || undefined,
         subject: issue.subject!,
         html: personalizeTemplate(issue.html!, email),
         text: personalizeTemplate(issue.text!, email),
-      })),
-    );
+      });
+      if (!error) return;
+      // Back off and retry on rate-limit (429); fail fast on anything else.
+      if (isRateLimitError(error) && attempt < RESEND_MAX_RETRIES) {
+        await sleep(RESEND_BATCH_INTERVAL_MS * (attempt + 1));
+        continue;
+      }
+      throw new Error(error.message || JSON.stringify(error));
+    }
+  };
 
-    for (const result of results) {
+  for (let i = 0; i < recipients.length; i += RESEND_BATCH_SIZE) {
+    const batch = recipients.slice(i, i + RESEND_BATCH_SIZE);
+    const results = await Promise.allSettled(batch.map((email) => sendOne(email)));
+
+    results.forEach((result, idx) => {
       if (result.status === 'fulfilled') {
         sent += 1;
-      } else {
-        failed += 1;
-        errors.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
+        return;
       }
+      failed += 1;
+      const email = batch[idx];
+      const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
+      const entry = reason.includes(email) ? reason : `${email}: ${reason}`;
+      errors.push(entry);
+      console.error('[newsletter] send failed —', entry);
+    });
+
+    // Pace batches under Resend's 5 req/s limit (skip the wait after the last batch).
+    if (i + RESEND_BATCH_SIZE < recipients.length) {
+      await sleep(RESEND_BATCH_INTERVAL_MS);
     }
   }
+
+  // Keep the summary readable but informative: total failures + first few details.
+  const errorSummary = errors.length > 0
+    ? `${failed}/${recipients.length} failed: ${errors.slice(0, 5).join(' | ')}${errors.length > 5 ? ` | +${errors.length - 5} more` : ''}`
+    : null;
 
   const { error: logError } = await serviceSupabase
     .from('newsletter_send_logs')
@@ -2005,7 +2188,7 @@ export async function sendNewsletterIssue(input: SendIssueInput) {
       failed_count: failed,
       provider: 'resend',
       delivery_mode: deliveryMode,
-      error_summary: errors.length > 0 ? errors.slice(0, 3).join(' | ') : null,
+      error_summary: errorSummary,
     });
 
   if (logError) throw new Error(logError.message);

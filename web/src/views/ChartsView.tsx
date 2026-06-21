@@ -41,6 +41,13 @@ interface Props {
   /** Show the range (1Y/2Y/5Y/10Y/All) toggle. Defaults to true. */
   showRange?: boolean;
   /**
+   * Optional controlled range. When set, the internal range state is bypassed so
+   * a parent can drive several embedded ChartsView instances from one shared
+   * toggle (used by the ordered model Charts tab). Pair with `onRangeChange`.
+   */
+  range?: RangeKey;
+  onRangeChange?: (range: RangeKey) => void;
+  /**
    * Optional explicit start date (YYYY-MM-DD). When set, charts are windowed to
    * `Date >= startDate`, overriding the internal range selector. Used by the CQM
    * simulator so the embedded CQM Risk chart matches the simulation interval.
@@ -98,8 +105,10 @@ function buildRegimeSpans(rows: Array<{ ts: number } & Record<string, any>>, key
     }
 
     if (v !== current && startTs !== null) {
-      const prevTs = rows[i - 1]?.ts ?? ts;
-      if (prevTs > startTs) spans.push({ x1: startTs, x2: prevTs, value: current });
+      // Abut the previous span to the transition timestamp so neighbouring
+      // ReferenceAreas share an edge. Ending at the prior row left a one-interval
+      // gap that rendered as a vertical line of the page background.
+      if (ts > startTs) spans.push({ x1: startTs, x2: ts, value: current });
       current = v;
       startTs = ts;
     }
@@ -138,8 +147,10 @@ function buildBinarySpans(rows: Array<{ ts: number } & Record<string, any>>, key
     }
 
     if (v !== current && startTs !== null) {
-      const prevTs = rows[i - 1]?.ts ?? ts;
-      if (prevTs > startTs) spans.push({ x1: startTs, x2: prevTs, value: current });
+      // Abut the previous span to the transition timestamp so neighbouring
+      // ReferenceAreas share an edge. Ending at the prior row left a one-interval
+      // gap that rendered as a vertical line of the page background.
+      if (ts > startTs) spans.push({ x1: startTs, x2: ts, value: current });
       current = v;
       startTs = ts;
     }
@@ -183,8 +194,10 @@ function buildSystemSpans(rows: Array<{ ts: number } & Record<string, any>>): Sy
     }
 
     if (v !== current && startTs !== null) {
-      const prevTs = rows[i - 1]?.ts ?? ts;
-      if (prevTs > startTs) spans.push({ x1: startTs, x2: prevTs, value: current });
+      // Abut the previous span to the transition timestamp so neighbouring
+      // ReferenceAreas share an edge. Ending at the prior row left a one-interval
+      // gap that rendered as a vertical line of the page background.
+      if (ts > startTs) spans.push({ x1: startTs, x2: ts, value: current });
       current = v;
       startTs = ts;
     }
@@ -226,8 +239,10 @@ function buildMvrvSpans(rows: Array<{ ts: number } & Record<string, any>>): Mvrv
     }
 
     if (v !== current && startTs !== null) {
-      const prevTs = rows[i - 1]?.ts ?? ts;
-      if (prevTs > startTs) spans.push({ x1: startTs, x2: prevTs, value: current });
+      // Abut the previous span to the transition timestamp so neighbouring
+      // ReferenceAreas share an edge. Ending at the prior row left a one-interval
+      // gap that rendered as a vertical line of the page background.
+      if (ts > startTs) spans.push({ x1: startTs, x2: ts, value: current });
       current = v;
       startTs = ts;
     }
@@ -306,8 +321,10 @@ function lookupRiskPctAtPrice(
   return Number.isFinite(best.riskPct) ? best.riskPct : null;
 }
 
-const ChartsView: React.FC<Props> = ({ data, sections, chartIds, embedded: embeddedProp, showRange = true, startDate, endDate }) => {
-  const [range, setRange] = useState<RangeKey>('all');
+const ChartsView: React.FC<Props> = ({ data, sections, chartIds, embedded: embeddedProp, showRange = true, range: controlledRange, onRangeChange, startDate, endDate }) => {
+  const [rangeState, setRangeState] = useState<RangeKey>('all');
+  const range = controlledRange ?? rangeState;
+  const setRange = onRangeChange ?? setRangeState;
   const [cqmBandScale, setCqmBandScale] = useState<CqmBandScale>('semi-log');
   const [cqmBrushRange, setCqmBrushRange] = useState<{ startIndex: number; endIndex: number } | null>(null);
   const location = useLocation();
@@ -606,8 +623,9 @@ const ChartsView: React.FC<Props> = ({ data, sections, chartIds, embedded: embed
       const vi = visual[i];
       const ts = (chartData[i] as any).ts;
       if (vi !== current) {
-        const prevTs = (chartData[i - 1] as any).ts;
-        if (prevTs > startTs) spans.push({ x1: startTs, x2: prevTs, value: current });
+        // Abut to the transition timestamp (see span builders above) so the
+        // background shading has no vertical gap line at regime changes.
+        if (ts > startTs) spans.push({ x1: startTs, x2: ts, value: current });
         current = vi;
         startTs = ts;
       }
@@ -936,12 +954,7 @@ const ChartsView: React.FC<Props> = ({ data, sections, chartIds, embedded: embed
               <Tooltip content={<CustomTooltip />} />
               {renderChartBrush()}
               <Line yAxisId="score" type="monotone" dataKey="BOTTOM_ACCUM_SCORE" name="Bottom Score" stroke="#facc15" strokeWidth={3} dot={false} isAnimationActive={false} />
-              <Line yAxisId="score" type="monotone" dataKey="BOTTOM_ONCHAIN_SCORE" name="On-chain Score" stroke="#a78bfa" strokeWidth={1.4} dot={false} isAnimationActive={false} opacity={0.7} />
-              <Line yAxisId="score" type="monotone" dataKey="BOTTOM_CAPITULATION_SCORE" name="Capitulation Score" stroke="#fb7185" strokeWidth={1.4} dot={false} isAnimationActive={false} opacity={0.7} />
-              <Line yAxisId="score" type="monotone" dataKey="BOTTOM_LIQUIDITY_SCORE" name="Liquidity Score" stroke="#60a5fa" strokeWidth={1.4} dot={false} isAnimationActive={false} opacity={0.7} />
-              <Line yAxisId="score" type="monotone" dataKey="BOTTOM_PRICE_SETUP_SCORE" name="Price Setup" stroke="#f97316" strokeWidth={1.2} dot={false} isAnimationActive={false} opacity={0.65} />
-              <Line yAxisId="score" type="monotone" dataKey="BOTTOM_PRICE_REPAIR_SCORE" name="Price Repair" stroke="#4ade80" strokeWidth={1.2} dot={false} isAnimationActive={false} opacity={0.65} />
-              <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.5} dot={false} isAnimationActive={false} opacity={0.45} />
+              <Line yAxisId="btc" type="monotone" dataKey="BTCUSD" name="BTCUSD" stroke="#e5e7eb" strokeWidth={2} dot={false} isAnimationActive={false} opacity={0.6} />
             </LineChart>
           </ResponsiveContainer>
         </Box>
@@ -1912,6 +1925,48 @@ const ChartsView: React.FC<Props> = ({ data, sections, chartIds, embedded: embed
       </Paper>
       )}
 
+      {/* Treasury Yields: 10Y, 3M and the 10Y-3M spread */}
+      {show('business', 'treasury-yields') && (
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Box sx={{ mb: 2.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            Treasury Yields &amp; Curve (10Y, 3M, 10Y-3M)
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            U.S. Treasury constant‑maturity yields: 10‑Year (DGS10) and 3‑Month (DGS3MO), plus their difference YC_M = 10Y − 3M (FRED T10Y3M).
+            <br />
+            The spread is the yield‑curve input to BIZ_CYCLE_SCORE: an inversion (below 0) is a recession trigger, while the expansion gate
+            requires the spread to be ≥ 0.75. The band between 0 and 0.75 is the neutral zone.
+          </Typography>
+        </Box>
+
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+          <Chip size="small" variant="outlined" label="10Y (%)" sx={{ borderColor: '#60a5fa', color: '#bfdbfe' }} />
+          <Chip size="small" variant="outlined" label="3M (%)" sx={{ borderColor: '#fbbf24', color: '#fde68a' }} />
+          <Chip size="small" variant="outlined" label="10Y-3M spread (%)" sx={{ borderColor: '#34d399', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="0.75 = expansion gate" sx={{ borderColor: '#34d399', color: '#bbf7d0' }} />
+          <Chip size="small" variant="outlined" label="0 = inversion" sx={{ borderColor: '#ef4444', color: '#fecaca' }} />
+        </Stack>
+
+        <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart key={`treasury-yields-${range}`} data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+              <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={xTickFormatter} tickCount={tickCount} minTickGap={24} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis yAxisId="pct" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => (typeof v === 'number' ? `${v.toFixed(1)}%` : '')} />
+              <ReferenceLine yAxisId="pct" y={0.75} stroke="#34d399" strokeDasharray="6 3" strokeWidth={1.5} label={{ value: '0.75 (expansion gate)', fill: '#bbf7d0', fontSize: 10, position: 'insideTopRight' }} />
+              <ReferenceLine yAxisId="pct" y={0} stroke="#ef4444" strokeDasharray="6 3" strokeWidth={1.5} label={{ value: '0 (inversion)', fill: '#fecaca', fontSize: 10, position: 'insideBottomRight' }} />
+              <Tooltip content={<CustomTooltip />} />
+              {renderChartBrush()}
+              <Line yAxisId="pct" type="monotone" dataKey="UST_10Y" name="10Y (%)" stroke="#60a5fa" strokeWidth={2} dot={false} isAnimationActive={false} />
+              <Line yAxisId="pct" type="monotone" dataKey="UST_3M" name="3M (%)" stroke="#fbbf24" strokeWidth={2} dot={false} isAnimationActive={false} />
+              <Line yAxisId="pct" type="monotone" dataKey="YC_M" name="10Y-3M spread (%)" stroke="#34d399" strokeWidth={2.5} dot={false} isAnimationActive={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Box>
+      </Paper>
+      )}
+
       {/* USD Regime Inputs (DTWEXBGS proxy) */}
       {show('usd', 'dxy-regime') && (
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
@@ -2239,7 +2294,7 @@ const ChartsView: React.FC<Props> = ({ data, sections, chartIds, embedded: embed
             CQM Risk
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            CQM Risk maps log(price / QR 50% fair value) through the full-sample empirical residual distribution, with cycle-aware γ and upper-percentile knots.
+            CQM Risk maps log(price / QR 50% fair value) to its full-sample empirical percentile, then through a static linear map between two percentile knots (pBuy 6% → 0% risk, pSell 72% → 100% risk).
             <br />
             Risk drives dynamic DCA sizing: below fair value (50%) it deploys up to 6% of the idle cash pile per period — tapering to zero at 50% and never below the <code>base × (1 − 2 × Risk)</code> floor; 50–75% is a hold zone; above 75% it sells, scaling up to full size at 100%.
           </Typography>

@@ -17,6 +17,14 @@
 [functions."scheduled-newsletter"]
   timeout = 60
 
+# Admin "compose draft" runs OpenAI + image generation, so it needs the most
+# headroom we can get. NOTE: this is a *synchronous* (browser-invoked) function,
+# which Netlify hard-caps at 26s (default 10s; 26s requires a Pro plan and a
+# Support request to activate, then a redeploy). 26 is the true ceiling — the
+# durable fix for anything heavier is a background function (see note below).
+[functions."admin-newsletter"]
+  timeout = 26
+
 [functions."signal-refresh"]
   timeout = 60
 
@@ -79,6 +87,11 @@
 [[redirects]]
   from = "/api/v1/signals/cqm-walkforward"
   to = "/.netlify/functions/signal-cqm-walkforward"
+  status = 200
+
+[[redirects]]
+  from = "/api/v1/signals/btc-series"
+  to = "/.netlify/functions/signal-btc-series"
   status = 200
 
 [[redirects]]

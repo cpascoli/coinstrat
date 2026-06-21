@@ -76,15 +76,62 @@ async function loadCachedChartData(): Promise<SignalData[]> {
   return enrichChartRows(payload.data);
 }
 
+interface BtcSeriesPoint {
+  Date: string;
+  BTCUSD: number;
+}
+
+/** Authoritative BTC daily price series (slim, dedicated blob — see signal-btc-series). */
+async function loadBtcSeries(): Promise<BtcSeriesPoint[]> {
+  const response = await fetch('/api/v1/signals/btc-series');
+  if (!response.ok) {
+    throw new Error(`BTC series unavailable (${response.status})`);
+  }
+  const payload = await response.json() as { data?: BtcSeriesPoint[] };
+  if (!Array.isArray(payload.data) || payload.data.length === 0) {
+    throw new Error('BTC series returned no rows');
+  }
+  return payload.data;
+}
+
+/**
+ * Overlay the authoritative BTC price onto the base rows by Date, appending any
+ * dates the base payload is missing. This keeps the CQM fit (and price charts)
+ * anchored to the same series the bot uses, even if the heavier chart-data
+ * payload had to fall back to client-side recompute.
+ */
+function overlayBtcSeries(baseRows: SignalData[], btc: BtcSeriesPoint[]): SignalData[] {
+  const byDate = new Map<string, SignalData>();
+  for (const row of baseRows) byDate.set(row.Date, row);
+  for (const point of btc) {
+    const existing = byDate.get(point.Date);
+    if (existing) {
+      existing.BTCUSD = point.BTCUSD;
+    } else {
+      byDate.set(point.Date, { Date: point.Date, BTCUSD: point.BTCUSD } as SignalData);
+    }
+  }
+  return Array.from(byDate.values()).sort((a, b) => (a.Date < b.Date ? -1 : a.Date > b.Date ? 1 : 0));
+}
+
 /**
  * Prefer the server-maintained signal cache (single request). Fall back to
  * client-side recomputation when the cache is unavailable (local dev, cold start).
+ * Either way, overlay the dedicated authoritative BTC series so the price/CQM
+ * line stays correct and in sync with the bot.
  */
 export async function loadChartSignals(): Promise<SignalData[]> {
-  try {
-    return await loadCachedChartData();
-  } catch (err) {
-    console.warn('[chartData] Cache load failed, falling back to live compute:', err);
-    return computeAllSignals();
-  }
+  const [baseRows, btc] = await Promise.all([
+    loadCachedChartData().catch((err) => {
+      console.warn('[chartData] Cache load failed, falling back to live compute:', err);
+      return computeAllSignals();
+    }),
+    loadBtcSeries().catch((err) => {
+      console.warn('[chartData] BTC series load failed; using base prices:', err);
+      return null;
+    }),
+  ]);
+
+  if (!btc) return baseRows;
+  return overlayBtcSeries(baseRows, btc);
 }

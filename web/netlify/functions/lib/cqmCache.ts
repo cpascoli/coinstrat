@@ -8,6 +8,7 @@
 
 import { fitCQM, type CQMFit } from '../../../src/utils/cqm';
 import type { SignalRow } from './compute';
+import { priceLadderFromFit, writeCqmPriceLadderBlob } from './cqmSnapshot';
 import { signalsStore } from './store';
 
 export const CQM_CACHE_FIELDS = [
@@ -106,6 +107,13 @@ export async function patchCqmFieldsInCache(
   }
 
   const fit = fitCQM(points);
+
+  // Persist the "price map" ladder from this same fit so newsletter compose can
+  // read it without paying for an inline refit (which risks the function timeout).
+  await writeCqmPriceLadderBlob(priceLadderFromFit(fit)).catch((err) => {
+    console.error('[cqm-cache] Failed to write price-ladder blob:', err);
+  });
+
   return applyCqmFieldsToRows(rows, fit, options);
 }
 

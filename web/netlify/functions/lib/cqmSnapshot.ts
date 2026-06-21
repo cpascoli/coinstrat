@@ -7,7 +7,7 @@
  */
 
 import { signalsStore } from './store';
-import { fitCQM, snapshotAt, type CQMFit } from '../../../src/utils/cqm';
+import { fitCQM, priceForRiskFair, snapshotAt, type CQMFit } from '../../../src/utils/cqm';
 
 export interface BtcPricePoint {
   date: string;
@@ -68,6 +68,83 @@ export async function loadBtcPricePoints(): Promise<BtcPricePoint[]> {
   }
 
   return points;
+}
+
+export interface CqmPriceLadderLevel {
+  /** Risk fraction in {0, 0.25, 0.5, 0.75, 1}. */
+  risk: number;
+  /** BTC/USD price that maps to this risk at the as-of fit. */
+  price: number;
+}
+
+export interface CqmPriceLadder {
+  /** Current risk as a percentage (0–100). */
+  riskPct: number;
+  /** Current BTC/USD price. */
+  price: number;
+  /** QR 50% fair value at the as-of date. */
+  fairValue: number;
+  levels: CqmPriceLadderLevel[];
+}
+
+/** Blob key for the precomputed "price map" ladder (written during refresh). */
+export const CQM_PRICE_LADDER_BLOB_KEY = 'cqm_price_ladder';
+
+/**
+ * Derive the price-map ladder from an already-computed CQM fit. Cheap (no
+ * refit), so callers that already hold a fit (e.g. the daily refresh) can
+ * persist the ladder without paying for a second fit.
+ */
+export function priceLadderFromFit(fit: CQMFit, asOfTs?: number): CqmPriceLadder | null {
+  const snap = typeof asOfTs === 'number' ? snapshotAt(fit, asOfTs) : snapshotAt(fit);
+  if (!snap) return null;
+  const levels: CqmPriceLadderLevel[] = [0, 0.25, 0.5, 0.75, 1].map((rr) => ({
+    risk: rr,
+    price: priceForRiskFair(fit, snap.ts, rr),
+  }));
+  return {
+    riskPct: Number(snap.risk) * 100,
+    price: Number(snap.price),
+    fairValue: Number(snap.qrDashedMedian),
+    levels,
+  };
+}
+
+/**
+ * "Price map at today's fit": holding the QR 50% fair value fixed, the BTC
+ * prices that correspond to each risk level. Mirrors the Overview page panel
+ * (models/cqm). Runs a fresh fit — only use off the hot path (e.g. a guarded
+ * fallback); prefer {@link readCqmPriceLadderBlob} when a precompute exists.
+ */
+export function computeCqmPriceLadder(points: BtcPricePoint[], asOfTs?: number): CqmPriceLadder | null {
+  if (points.length < 365) return null;
+  try {
+    const fit = fitCQM(points);
+    return priceLadderFromFit(fit, asOfTs);
+  } catch {
+    return null;
+  }
+}
+
+/** Persist the latest ladder so newsletter compose avoids an inline refit. */
+export async function writeCqmPriceLadderBlob(ladder: CqmPriceLadder | null): Promise<void> {
+  if (!ladder) return;
+  await signalsStore().setJSON(CQM_PRICE_LADDER_BLOB_KEY, {
+    timestamp: Date.now(),
+    ladder,
+  });
+}
+
+/** Read the precomputed ladder, or null if it has not been materialised yet. */
+export async function readCqmPriceLadderBlob(): Promise<CqmPriceLadder | null> {
+  try {
+    const payload = await signalsStore().get(CQM_PRICE_LADDER_BLOB_KEY, { type: 'json' }) as
+      | { ladder?: CqmPriceLadder }
+      | null;
+    return payload?.ladder ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export function cqmSnapshotForDate(fit: CQMFit, date: string): CqmPointSnapshot | null {

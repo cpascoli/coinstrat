@@ -82,17 +82,11 @@ export interface CQMFit {
   // QR median params (same form, fit by IRLS LAD)
   qrIntercept: number;
   qrSlope: number;
-  // Calibration anchors used by the risk model
-  lowQ: number;
-  highQ: number;
+  // Risk-mapping knots (valuation-percentile space): risk pins to 0 at/below
+  // `pBuy` and to 1 at/above `pSell`, linear in between.
+  pBuy: number;
+  pSell: number;
   scorePower: number;
-  riskGammaStart: number;
-  riskGamma2018: number;
-  riskGamma2022: number;
-  riskGammaCurrent: number;
-  riskHighQuantileStart: number;
-  riskHighQuantile2018: number;
-  riskHighQuantile2022: number;
   // Sorted residual arrays for empirical quantile lookups
   sortedOlsResiduals: Float64Array;
   sortedQrResiduals: Float64Array;
@@ -111,6 +105,13 @@ export interface CQMFit {
   solidGreenWarmupOffset: number;     // log offset = empirical_quantile(0.001, qrResiduals)
   rollingAth: Float64Array;     // aligned with the input price series
   pricesTimestamps: number[];   // aligned with rollingAth
+  // Forward band projection: the analytic QR fan plus the (frozen) tail scale,
+  // so `projectBandsAt` can evaluate 0.1% / 50% / 99.9% at any future date.
+  qrAsymFit: AsymmetricQuantileFit | null;
+  qrEndScale: number;
+  qrCalDate: string;
+  qrRampStartDate: string;
+  qrScaleRampPower: number;
   // Cached signal series (full sample)
   signals: CQMPoint[];
 }
@@ -125,20 +126,23 @@ export interface CQMConfig {
    */
   startDate?: string;
   timePower?: number;
-  lowQ?: number;
-  highQ?: number;
-  scorePower?: number;
   /**
-   * Cycle-aware risk mapping. Older cycles use a higher upper percentile
-   * anchor so early BTC blow-off moves don't all hard-clip at 100% risk.
-   * The latest endpoint decays back to `highQ`, preserving today's snapshot.
+   * Risk mapping knots, in valuation-percentile space. `risk` is a static
+   * linear map of the fair-value percentile `pct`:
+   *
+   *   risk = clamp( (pct − pBuy) / (pSell − pBuy), 0, 1 )
+   *
+   * - `pBuy`  — at/below this percentile risk pins to 0 (maximum accumulate).
+   * - `pSell` — at/above this percentile risk pins to 1 (maximum de-risk).
+   *
+   * The actual buy / hold / sell *actions* are governed by the sizing layer
+   * (`computeCqmDynamicTrade`: fair at risk 0.5, sell above `sellThreshold`),
+   * so these two knots set how aggressively valuation translates into risk.
+   * `pBuy = 0, pSell = 1` recovers the identity (raw-percentile) mapping.
    */
-  riskGammaStart?: number;
-  riskGamma2018?: number;
-  riskGamma2022?: number;
-  riskHighQuantileStart?: number;
-  riskHighQuantile2018?: number;
-  riskHighQuantile2022?: number;
+  pBuy?: number;
+  pSell?: number;
+  scorePower?: number;
   /** Legacy ATH-shelved band params (retained for API compat; v1b solids use scaled QR). */
   upperAthFactor?: number;
   solidGoldWindow?: number;
@@ -199,15 +203,9 @@ export interface CQMConfig {
 const DEFAULT_CONFIG: Required<CQMConfig> = {
   startDate: '2014-01-01',
   timePower: 0.6,
-  lowQ: 0.06,
-  highQ: 0.68,
+  pBuy: 0.06,
+  pSell: 0.72,
   scorePower: 1.5,
-  riskGammaStart: 1.35,
-  riskGamma2018: 1.20,
-  riskGamma2022: 1.08,
-  riskHighQuantileStart: 0.999,
-  riskHighQuantile2018: 0.990,
-  riskHighQuantile2022: 0.950,
   upperAthFactor: 1.28,
   solidGoldWindow: 730,
   solidGoldFloorWindow: 30,
@@ -399,31 +397,15 @@ function rollingEmpiricalPercentile(
   return out;
 }
 
-function riskFromPercentile(
-  pct: number,
-  ts: number,
-  endTs: number,
-  cfg: Required<CQMConfig>,
-  riskGammaCurrent: number,
-): number {
-  const riskHighQ = interpolateCycleKnot(
-    ts,
-    endTs,
-    cfg.riskHighQuantileStart,
-    cfg.riskHighQuantile2018,
-    cfg.riskHighQuantile2022,
-    cfg.highQ,
-  );
-  const riskGamma = interpolateCycleKnot(
-    ts,
-    endTs,
-    cfg.riskGammaStart,
-    cfg.riskGamma2018,
-    cfg.riskGamma2022,
-    riskGammaCurrent,
-  );
-  const riskZ = clamp((pct - cfg.lowQ) / (riskHighQ - cfg.lowQ), 0, 1);
-  return Math.pow(riskZ, riskGamma);
+/**
+ * Static linear map from fair-value percentile to risk:
+ *   risk = clamp( (pct − pBuy) / (pSell − pBuy), 0, 1 )
+ * No cycle/calendar dependence and no curvature — `pBuy`/`pSell` are the only
+ * knobs. `pBuy = 0, pSell = 1` yields the identity (raw-percentile) mapping.
+ */
+function riskFromPercentile(pct: number, cfg: Required<CQMConfig>): number {
+  const span = Math.max(1e-6, cfg.pSell - cfg.pBuy);
+  return clamp((pct - cfg.pBuy) / span, 0, 1);
 }
 
 /** Blend weight 0 = global only; 1 = full min(global, rolling) target. */
@@ -491,7 +473,7 @@ const ASYM_NM_MAX_ITER = 120;
 let asymFitCacheKey = '';
 let asymFitCache: AsymmetricQuantileFit | null = null;
 
-interface AsymmetricQuantileFit {
+export interface AsymmetricQuantileFit {
   anchorMs: number;
   mu: number;
   paramsByQuantile: Map<number, [number, number, number]>;
@@ -700,12 +682,20 @@ function computeAutoCalibration(
   };
 }
 
+/** Resolved tail-scale ramp params, reused for both the in-sample bands and forward projection. */
+interface QrTailScale {
+  endScale: number;
+  calDate: string;
+  rampStartDate: string;
+  rampPower: number;
+}
+
 /** Tail-scaled asymmetric QR 0.1% / 50% / 99.9% (uniform scale on all quantiles). */
 function buildScaledQrBands(
   asymFit: AsymmetricQuantileFit,
   cleaned: PricePoint[],
   cfg: Required<CQMConfig>,
-): { qrLow: Float64Array; qrMed: Float64Array; qrHigh: Float64Array } {
+): { qrLow: Float64Array; qrMed: Float64Array; qrHigh: Float64Array; scale: QrTailScale } {
   const n = cleaned.length;
   const rawLow = new Float64Array(n);
   const rawMed = new Float64Array(n);
@@ -748,7 +738,13 @@ function buildScaledQrBands(
     qrMed[i] = rawMed[i] * tailScale;
     qrHigh[i] = rawHigh[i] * tailScale;
   }
-  return { qrLow, qrMed, qrHigh };
+  const scale: QrTailScale = {
+    endScale,
+    calDate: effCfg.qrCalibrationDate,
+    rampStartDate: effCfg.qrScaleRampStartDate,
+    rampPower: effCfg.qrScaleRampPower,
+  };
+  return { qrLow, qrMed, qrHigh, scale };
 }
 
 function buildFairValueGold(
@@ -854,35 +850,6 @@ function nelderMeadSimplex(
     if (f[i] < f[bestIdx]) bestIdx = i;
   }
   return simplex[bestIdx];
-}
-
-function interpolateCycleKnot(
-  ts: number,
-  endTs: number,
-  startValue: number,
-  value2018: number,
-  value2022: number,
-  currentValue: number,
-): number {
-  const knots = [
-    { ts: new Date('2014-01-01').getTime(), value: startValue },
-    { ts: new Date('2018-01-01').getTime(), value: value2018 },
-    { ts: new Date('2022-01-01').getTime(), value: value2022 },
-    { ts: endTs, value: currentValue },
-  ];
-  if (ts <= knots[0].ts) return knots[0].value;
-
-  for (let i = 1; i < knots.length; i++) {
-    const previous = knots[i - 1];
-    const next = knots[i];
-    if (ts <= next.ts) {
-      const span = Math.max(next.ts - previous.ts, DAY_MS);
-      const progress = (ts - previous.ts) / span;
-      return previous.value + progress * (next.value - previous.value);
-    }
-  }
-
-  return knots[knots.length - 1].value;
 }
 
 /**
@@ -1064,11 +1031,18 @@ export function fitCQM(prices: PricePoint[], config: CQMConfig = {}): CQMFit {
   let scaledQrLow = new Float64Array(n);
   let scaledQrMed = new Float64Array(n);
   let scaledQrHigh = new Float64Array(n);
+  let qrTailScale: QrTailScale = {
+    endScale: 1,
+    calDate: cfg.qrCalibrationDate,
+    rampStartDate: cfg.qrScaleRampStartDate,
+    rampPower: cfg.qrScaleRampPower,
+  };
   if (asymFit) {
     const scaled = buildScaledQrBands(asymFit, cleaned, cfg);
     scaledQrLow.set(scaled.qrLow);
     scaledQrMed.set(scaled.qrMed);
     scaledQrHigh.set(scaled.qrHigh);
+    qrTailScale = scaled.scale;
   } else {
     for (let i = 0; i < n; i++) {
       const med = Math.exp(qr.intercept + qr.slope * x[i]);
@@ -1132,25 +1106,6 @@ export function fitCQM(prices: PricePoint[], config: CQMConfig = {}): CQMFit {
       : null;
 
   const solidGreenWarmupOffset = empiricalQuantile(sortedQr, 0.001);
-  const endTs = cleaned[n - 1].ts;
-  const latestPct = empiricalPercentile(sortedFairResiduals, fairResiduals[n - 1]);
-  const latestLinearRisk = clamp(
-    (latestPct - cfg.lowQ) / (cfg.highQ - cfg.lowQ),
-    0,
-    1,
-  );
-  const latestSoftZ = clamp(
-    (latestPct - cfg.lowQ) / (cfg.highQ - cfg.lowQ),
-    0,
-    1,
-  );
-  const riskGammaCurrent =
-    latestLinearRisk > 0 &&
-    latestLinearRisk < 1 &&
-    latestSoftZ > 0 &&
-    latestSoftZ < 1
-      ? Math.log(latestLinearRisk) / Math.log(latestSoftZ)
-      : 1.0;
 
   // Build the daily signal series
   const signals: CQMPoint[] = new Array(n);
@@ -1167,16 +1122,10 @@ export function fitCQM(prices: PricePoint[], config: CQMConfig = {}): CQMFit {
     const pct = Number.isFinite(fairResiduals[i])
       ? empiricalPercentile(sortedFairResiduals, fairResiduals[i])
       : 0.5;
-    let risk = riskFromPercentile(pct, cleaned[i].ts, endTs, cfg, riskGammaCurrent);
+    let risk = riskFromPercentile(pct, cfg);
 
     if (rollingPct !== null && Number.isFinite(rollingPct[i])) {
-      const rollingRisk = riskFromPercentile(
-        rollingPct[i],
-        cleaned[i].ts,
-        endTs,
-        cfg,
-        riskGammaCurrent,
-      );
+      const rollingRisk = riskFromPercentile(rollingPct[i], cfg);
       if (cfg.riskMode === 'rolling') {
         risk = rollingRisk;
       } else if (cfg.riskMode === 'gated' && nearLowMin !== null) {
@@ -1217,16 +1166,9 @@ export function fitCQM(prices: PricePoint[], config: CQMConfig = {}): CQMFit {
     olsSlope: ols.slope,
     qrIntercept: qr.intercept,
     qrSlope: qr.slope,
-    lowQ: cfg.lowQ,
-    highQ: cfg.highQ,
+    pBuy: cfg.pBuy,
+    pSell: cfg.pSell,
     scorePower: cfg.scorePower,
-    riskGammaStart: cfg.riskGammaStart,
-    riskGamma2018: cfg.riskGamma2018,
-    riskGamma2022: cfg.riskGamma2022,
-    riskGammaCurrent,
-    riskHighQuantileStart: cfg.riskHighQuantileStart,
-    riskHighQuantile2018: cfg.riskHighQuantile2018,
-    riskHighQuantile2022: cfg.riskHighQuantile2022,
     sortedOlsResiduals: sortedOls,
     sortedQrResiduals: sortedQr,
     sortedFairResiduals,
@@ -1241,6 +1183,11 @@ export function fitCQM(prices: PricePoint[], config: CQMConfig = {}): CQMFit {
     upperAthFactor: cfg.upperAthFactor,
     rollingAth,
     pricesTimestamps: ts,
+    qrAsymFit: asymFit,
+    qrEndScale: qrTailScale.endScale,
+    qrCalDate: qrTailScale.calDate,
+    qrRampStartDate: qrTailScale.rampStartDate,
+    qrScaleRampPower: qrTailScale.rampPower,
     signals,
   };
 }
@@ -1248,15 +1195,9 @@ export function fitCQM(prices: PricePoint[], config: CQMConfig = {}): CQMFit {
 function riskMappingCfg(fit: CQMFit): Required<CQMConfig> {
   return {
     ...DEFAULT_CONFIG,
-    lowQ: fit.lowQ,
-    highQ: fit.highQ,
+    pBuy: fit.pBuy,
+    pSell: fit.pSell,
     scorePower: fit.scorePower,
-    riskGammaStart: fit.riskGammaStart,
-    riskGamma2018: fit.riskGamma2018,
-    riskGamma2022: fit.riskGamma2022,
-    riskHighQuantileStart: fit.riskHighQuantileStart,
-    riskHighQuantile2018: fit.riskHighQuantile2018,
-    riskHighQuantile2022: fit.riskHighQuantile2022,
   };
 }
 
@@ -1268,8 +1209,7 @@ export function riskForPriceFair(fit: CQMFit, ts: number, price: number): number
   if (!Number.isFinite(fair) || fair <= 0) return NaN;
   const residual = Math.log(price) - Math.log(fair);
   const pct = empiricalPercentile(fit.sortedFairResiduals, residual);
-  const endTs = fit.signals[fit.signals.length - 1]?.ts ?? ts;
-  return riskFromPercentile(pct, ts, endTs, riskMappingCfg(fit), fit.riskGammaCurrent);
+  return riskFromPercentile(pct, riskMappingCfg(fit));
 }
 
 /** Inverse mapping: price that would produce the given global fair-value risk. */
@@ -1280,26 +1220,97 @@ export function priceForRiskFair(fit: CQMFit, ts: number, risk: number): number 
   if (!Number.isFinite(fair) || fair <= 0) return NaN;
   const clamped = clamp(risk, 0, 1);
   const cfg = riskMappingCfg(fit);
-  const endTs = fit.signals[fit.signals.length - 1]?.ts ?? ts;
-  const riskHighQ = interpolateCycleKnot(
-    ts,
-    endTs,
-    cfg.riskHighQuantileStart,
-    cfg.riskHighQuantile2018,
-    cfg.riskHighQuantile2022,
-    cfg.highQ,
-  );
-  const riskGamma = interpolateCycleKnot(
-    ts,
-    endTs,
-    cfg.riskGammaStart,
-    cfg.riskGamma2018,
-    cfg.riskGamma2022,
-    fit.riskGammaCurrent,
-  );
-  const residualQ = cfg.lowQ + Math.pow(clamped, 1 / riskGamma) * (riskHighQ - cfg.lowQ);
+  // Invert the static linear map: risk = (pct − pBuy) / (pSell − pBuy).
+  const residualQ = cfg.pBuy + clamped * (cfg.pSell - cfg.pBuy);
   const residual = empiricalQuantile(fit.sortedFairResiduals, residualQ);
   return Math.exp(Math.log(fair) + residual);
+}
+
+export interface ProjectedBands {
+  /** 0.1% lower quantile (tail-scaled). */
+  q001: number;
+  /** 50% fair-value median (tail-scaled). */
+  q50: number;
+  /** 99.9% upper quantile (tail-scaled). */
+  q999: number;
+}
+
+/**
+ * Evaluate the asymmetric QR fan (0.1% / 50% / 99.9%) at an arbitrary timestamp,
+ * including dates beyond the fitted history. Uses the analytic log-time parabola
+ * plus the frozen tail scale captured at fit time, so the bands extrapolate with
+ * diminishing expected returns (median flattens) and a narrowing fan (diminishing
+ * relative volatility). Returns null when the fit has no asymmetric fan.
+ */
+export function projectBandsAt(fit: CQMFit, ts: number): ProjectedBands | null {
+  if (!fit.qrAsymFit) return null;
+  const raw = asymmetricPricesAt(fit.qrAsymFit, ts, QR_FAN_QUANTILES);
+  const low = raw.get(0.001);
+  const med = raw.get(0.5);
+  const high = raw.get(0.999);
+  if (!Number.isFinite(low) || !Number.isFinite(med) || !Number.isFinite(high)) {
+    return null;
+  }
+  const effCfg: Required<CQMConfig> = {
+    ...DEFAULT_CONFIG,
+    qrCalibrationDate: fit.qrCalDate,
+    qrScaleRampStartDate: fit.qrRampStartDate,
+    qrScaleRampPower: fit.qrScaleRampPower,
+  };
+  const scale = qrTailRampFactor(ts, fit.qrEndScale, effCfg);
+  return {
+    q001: (low as number) * scale,
+    q50: (med as number) * scale,
+    q999: (high as number) * scale,
+  };
+}
+
+/**
+ * Forward-aware fair-value risk for a hypothetical price at any date. Unlike
+ * `riskForPriceFair` (which reads the last in-sample snapshot for future dates),
+ * this uses the projected QR-50% median so risk stays meaningful into the future.
+ * The residual distribution is frozen at the fit's last date.
+ */
+export function riskForPriceFairProjected(fit: CQMFit, ts: number, price: number): number {
+  if (!Number.isFinite(price) || price <= 0) return NaN;
+  const bands = projectBandsAt(fit, ts);
+  const fair = bands ? bands.q50 : snapshotAt(fit, ts)?.qrDashedMedian;
+  if (!Number.isFinite(fair) || (fair as number) <= 0) return NaN;
+  const residual = Math.log(price) - Math.log(fair as number);
+  const pct = empiricalPercentile(fit.sortedFairResiduals, residual);
+  return riskFromPercentile(pct, riskMappingCfg(fit));
+}
+
+/**
+ * Pre-mapping valuation percentile: the empirical CDF (0..1) of the current
+ * fair-value log-residual `log(price) − log(QR-50%)` within the full-sample
+ * residual distribution. This is the raw, mapping-agnostic valuation signal
+ * that `riskForPriceFair` feeds through the static `[pBuy, pSell]` map. Exposed
+ * for calibration tooling so candidate risk mappings can be evaluated offline
+ * without re-fitting. Returns NaN when inputs are invalid.
+ */
+export function valuationPercentileFair(fit: CQMFit, ts: number, price: number): number {
+  const snap = snapshotAt(fit, ts);
+  if (!snap || !Number.isFinite(price) || price <= 0) return NaN;
+  const fair = snap.qrDashedMedian;
+  if (!Number.isFinite(fair) || fair <= 0) return NaN;
+  const residual = Math.log(price) - Math.log(fair);
+  return empiricalPercentile(fit.sortedFairResiduals, residual);
+}
+
+/**
+ * Forward-aware counterpart of {@link valuationPercentileFair}: uses the
+ * projected QR-50% median (so it stays meaningful past the fit's last date)
+ * with the residual distribution frozen at fit time. Mirrors
+ * `riskForPriceFairProjected` but returns the pre-mapping percentile.
+ */
+export function valuationPercentileFairProjected(fit: CQMFit, ts: number, price: number): number {
+  if (!Number.isFinite(price) || price <= 0) return NaN;
+  const bands = projectBandsAt(fit, ts);
+  const fair = bands ? bands.q50 : snapshotAt(fit, ts)?.qrDashedMedian;
+  if (!Number.isFinite(fair) || (fair as number) <= 0) return NaN;
+  const residual = Math.log(price) - Math.log(fair as number);
+  return empiricalPercentile(fit.sortedFairResiduals, residual);
 }
 
 export interface RiskPricePoint {

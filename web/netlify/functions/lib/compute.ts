@@ -95,6 +95,7 @@ function lookbackDate(): string {
 
 const FRED_SIGNAL_SERIES = [
   'WALCL', 'WTREGEN', 'RRPONTSYD', 'DTWEXBGS', 'SAHMREALTIME', 'T10Y3M', 'AMTMNO',
+  'DGS10', 'DGS3MO',
   'ECBASSETSW', 'JPNASSETS', 'DEXUSEU', 'DEXJPUS',
 ] as const;
 
@@ -391,6 +392,8 @@ export async function refreshSignals(
   const dxyRaw = fredMap.get('DTWEXBGS') ?? [];
   const sahm = fredMap.get('SAHMREALTIME') ?? [];
   const yc = fredMap.get('T10Y3M') ?? [];
+  const ust10y = fredMap.get('DGS10') ?? [];
+  const ust3m = fredMap.get('DGS3MO') ?? [];
   const newOrders = fredMap.get('AMTMNO') ?? [];
   const ecbAssets = fredMap.get('ECBASSETSW') ?? [];
   const bojAssets = fredMap.get('JPNASSETS') ?? [];
@@ -427,7 +430,7 @@ export async function refreshSignals(
 
   const cachedByDate = new Map(cachedSignals.map((s) => [s.Date, s]));
   const seedKeys = [
-    'BTCUSD', 'DXY', 'SAHM', 'YC_M', 'NO', 'MVRV', 'US_LIQ', 'SIP', 'LTH_SOPR', 'LTH_NUPL',
+    'BTCUSD', 'DXY', 'SAHM', 'YC_M', 'UST_10Y', 'UST_3M', 'NO', 'MVRV', 'US_LIQ', 'SIP', 'LTH_SOPR', 'LTH_NUPL',
     'STH_REALIZED_PRICE', 'LTH_REALIZED_PRICE', 'REALIZED_PRICE', 'ECB_RAW', 'BOJ_RAW', 'EURUSD', 'JPYUSD', 'WALCL', 'WTREGEN', 'RRPONTSYD',
     'G3_ASSETS', 'ISM_PMI', 'BTC_FUNDING_RATE', 'BTC_OPEN_INTEREST_USD',
   ];
@@ -447,6 +450,8 @@ export async function refreshSignals(
   overlaySeries(dxyRaw, daily, allDates, 'DXY');
   overlaySeries(sahm, daily, allDates, 'SAHM');
   overlaySeries(yc, daily, allDates, 'YC_M');
+  overlaySeries(ust10y, daily, allDates, 'UST_10Y');
+  overlaySeries(ust3m, daily, allDates, 'UST_3M');
   overlaySeries(newOrders, daily, allDates, 'NO');
   overlaySeries(mvrv, daily, allDates, 'MVRV');
   overlaySeries(lthSopr, daily, allDates, 'LTH_SOPR');
@@ -472,7 +477,7 @@ export async function refreshSignals(
   // When FRED is rate-limited, carry macro values forward so new BTC days
   // still get liquidity / macro scores instead of leaving fields blank.
   forwardFillFields(daily, [
-    'WALCL', 'WTREGEN', 'RRPONTSYD', 'DXY', 'SAHM', 'YC_M', 'NO', 'MVRV',
+    'WALCL', 'WTREGEN', 'RRPONTSYD', 'DXY', 'SAHM', 'YC_M', 'UST_10Y', 'UST_3M', 'NO', 'MVRV',
     'LTH_SOPR', 'LTH_NUPL', 'SIP', 'STH_REALIZED_PRICE', 'LTH_REALIZED_PRICE', 'REALIZED_PRICE',
     'ECB_RAW', 'BOJ_RAW', 'EURUSD', 'JPYUSD', 'ISM_PMI',
     'BTC_FUNDING_RATE', 'BTC_OPEN_INTEREST_USD',

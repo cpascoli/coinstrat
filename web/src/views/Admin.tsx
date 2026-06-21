@@ -237,8 +237,9 @@ const Admin: React.FC = () => {
   const [rebuilding, setRebuilding] = useState(false);
   const [patchingMvrv, setPatchingMvrv] = useState(false);
   const [patchingSthLthRp, setPatchingSthLthRp] = useState(false);
+  const [patchingTreasuryYields, setPatchingTreasuryYields] = useState(false);
   const [recomputing, setRecomputing] = useState(false);
-  const signalPatchBusy = patchingMvrv || patchingSthLthRp || recomputing;
+  const signalPatchBusy = patchingMvrv || patchingSthLthRp || patchingTreasuryYields || recomputing;
   const [scheduledAlertsLoading, setScheduledAlertsLoading] = useState(true);
   const [scheduledAlertsRunning, setScheduledAlertsRunning] = useState(false);
   const [scheduledAlertsStatus, setScheduledAlertsStatus] = useState<ScheduledAlertsStatus | null>(null);
@@ -632,6 +633,44 @@ const Admin: React.FC = () => {
       setError(err.message);
     } finally {
       setPatchingSthLthRp(false);
+    }
+  };
+
+  const handlePatchTreasuryYields = async () => {
+    if (!window.confirm(
+      'This will fetch full 10Y (DGS10) and 3M (DGS3MO) Treasury yield history from FRED and fill every cached row where those values are missing.\n\nIt runs in ~2 seconds and only touches the UST_10Y / UST_3M fields. Continue?',
+    )) return;
+
+    setPatchingTreasuryYields(true);
+    setRefreshResult(null);
+    setError(null);
+
+    try {
+      const res = await fetch('/api/v1/signals/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ mode: 'patch_treasury_yields' }),
+      });
+      const text = await res.text();
+      const parsed = parseJsonOrApiFailure(res.status, text);
+      if (!parsed.ok) {
+        setError(parsed.message);
+        return;
+      }
+      const data = parsed.data as { error?: string; patched?: number; total?: number; cached_at?: string | null };
+      if (!res.ok) {
+        setError(data.error ?? `Patch Treasury yields failed (HTTP ${res.status})`);
+      } else {
+        setRefreshResult(
+          `Treasury yields patched — ${data.patched ?? '?'} rows updated out of ${data.total ?? '?'} total.`,
+        );
+        setCacheInfo((prev) => ({ ...prev, cachedAt: data.cached_at ?? prev.cachedAt, stale: false }));
+      }
+      await fetchCacheInfo();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setPatchingTreasuryYields(false);
     }
   };
 
@@ -1820,6 +1859,16 @@ const Admin: React.FC = () => {
                   sx={{ textTransform: 'none', fontWeight: 700 }}
                 >
                   {patchingSthLthRp ? 'Patching…' : 'Patch Holder RP'}
+                </Button>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  disabled={rebuilding || refreshing || signalPatchBusy}
+                  onClick={handlePatchTreasuryYields}
+                  startIcon={patchingTreasuryYields ? <CircularProgress size={14} color="inherit" /> : <RefreshCw size={14} />}
+                  sx={{ textTransform: 'none', fontWeight: 700 }}
+                >
+                  {patchingTreasuryYields ? 'Patching…' : 'Patch 10Y/3M'}
                 </Button>
                 <Button
                   variant="outlined"

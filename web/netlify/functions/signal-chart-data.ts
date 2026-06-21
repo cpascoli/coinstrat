@@ -1,8 +1,15 @@
 import type { Handler } from '@netlify/functions';
+import { gzipSync } from 'node:zlib';
 import { projectChartRows } from './lib/chartDataFields';
 import { signalsStore } from './lib/store';
 
-/** Netlify synchronous functions cap response bodies at 6 MB. Full cache rows exceed that. */
+/**
+ * Netlify synchronous functions cap the response body the function returns at
+ * 6 MB. Edge auto-compression does not help because that cap is measured on
+ * the *uncompressed* body, so we gzip the JSON ourselves and return it as a
+ * base64 payload with `Content-Encoding: gzip` (the browser transparently
+ * decompresses it). We keep a guard on the compressed size as a backstop.
+ */
 const MAX_RESPONSE_BYTES = 5_800_000;
 
 /**
@@ -35,14 +42,21 @@ export const handler: Handler = async (event) => {
 
     const cachedAtMs = typeof cached.timestamp === 'number' ? cached.timestamp : null;
     const data = projectChartRows(cached.data);
-    const body = JSON.stringify({
+    const json = JSON.stringify({
       count: data.length,
       data,
       cached_at: cachedAtMs ? new Date(cachedAtMs).toISOString() : null,
     });
 
-    if (Buffer.byteLength(body, 'utf8') > MAX_RESPONSE_BYTES) {
-      console.error('[signal-chart-data] projected payload still too large:', Buffer.byteLength(body, 'utf8'));
+    const gzipped = gzipSync(json);
+    const base64 = gzipped.toString('base64');
+
+    // The base64 string is what Netlify counts against the 6 MB cap.
+    if (Buffer.byteLength(base64, 'utf8') > MAX_RESPONSE_BYTES) {
+      console.error(
+        '[signal-chart-data] gzipped payload still too large:',
+        Buffer.byteLength(base64, 'utf8'),
+      );
       return {
         statusCode: 503,
         headers: corsHeaders(),
@@ -52,11 +66,13 @@ export const handler: Handler = async (event) => {
 
     return {
       statusCode: 200,
+      isBase64Encoded: true,
       headers: {
         ...corsHeaders(),
+        'Content-Encoding': 'gzip',
         'Cache-Control': 'public, max-age=300, s-maxage=300',
       },
-      body,
+      body: base64,
     };
   } catch (err: any) {
     console.error('[signal-chart-data]', err);

@@ -8,6 +8,7 @@ import {
   CQM_DEFAULT_SELL_THRESHOLD,
   CQM_FAIR_RISK,
 } from '../../utils/cqmSizing';
+import { CQM_RISK_GRADIENT_CSS } from '../../utils/cqmRiskGradient';
 
 type Band = 0 | 1 | 2 | 3;
 
@@ -205,6 +206,16 @@ const CqmOverview: React.FC<{ current: SignalData; history: SignalData[] }> = ({
         </Box>
       </Paper>
 
+      {/* About */}
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Typography variant="h6" sx={{ fontWeight: 800, mb: 1 }}>About this model</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1, lineHeight: 1.8 }}>
+          CQM fits quantile-regression bands across BTC&apos;s full price history and converts the latest price into a
+          fair-value risk between 0% (deep value) and 100% (euphoric). Risk drives the CQM Risk-Weighted DCA strategy:
+          deploy idle cash when risk is low, hold through the mid-zone, and distribute when risk is high.
+        </Typography>
+      </Paper>
+
       {/* Price map — what each risk level implies for BTC price today */}
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Typography variant="h6" sx={{ fontWeight: 800, mb: 0.5 }}>Price map at today&apos;s fit</Typography>
@@ -213,7 +224,7 @@ const CqmOverview: React.FC<{ current: SignalData; history: SignalData[] }> = ({
         </Typography>
         {/* gradient scale with current marker */}
         <Box sx={{ position: 'relative', mb: 2 }}>
-          <Box sx={{ height: 12, borderRadius: 6, background: 'linear-gradient(90deg, #22c55e 0%, #84cc16 33%, #f59e0b 66%, #ef4444 100%)' }} />
+          <Box sx={{ height: 12, borderRadius: 6, background: CQM_RISK_GRADIENT_CSS }} />
           <Box
             sx={{
               position: 'absolute',
@@ -244,21 +255,6 @@ const CqmOverview: React.FC<{ current: SignalData; history: SignalData[] }> = ({
         </Box>
       </Paper>
 
-      {/* About + CTAs */}
-      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
-        <Typography variant="h6" sx={{ fontWeight: 800, mb: 1 }}>About this model</Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 1, lineHeight: 1.8 }}>
-          CQM fits quantile-regression bands across BTC&apos;s full price history and converts the latest price into a
-          fair-value risk between 0% (deep value) and 100% (euphoric). Risk drives the CQM Risk-Weighted DCA strategy:
-          deploy idle cash when risk is low, hold through the mid-zone, and distribute when risk is high.
-        </Typography>
-        <Stack direction="row" spacing={1.5} useFlexGap flexWrap="wrap" sx={{ mt: 1 }}>
-          <Button component={RouterLink} to="/models/cqm/charts" variant="contained" sx={{ fontWeight: 700 }}>View charts</Button>
-          <Button component={RouterLink} to="/models/cqm/backtest" variant="outlined" sx={{ fontWeight: 700 }}>Backtest</Button>
-          <Button component={RouterLink} to="/lab" variant="outlined" sx={{ fontWeight: 700 }}>Compare in Lab</Button>
-          <Button component={RouterLink} to="/models/cqm/docs" variant="text" sx={{ fontWeight: 700 }}>Docs</Button>
-        </Stack>
-      </Paper>
     </Box>
   );
 };

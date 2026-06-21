@@ -2,6 +2,7 @@ import type { Handler } from '@netlify/functions';
 import { requireAdmin } from './lib/auth';
 import {
   composeNewsletterIssue,
+  getComposeJob,
   getIssueById,
   getIssueByWeek,
   getNewsletterDashboardData,
@@ -24,6 +25,13 @@ export const handler: Handler = async (event) => {
 
   try {
     if (event.httpMethod === 'GET') {
+      // Poll endpoint for the async (background) compose job.
+      const composeStatusWeek = event.queryStringParameters?.composeStatus;
+      if (composeStatusWeek) {
+        const job = await getComposeJob(composeStatusWeek);
+        return { statusCode: 200, body: JSON.stringify({ job }) };
+      }
+
       const weekOf = event.queryStringParameters?.weekOf;
       const data = await getNewsletterDashboardData(weekOf);
       return {
@@ -81,12 +89,20 @@ export const handler: Handler = async (event) => {
           return { statusCode: 404, body: JSON.stringify({ error: 'Newsletter issue not found.' }) };
         }
 
+        const customRecipients = Array.isArray(body.recipients)
+          ? (body.recipients as unknown[]).filter(
+            (r): r is string => typeof r === 'string' && r.trim().length > 0,
+          )
+          : [];
+
         const settings = await getNewsletterSettings();
         const result = await sendNewsletterIssue({
           issue,
           settings,
           mode: action === 'send' ? 'broadcast' : 'test',
           testRecipient: action === 'send_test' ? admin.email : null,
+          testRecipients:
+            action === 'send_test' && customRecipients.length > 0 ? customRecipients : null,
         });
 
         const freshIssue = await getIssueById(issue.id);

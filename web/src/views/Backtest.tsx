@@ -13,6 +13,10 @@ import {
   CQM_DEFAULT_SELL_THRESHOLD,
 } from '../utils/cqmSizing';
 import { buildWalkForwardRiskMap } from '../utils/cqmWalkForward';
+import { fitCQM, riskForPriceFairProjected } from '../utils/cqm';
+import { generateForwardPrices } from '../utils/cqmForwardSim';
+import { usePersistentState } from '../utils/usePersistentState';
+import { buildRiskGradientStops } from '../utils/cqmRiskGradient';
 import ChartsView from './ChartsView';
 import { format } from 'date-fns';
 import { FlaskConical, TrendingUp, Coins, BarChart3, ShieldAlert, DollarSign, ArrowDownToLine, Wallet, Download, ArrowUpDown } from 'lucide-react';
@@ -28,7 +32,6 @@ import {
   FormControl,
   Grid,
   InputAdornment,
-  InputLabel,
   Link as MuiLink,
   MenuItem,
   Paper,
@@ -62,6 +65,9 @@ interface Props {
 type RangeKey = 'all' | '5y' | '4y' | '3y' | '2y' | '1y' | 'custom';
 
 const ALL_START_DATE = '2013-01-01';
+// Furthest the CQM simulator will project synthetic future prices (end of the
+// next ~4-year cycle: lows 2026 / 2030 / 2034).
+const FUTURE_MAX_DATE = '2034-12-31';
 
 const STRATEGY_COLORS: Record<string, string> = {
   'Baseline DCA': '#94a3b8',
@@ -198,15 +204,8 @@ function buildRiskSpans(
 }
 
 const Backtest: React.FC<Props> = ({ data, variant }) => {
-  const [range, setRange] = useState<RangeKey>('5y');
-  const [customDate, setCustomDate] = useState<string>(ALL_START_DATE);
-  // End of the simulation window. Empty string = "today" (last available date).
-  const [customEndDate, setCustomEndDate] = useState<string>('');
-  // CQM defaults to a daily $100 base DCA; other variants/Lab keep weekly.
-  const [frequency, setFrequency] = useState<DcaFrequency>(() => (variant === 'cqm' ? 'daily' : 'weekly'));
-  const [dcaAmount, setDcaAmount] = useState<number>(100);
-
-  // Optional URL overrides:
+  // Optional URL overrides take priority over persisted state (and are written
+  // back to it). When absent, the persisted value (or default) is used.
   //   ?start-date=YYYY-MM-DD   → simulation start date
   //   ?end-date=YYYY-MM-DD     → simulation end date (defaults to today)
   //   ?dca-amount=100          → base DCA amount (USD)
@@ -216,44 +215,58 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
   const endDateParam = searchParams.get('end-date');
   const dcaAmountParam = searchParams.get('dca-amount');
   const dcaFrequencyParam = searchParams.get('dca-frequency');
-  useEffect(() => {
-    if (startDateParam && /^\d{4}-\d{2}-\d{2}$/.test(startDateParam)) {
-      const clamped = startDateParam < ALL_START_DATE ? ALL_START_DATE : startDateParam;
-      setCustomDate(clamped);
-      setRange('custom');
-    }
+
+  const startDateOverride = useMemo<string | undefined>(() => {
+    if (!startDateParam || !/^\d{4}-\d{2}-\d{2}$/.test(startDateParam)) return undefined;
+    return startDateParam < ALL_START_DATE ? ALL_START_DATE : startDateParam;
   }, [startDateParam]);
-  useEffect(() => {
-    if (endDateParam && /^\d{4}-\d{2}-\d{2}$/.test(endDateParam)) {
-      setCustomEndDate(endDateParam);
-    }
-  }, [endDateParam]);
-  useEffect(() => {
-    if (dcaAmountParam === null) return;
+  // A start-date in the URL implies a custom range.
+  const rangeOverride = startDateOverride !== undefined ? ('custom' as RangeKey) : undefined;
+  const endDateOverride = useMemo<string | undefined>(
+    () => (endDateParam && /^\d{4}-\d{2}-\d{2}$/.test(endDateParam) ? endDateParam : undefined),
+    [endDateParam],
+  );
+  const dcaAmountOverride = useMemo<number | undefined>(() => {
+    if (dcaAmountParam === null) return undefined;
     const v = parseFloat(dcaAmountParam);
-    if (Number.isFinite(v) && v > 0) setDcaAmount(v);
+    return Number.isFinite(v) && v > 0 ? v : undefined;
   }, [dcaAmountParam]);
-  useEffect(() => {
+  const frequencyOverride = useMemo<DcaFrequency | undefined>(() => {
     const v = (dcaFrequencyParam ?? '').toLowerCase();
-    if (v === 'daily' || v === 'weekly' || v === 'monthly') setFrequency(v);
+    return v === 'daily' || v === 'weekly' || v === 'monthly' ? (v as DcaFrequency) : undefined;
   }, [dcaFrequencyParam]);
-  const [offSignalMode, setOffSignalMode] = useState<OffSignalMode>('pause');
-  const [macroAccel, setMacroAccel] = useState<boolean>(true);
-  const [cqmDca, setCqmDca] = useState<boolean>(false);
+
+  // Form parameters are persisted to localStorage per simulator variant so a
+  // page refresh keeps the same simulation setup.
+  const ps = `cqm-backtest:${variant ?? 'lab'}`;
+  const [range, setRange] = usePersistentState<RangeKey>(`${ps}:range`, '5y', rangeOverride);
+  const [customDate, setCustomDate] = usePersistentState<string>(`${ps}:customDate`, ALL_START_DATE, startDateOverride);
+  // End of the simulation window. Empty string = "today" (last available date).
+  const [customEndDate, setCustomEndDate] = usePersistentState<string>(`${ps}:customEndDate`, '', endDateOverride);
+  // CQM defaults to a daily $100 base DCA; other variants/Lab keep weekly.
+  const [frequency, setFrequency] = usePersistentState<DcaFrequency>(`${ps}:frequency`, () => (variant === 'cqm' ? 'daily' : 'weekly'), frequencyOverride);
+  const [dcaAmount, setDcaAmount] = usePersistentState<number>(`${ps}:dcaAmount`, 100, dcaAmountOverride);
+
+  const [offSignalMode, setOffSignalMode] = usePersistentState<OffSignalMode>(`${ps}:offSignalMode`, 'pause');
+  const [macroAccel, setMacroAccel] = usePersistentState<boolean>(`${ps}:macroAccel`, true);
+  const [cqmDca, setCqmDca] = usePersistentState<boolean>(`${ps}:cqmDca`, false);
   // Tuned dynamic sizing knobs (6% cash-frac @ R=0, sell above 75%).
-  const [cqmMaxCashFraction, setCqmMaxCashFraction] = useState<number>(CQM_DEFAULT_MAX_CASH_FRACTION);
-  const [cqmSellThreshold, setCqmSellThreshold] = useState<number>(CQM_DEFAULT_SELL_THRESHOLD);
+  const [cqmMaxCashFraction, setCqmMaxCashFraction] = usePersistentState<number>(`${ps}:cqmMaxCashFraction`, CQM_DEFAULT_MAX_CASH_FRACTION);
+  const [cqmSellThreshold, setCqmSellThreshold] = usePersistentState<number>(`${ps}:cqmSellThreshold`, CQM_DEFAULT_SELL_THRESHOLD);
   // Legacy flat reserve-scaling (Lab only). When enabled, disables dynamic sizing.
-  const [cqmTradeFraction, setCqmTradeFraction] = useState<number>(0.01);
-  const [cqmFractionEnabled, setCqmFractionEnabled] = useState<boolean>(false);
+  const [cqmTradeFraction, setCqmTradeFraction] = usePersistentState<number>(`${ps}:cqmTradeFraction`, 0.01);
+  const [cqmFractionEnabled, setCqmFractionEnabled] = usePersistentState<boolean>(`${ps}:cqmFractionEnabled`, false);
   const [cqmRiskByDate, setCqmRiskByDate] = useState<Map<string, number>>(new Map());
   const [cqmRiskLoading, setCqmRiskLoading] = useState(false);
   const [cqmRiskProgress, setCqmRiskProgress] = useState(0); // 0..1
   // Annual yield on idle cash (APY %), accrued daily across all strategies.
-  const [cashYieldPct, setCashYieldPct] = useState<number>(0);
+  const [cashYieldPct, setCashYieldPct] = usePersistentState<number>(`${ps}:cashYieldPct`, 0);
   // CQM Risk chart: 'walkforward' = the causal risk that drives the sim;
   // 'lookback' = the full-sample fit shown on models/cqm/charts (hindsight).
-  const [riskChartMode, setRiskChartMode] = useState<'walkforward' | 'lookback'>('walkforward');
+  const [riskChartMode, setRiskChartMode] = usePersistentState<'walkforward' | 'lookback'>(`${ps}:riskChartMode`, 'walkforward');
+  // Seed for the forward price simulation. "Re-roll" bumps it for a new path.
+  // Persisted so a refresh keeps the same simulated future path.
+  const [forwardSeed, setForwardSeed] = usePersistentState<number>(`${ps}:forwardSeed`, () => (Math.random() * 0x7fffffff) >>> 0);
 
   // --- Per-model variant -------------------------------------------------
   // Locks the simulator to a single model's strategies and hides the
@@ -387,18 +400,90 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
     };
   }, [cqmPricePoints, effCqmDca]);
 
-  // End of the simulation window. Defaults to the last available date ("today");
-  // a custom value is clamped to [ALL_START_DATE, last available date].
+  // Last day of real BTC history ("today" for the simulator).
+  const lastHistoryDate = useMemo(
+    () => (data.length ? data[data.length - 1].Date : ''),
+    [data],
+  );
+
+  // End of the simulation window. Defaults to the last available date ("today").
+  // The CQM tab may run into the future (up to FUTURE_MAX_DATE) by simulating
+  // synthetic prices; other variants stay clamped to available history.
   const endDate = useMemo(() => {
-    const last = data.length ? data[data.length - 1].Date : '';
+    const last = lastHistoryDate;
     if (!last) return customEndDate;
     if (customEndDate && /^\d{4}-\d{2}-\d{2}$/.test(customEndDate)) {
-      if (customEndDate > last) return last;
+      const cap = isCqm ? FUTURE_MAX_DATE : last;
+      if (customEndDate > cap) return cap;
       if (customEndDate < ALL_START_DATE) return ALL_START_DATE;
       return customEndDate;
     }
     return last;
-  }, [data, customEndDate]);
+  }, [lastHistoryDate, customEndDate, isCqm]);
+
+  // --- Forward (future) price simulation ---------------------------------
+  // When the CQM tab's end date runs past the last real day, generate a
+  // semi-random but model-consistent BTC path: a halving-cycle drift along the
+  // QR-50% median, OU volatility that diminishes into the future, all squashed
+  // to stay strictly inside the projected 0.1% / 99.9% QR fan.
+  const isFuture = isCqm && !!lastHistoryDate && endDate > lastHistoryDate;
+
+  const forwardSim = useMemo(() => {
+    if (!isFuture) return null;
+    const hist: { date: string; ts: number; price: number }[] = [];
+    for (const d of data) {
+      const price = Number((d as { BTCUSD?: number }).BTCUSD);
+      if (!Number.isFinite(price) || price <= 0) continue;
+      const ts = new Date(d.Date).getTime();
+      if (!Number.isFinite(ts)) continue;
+      hist.push({ date: d.Date, ts, price });
+    }
+    if (hist.length < 365) return null;
+    try {
+      const fit = fitCQM(hist);
+      const points = generateForwardPrices(fit, { endDate, seed: forwardSeed });
+      return points.length > 0 ? { fit, points } : null;
+    } catch (err) {
+      console.warn('CQM forward simulation failed:', err);
+      return null;
+    }
+  }, [isFuture, data, endDate, forwardSeed]);
+
+  // History plus the synthetic future tail, used for the backtest and charts.
+  const simData = useMemo<SignalData[]>(() => {
+    if (!forwardSim) return data;
+    const extra = forwardSim.points.map(
+      (p) => ({ Date: p.date, BTCUSD: p.price }) as unknown as SignalData,
+    );
+    return [...data, ...extra];
+  }, [data, forwardSim]);
+
+  // Causal risk for the synthetic future days (frozen residual distribution +
+  // projected median). Merged onto the historical walk-forward risk map.
+  const forwardRiskByDate = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!forwardSim) return map;
+    for (const p of forwardSim.points) {
+      const r = riskForPriceFairProjected(forwardSim.fit, p.ts, p.price);
+      if (Number.isFinite(r)) map.set(p.date, Math.max(0, Math.min(1, r)));
+    }
+    return map;
+  }, [forwardSim]);
+
+  const effectiveRiskByDate = useMemo(() => {
+    if (forwardRiskByDate.size === 0) return cqmRiskByDate;
+    const merged = new Map(cqmRiskByDate);
+    for (const [date, risk] of forwardRiskByDate) merged.set(date, risk);
+    return merged;
+  }, [cqmRiskByDate, forwardRiskByDate]);
+
+  // Timestamps bounding the simulated future region, for chart shading.
+  const projectedSpan = useMemo(() => {
+    if (!isFuture || !lastHistoryDate) return null;
+    const x1 = new Date(lastHistoryDate).getTime();
+    const x2 = new Date(endDate).getTime();
+    return Number.isFinite(x1) && Number.isFinite(x2) && x2 > x1 ? { x1, x2 } : null;
+  }, [isFuture, lastHistoryDate, endDate]);
 
   // Compute start date from range selection or custom date. Presets are anchored
   // to the (possibly past) end date so "5Y" means the 5 years before endDate.
@@ -423,7 +508,7 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
 
   // Run backtest
   const results = useMemo<StrategyResult[]>(() => {
-    if (!data.length) return [];
+    if (!simData.length) return [];
     const config: BacktestConfig = {
       startDate,
       endDate,
@@ -432,19 +517,19 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
       offSignalMode,
       macroAccel: effMacroAccel,
       accelMultiplier: 3,
-      cqmDca: effCqmDca && cqmRiskByDate.size > 0 && !cqmRiskLoading,
-      cqmRiskByDate: cqmRiskByDate.size > 0 ? cqmRiskByDate : undefined,
+      cqmDca: effCqmDca && effectiveRiskByDate.size > 0 && !cqmRiskLoading,
+      cqmRiskByDate: effectiveRiskByDate.size > 0 ? effectiveRiskByDate : undefined,
       cqmDynamicSizing: effCqmDynamicSizing,
       cqmMaxCashFraction,
       cqmSellThreshold,
       cqmTradeFraction: effCqmTradeFraction,
       cashAnnualYieldPct: cashYieldPct,
     };
-    const all = runBacktest(data, config);
+    const all = runBacktest(simData, config);
     return allowedStrategies ? all.filter((r) => allowedStrategies.has(r.name)) : all;
   }, [
-    data, startDate, endDate, dcaAmount, frequency, offSignalMode, effMacroAccel,
-    effCqmDca, cqmRiskByDate, cqmRiskLoading, effCqmDynamicSizing, cqmMaxCashFraction,
+    simData, startDate, endDate, dcaAmount, frequency, offSignalMode, effMacroAccel,
+    effCqmDca, effectiveRiskByDate, cqmRiskLoading, effCqmDynamicSizing, cqmMaxCashFraction,
     cqmSellThreshold, effCqmTradeFraction, cashYieldPct, allowedStrategies,
   ]);
 
@@ -480,9 +565,9 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
       }
     }
 
-    // Merge per-day CQM Risk (0..1) so tooltips can surface it.
-    if (cqmRiskByDate.size > 0) {
-      for (const [date, risk] of cqmRiskByDate) {
+    // Merge per-day CQM Risk (0..1) so tooltips can surface it (history + future).
+    if (effectiveRiskByDate.size > 0) {
+      for (const [date, risk] of effectiveRiskByDate) {
         const entry = dateMap.get(date);
         if (entry) entry.cqmRisk = risk;
       }
@@ -505,25 +590,24 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
     }
 
     return Array.from(dateMap.values()).sort((a: any, b: any) => a.ts - b.ts);
-  }, [results, data, cqmRiskByDate]);
+  }, [results, data, effectiveRiskByDate]);
 
   const systemSpans = useMemo(() => buildSystemSpans(chartData), [chartData]);
 
   // CQM variant shades the background by per-day CQM Risk instead of the
   // CORE/MACRO regime (which is irrelevant to the CQM model).
   const riskSpans = useMemo(
-    () => (isCqm ? buildRiskSpans(chartData, cqmRiskByDate) : []),
-    [isCqm, chartData, cqmRiskByDate],
+    () => (isCqm ? buildRiskSpans(chartData, effectiveRiskByDate) : []),
+    [isCqm, chartData, effectiveRiskByDate],
   );
   const useRiskShading = isCqm && riskSpans.length > 0;
 
   // Per-day walk-forward risk series (the exact values driving the sim),
-  // windowed to the simulation interval, for the CQM Risk chart. The risk line
-  // is split into the four risk-band colors (same technique as the lookback
-  // chart): each point carries its value only on its band's key, with prev/next
-  // overlap so the colored segments join across band boundaries without gaps.
+  // windowed to the simulation interval, for the CQM Risk chart. Rendered as a
+  // single line whose stroke is a continuous green→red gradient mapped to the
+  // risk value (see wfRiskGradientStops).
   const wfRiskData = useMemo(() => {
-    const rows = chartData
+    return chartData
       .filter((d: any) => Number.isFinite(d.cqmRisk))
       .map((d: any) => ({
         ts: d.ts,
@@ -531,20 +615,22 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
         riskPct: (d.cqmRisk as number) * 100,
         btcPrice: d.btcPrice,
       }));
-    return rows.map((row, i) => {
-      const band = riskBand(row.riskPct / 100);
-      const prev = i > 0 ? riskBand(rows[i - 1].riskPct / 100) : null;
-      const next = i < rows.length - 1 ? riskBand(rows[i + 1].riskPct / 100) : null;
-      const inBand = (b: RiskBand) => band === b || prev === b || next === b;
-      return {
-        ...row,
-        riskCool: inBand(0) ? row.riskPct : null,
-        riskWarm: inBand(1) ? row.riskPct : null,
-        riskHot: inBand(2) ? row.riskPct : null,
-        riskEuphoric: inBand(3) ? row.riskPct : null,
-      };
-    });
   }, [chartData]);
+
+  // Gradient stops for the walk-forward risk line, derived from its min/max so
+  // the green→red colours track true risk values (SVG gradients map to the path
+  // bounding box, not the 0–100 axis).
+  const wfRiskGradientStops = useMemo(() => {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const d of wfRiskData) {
+      const v = Number(d.riskPct);
+      if (!Number.isFinite(v)) continue;
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+    return buildRiskGradientStops(lo, hi);
+  }, [wfRiskData]);
 
   // BTC price Y domain (right axis, log scale)
   const btcDomain = useMemo(() => {
@@ -707,14 +793,14 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
 
       {/* Controls */}
       <Paper sx={{ p: { xs: 2, sm: 2.5 } }}>
-        <Grid container spacing={2} alignItems="center">
+        <Grid container spacing={2} alignItems="flex-start">
           {/* Time Range Presets */}
           <Grid item xs={12} sm="auto">
             <Stack spacing={0.5}>
               <Typography variant="overline" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
                 Time Range
               </Typography>
-              <Stack direction="row" alignItems="center" spacing={1}>
+              <Stack direction="row" alignItems="flex-start" spacing={1} useFlexGap flexWrap="wrap" rowGap={1}>
                 <ToggleButtonGroup
                   color="primary"
                   exclusive
@@ -723,6 +809,7 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
                     if (next) setRange(next);
                   }}
                   size="small"
+                  sx={{ flexWrap: 'wrap' }}
                 >
                   <ToggleButton value="1y">1Y</ToggleButton>
                   <ToggleButton value="2y">2Y</ToggleButton>
@@ -759,11 +846,31 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
                   InputLabelProps={{ shrink: true }}
                   inputProps={{
                     min: startDate,
-                    max: data.length ? data[data.length - 1].Date : undefined,
+                    max: isCqm ? FUTURE_MAX_DATE : (lastHistoryDate || undefined),
                   }}
+                  helperText={isCqm ? `Up to ${FUTURE_MAX_DATE} simulates the future` : undefined}
+                  FormHelperTextProps={{ sx: { fontSize: '0.6rem', m: 0, mt: 0.25 } }}
                   sx={{ width: 155 }}
                 />
+                {isCqm && isFuture && (
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    startIcon={<ArrowUpDown size={14} />}
+                    onClick={() => setForwardSeed((s) => (s * 1664525 + 1013904223) >>> 0)}
+                    sx={{ whiteSpace: 'nowrap', height: 40 }}
+                  >
+                    Re-roll
+                  </Button>
+                )}
               </Stack>
+              {isCqm && isFuture && (
+                <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem', maxWidth: 520 }}>
+                  Prices after {lastHistoryDate} are a semi-random simulation — a halving-cycle
+                  path with diminishing volatility, kept inside the model&apos;s 0.1%–99.9% quantile
+                  band. Illustrative only, not a forecast. Press Re-roll for another scenario.
+                </Typography>
+              )}
             </Stack>
           </Grid>
 
@@ -789,64 +896,79 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
 
           {/* DCA Amount */}
           <Grid item xs={6} sm="auto">
-            <TextField
-              label="DCA Amount"
-              type="number"
-              size="small"
-              value={dcaAmount}
-              onChange={(e) => {
-                const v = parseFloat(e.target.value);
-                if (Number.isFinite(v) && v > 0) setDcaAmount(v);
-              }}
-              InputProps={{
-                startAdornment: <InputAdornment position="start">$</InputAdornment>,
-              }}
-              sx={{ width: 120 }}
-            />
+            <Stack spacing={0.5}>
+              <Typography variant="overline" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
+                DCA Amount
+              </Typography>
+              <TextField
+                type="number"
+                size="small"
+                value={dcaAmount}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  if (Number.isFinite(v) && v > 0) setDcaAmount(v);
+                }}
+                InputProps={{
+                  startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                }}
+                sx={{ width: { xs: '100%', sm: 120 } }}
+              />
+            </Stack>
           </Grid>
 
           {/* Cash yield on idle USD (applies to every strategy's cash balance) */}
           <Grid item xs={6} sm="auto">
-            <TextField
-              label="Cash APY"
-              type="number"
-              size="small"
-              value={cashYieldPct}
-              onChange={(e) => {
-                const v = parseFloat(e.target.value);
-                if (Number.isFinite(v) && v >= 0 && v <= 20) setCashYieldPct(v);
-              }}
-              InputProps={{
-                endAdornment: <InputAdornment position="end">%</InputAdornment>,
-              }}
-              inputProps={{ step: 0.5, min: 0, max: 20 }}
-              sx={{ width: 110 }}
-              title="Annual yield earned on idle cash (accrued daily). Set to a T-bill rate (e.g. 4%) so cash-holding strategies aren't unfairly penalized."
-            />
+            <Stack spacing={0.5}>
+              <Typography variant="overline" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
+                Cash APY
+              </Typography>
+              <TextField
+                type="number"
+                size="small"
+                value={cashYieldPct}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  if (Number.isFinite(v) && v >= 0 && v <= 20) setCashYieldPct(v);
+                }}
+                InputProps={{
+                  endAdornment: <InputAdornment position="end">%</InputAdornment>,
+                }}
+                inputProps={{ step: 0.5, min: 0, max: 20 }}
+                sx={{ width: { xs: '100%', sm: 110 } }}
+                title="Annual yield earned on idle cash (accrued daily). Set to a T-bill rate (e.g. 4%) so cash-holding strategies aren't unfairly penalized."
+              />
+            </Stack>
           </Grid>
 
           {/* Off-Signal Mode (CORE-based strategies only) */}
           {!isCqm && (
           <Grid item xs={6} sm="auto">
-            <FormControl size="small" sx={{ minWidth: 160 }}>
-              <InputLabel>When Signal OFF</InputLabel>
-              <Select
-                value={offSignalMode}
-                label="When Signal OFF"
-                onChange={(e) => setOffSignalMode(e.target.value as OffSignalMode)}
-              >
-                <MenuItem value="pause">Pause Buys</MenuItem>
-                <MenuItem value="sell_matching">Sell Matching</MenuItem>
-                <MenuItem value="sell_all">Sell All</MenuItem>
-              </Select>
-            </FormControl>
+            <Stack spacing={0.5}>
+              <Typography variant="overline" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
+                When Signal OFF
+              </Typography>
+              <FormControl size="small" sx={{ minWidth: 160, width: { xs: '100%', sm: 160 } }}>
+                <Select
+                  value={offSignalMode}
+                  onChange={(e) => setOffSignalMode(e.target.value as OffSignalMode)}
+                >
+                  <MenuItem value="pause">Pause Buys</MenuItem>
+                  <MenuItem value="sell_matching">Sell Matching</MenuItem>
+                  <MenuItem value="sell_all">Sell All</MenuItem>
+                </Select>
+              </FormControl>
+            </Stack>
           </Grid>
           )}
 
           {/* MACRO 3x Toggle (CORE-based strategies only) */}
           {!isCqm && (
           <Grid item xs={6} sm="auto">
-            <Stack direction="row" alignItems="center" spacing={1}>
+            <Stack spacing={0.5}>
+              <Typography variant="overline" aria-hidden sx={{ fontSize: '0.65rem', visibility: 'hidden', userSelect: 'none' }}>
+                .
+              </Typography>
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ height: 40 }}>
               <Switch
                 checked={macroAccel}
                 onChange={(_, checked) => setMacroAccel(checked)}
@@ -856,6 +978,7 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
               <Typography variant="body2" sx={{ fontWeight: 700 }}>
                 MACRO 3x
               </Typography>
+              </Stack>
             </Stack>
           </Grid>
           )}
@@ -863,7 +986,11 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
           {/* CQM Risk DCA Toggle (Lab only — locked on in the CQM model tab) */}
           {isLab && (
           <Grid item xs={6} sm="auto">
-            <Stack direction="row" alignItems="center" spacing={1}>
+            <Stack spacing={0.5}>
+              <Typography variant="overline" aria-hidden sx={{ fontSize: '0.65rem', visibility: 'hidden', userSelect: 'none' }}>
+                .
+              </Typography>
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ height: 40 }}>
               <Switch
                 checked={cqmDca}
                 onChange={(_, checked) => setCqmDca(checked)}
@@ -882,6 +1009,7 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
               >
                 CQM Risk DCA
               </Typography>
+              </Stack>
             </Stack>
           </Grid>
           )}
@@ -1221,6 +1349,16 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
                 {isCqm && (
                   <ReferenceLine yAxisId="pv" y={0} stroke="#94a3b8" strokeDasharray="4 3" strokeWidth={1} />
                 )}
+                {projectedSpan && (
+                  <ReferenceLine
+                    yAxisId="pv"
+                    x={projectedSpan.x1}
+                    stroke="#a855f7"
+                    strokeDasharray="5 4"
+                    strokeWidth={1.2}
+                    label={{ value: 'simulated →', position: 'insideTopRight', fill: '#c4b5fd', fontSize: 10 }}
+                  />
+                )}
                 <XAxis
                   dataKey="ts"
                   type="number"
@@ -1354,6 +1492,16 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
                 {isCqm && (
                   <ReferenceLine yAxisId="btcHoldings" y={0} stroke="#94a3b8" strokeDasharray="4 3" strokeWidth={1} />
+                )}
+                {projectedSpan && (
+                  <ReferenceLine
+                    yAxisId="btcHoldings"
+                    x={projectedSpan.x1}
+                    stroke="#a855f7"
+                    strokeDasharray="5 4"
+                    strokeWidth={1.2}
+                    label={{ value: 'simulated →', position: 'insideTopRight', fill: '#c4b5fd', fontSize: 10 }}
+                  />
                 )}
                 <XAxis
                   dataKey="ts"
@@ -1491,6 +1639,13 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
                   <Box sx={{ height: { xs: 340, sm: 420 }, width: '100%', minWidth: 0 }}>
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={wfRiskData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
+                        <defs>
+                          <linearGradient id="wfRiskLineGradient" x1="0" y1="0" x2="0" y2="1">
+                            {wfRiskGradientStops.map((s, i) => (
+                              <stop key={i} offset={`${(s.offset * 100).toFixed(2)}%`} stopColor={s.color} />
+                            ))}
+                          </linearGradient>
+                        </defs>
                         <ReferenceArea yAxisId="risk" y1={0} y2={25} fill="#22c55e" fillOpacity={0.16} strokeOpacity={0} />
                         <ReferenceArea yAxisId="risk" y1={25} y2={50} fill="#84cc16" fillOpacity={0.14} strokeOpacity={0} />
                         <ReferenceArea yAxisId="risk" y1={50} y2={75} fill="#f59e0b" fillOpacity={0.14} strokeOpacity={0} />
@@ -1527,13 +1682,20 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
                           tickFormatter={(v) => (typeof v === 'number' ? `${v.toFixed(0)}%` : '')}
                         />
                         <ReferenceLine yAxisId="risk" y={50} stroke="#94a3b8" strokeDasharray="6 3" strokeWidth={1.2} />
+                        {projectedSpan && (
+                          <ReferenceLine
+                            yAxisId="risk"
+                            x={projectedSpan.x1}
+                            stroke="#a855f7"
+                            strokeDasharray="5 4"
+                            strokeWidth={1.2}
+                            label={{ value: 'simulated →', position: 'insideTopRight', fill: '#c4b5fd', fontSize: 10 }}
+                          />
+                        )}
                         <Tooltip content={<WfRiskTooltip />} />
                         {renderChartBrush()}
                         <Line yAxisId="btc" type="monotone" dataKey="btcPrice" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.4} dot={false} isAnimationActive={false} opacity={0.45} />
-                        <Line yAxisId="risk" type="monotone" dataKey="riskCool" name="CQM Risk %" stroke="#22c55e" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
-                        <Line yAxisId="risk" type="monotone" dataKey="riskWarm" name="CQM Risk %" stroke="#84cc16" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
-                        <Line yAxisId="risk" type="monotone" dataKey="riskHot" name="CQM Risk %" stroke="#f59e0b" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
-                        <Line yAxisId="risk" type="monotone" dataKey="riskEuphoric" name="CQM Risk %" stroke="#ef4444" strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls={false} />
+                        <Line yAxisId="risk" type="monotone" dataKey="riskPct" name="CQM Risk %" stroke="url(#wfRiskLineGradient)" strokeWidth={2.6} dot={false} isAnimationActive={false} connectNulls />
                       </LineChart>
                     </ResponsiveContainer>
                   </Box>

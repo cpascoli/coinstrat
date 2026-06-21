@@ -5,7 +5,7 @@
  *   1. The admin-gated `admin-cqm-bot-execute.ts` Netlify function when the
  *      admin clicks "Execute trade" in the UI.
  *   2. The Netlify scheduled function `scheduled-cqm-bot.ts` that fires on a
- *      cron at 00:00 UTC every day.
+ *      cron at 07:00 UTC every day.
  *
  * Both callers use the same business logic: pause guard → frequency hard
  * guard → execution lease → CQM Risk → BTC-GBP price → virtual ledger

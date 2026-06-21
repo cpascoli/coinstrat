@@ -48,6 +48,13 @@ export interface ModelDef {
   featured?: boolean;
   summary: string[];
   chartSections: ChartsSection[];
+  /**
+   * Optional explicit chart-id list for the model's Charts tab. When set, the
+   * Charts tab renders exactly these charts (by stable id, cross-section)
+   * instead of every chart in `chartSections`. Lets a model curate charts
+   * pulled in from other indicator sections.
+   */
+  chartIds?: string[];
   factorGroups?: FactorGroup[];
   /**
    * Optional custom Factors view. When set, it replaces the generic
@@ -146,6 +153,19 @@ const bottomModel: ModelDef = {
     'Higher scores indicate deeper value and stronger accumulation setups; the band and deployment range translate the score into action.',
   ],
   chartSections: ['bottom'],
+  // Curated Charts tab, rendered in this exact order: the key on-chain value
+  // charts first, then liquidity/macro context, with the leverage/flush charts
+  // last. (The headline score chart lives on the Overview tab.)
+  chartIds: [
+    'holder-realized',
+    'mvrv',
+    'nupl',
+    'lth-nupl',
+    'us-net-liquidity',
+    'ism-pmi',
+    'funding',
+    'oi',
+  ],
   OverviewExtra: BottomScorePanel,
   FactorsComponent: BottomFactors,
   factorGroups: [

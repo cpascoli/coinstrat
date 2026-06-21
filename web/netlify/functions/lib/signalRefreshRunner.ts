@@ -5,8 +5,10 @@ import {
   fetchBGeometrics,
   type SignalRow,
 } from './compute';
+import { fetchFredObservations } from './fredClient';
 import { patchCqmFieldsInCache } from './cqmCache';
 import { triggerWalkForwardRecompute } from './cqmWalkForwardCache';
+import { writeBtcSeriesBlob } from './btcSeriesCache';
 import { persistSignalAlertChanges, detectAlertChanges } from './signalAlerts';
 import { signalsStore } from './store';
 import { evaluateActiveStrategies } from './strategyAlerts';
@@ -46,6 +48,13 @@ export type SignalRefreshResult =
   | {
     ok: true;
     mode: 'patch_sth_lth_rp';
+    patched: number;
+    total: number;
+    cached_at: string;
+  }
+  | {
+    ok: true;
+    mode: 'patch_treasury_yields';
     patched: number;
     total: number;
     cached_at: string;
@@ -328,6 +337,90 @@ export async function patchSthLthRealizedPriceInCache(): Promise<SignalRefreshRe
 }
 
 /**
+ * Back-fill the 10Y / 3M Treasury yields (FRED DGS10 / DGS3MO) for every cached
+ * row, forward-filled along the cache timeline. Fast (two FRED fetches) — use
+ * this instead of a full `rebuild` when the UST_10Y / UST_3M fields were added
+ * after the cache was seeded and historical dates are still null.
+ *
+ * (The 10Y-3M spread itself lives in YC_M and is already populated; this only
+ * fills the two individual yield legs so the indicators chart can plot them.)
+ */
+export async function patchTreasuryYieldsInCache(): Promise<SignalRefreshResult> {
+  const store = signalsStore();
+  const cached = await loadCachedSignals();
+  const cachedData = cached?.data ?? [];
+
+  if (cachedData.length === 0) {
+    throw new Error('Cache is empty — seed the cache first before patching Treasury yields.');
+  }
+
+  const [ust10y, ust3m] = await Promise.all([
+    fetchFredObservations('DGS10', { observationStart: null }),
+    fetchFredObservations('DGS3MO', { observationStart: null }),
+  ]);
+
+  const dates = cachedData.map((r) => r.Date);
+
+  const forwardFill = (
+    orderedDates: string[],
+    series: { date: string; value: number }[],
+  ): Map<string, number> => {
+    const pointMap = new Map(series.map((p) => [p.date, p.value]));
+    let last = NaN;
+    const out = new Map<string, number>();
+    for (const d of orderedDates) {
+      const v = pointMap.get(d);
+      if (v !== undefined && Number.isFinite(v)) last = v;
+      if (Number.isFinite(last)) out.set(d, last);
+    }
+    return out;
+  };
+
+  const ten = forwardFill(dates, ust10y);
+  const three = forwardFill(dates, ust3m);
+
+  let patched = 0;
+  const rows = cachedData.map((row) => {
+    const t10 = ten.get(row.Date);
+    const t3 = three.get(row.Date);
+    const t10Ok = typeof row.UST_10Y === 'number' && Number.isFinite(row.UST_10Y);
+    const t3Ok = typeof row.UST_3M === 'number' && Number.isFinite(row.UST_3M);
+
+    let next = row;
+    let changed = false;
+    if (t10 !== undefined && !t10Ok) {
+      next = { ...next, UST_10Y: t10 };
+      changed = true;
+    }
+    if (t3 !== undefined && !t3Ok) {
+      next = { ...next, UST_3M: t3 };
+      changed = true;
+    }
+    if (changed) patched += 1;
+    return next;
+  });
+
+  const cachedAt = new Date().toISOString();
+  await store.setJSON('signals_latest', {
+    timestamp: Date.now(),
+    count: rows.length,
+    data: rows,
+  });
+
+  console.log(
+    `[signal-refresh] Treasury yields patch complete — updated ${patched} of ${rows.length} rows.`,
+  );
+
+  return {
+    ok: true,
+    mode: 'patch_treasury_yields',
+    patched,
+    total: rows.length,
+    cached_at: cachedAt,
+  };
+}
+
+/**
  * Back-fill Bottom Accumulation Score fields across the existing cache range.
  *
  * This intentionally avoids `fullHistory: true`: historical raw values already
@@ -435,6 +528,10 @@ async function persistCacheWithCqmPatch(
     timestamp: Date.now(),
     count: cqmPatch.rows.length,
     data: cqmPatch.rows,
+  });
+  // Mirror the BTC price series into its own slim blob (see btcSeriesCache.ts).
+  await writeBtcSeriesBlob(cqmPatch.rows).catch((err) => {
+    console.error('[signal-refresh] Failed to write btc_series blob:', err);
   });
   console.log(
     `[signal-refresh] CQM patch complete — updated ${cqmPatch.patched} of ${cqmPatch.rows.length} rows.`,

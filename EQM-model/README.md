@@ -64,7 +64,18 @@ EQM score = 0.143  (reference 0.145)
 
 Override any of these with `--time-power`, `--low-quantile`, `--high-quantile`,
 `--score-power`, or the `--risk-*` gate flags. Python defaults live in
-`eqm_model.CQM_DEFAULTS` and must stay in sync with `web/src/utils/cqm.ts`.
+`eqm_model.CQM_DEFAULTS`.
+
+> **Divergence note (2026-06-21).** The production model `web/src/utils/cqm.ts`
+> no longer uses the cycle-aware γ / per-cycle upper-quantile mapping described
+> above. Its risk mapping was simplified to a single static line in percentile
+> space, `risk = clamp((pct − pBuy) / (pSell − pBuy), 0, 1)` with
+> `pBuy = 0.06`, `pSell = 0.68` (these are the former `low_quantile` / `high_quantile`
+> renamed; γ and the calendar cycle knots were removed). Live behaviour is
+> unchanged because the old mapping already collapsed to this at the fit endpoint.
+> This Python prototype retains the original reverse-engineering mapping for
+> reference and is no longer kept byte-for-byte in sync with the production model.
+
 To re-run grid search against alternate risk-price knots, see the calibration
 section below.
 

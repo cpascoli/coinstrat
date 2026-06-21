@@ -88,6 +88,8 @@ export interface SignalData {
   US_LIQ_13W_DELTA: number;
   SAHM?: number;
   YC_M?: number;
+  UST_10Y?: number;
+  UST_3M?: number;
   NO_YOY?: number;
   MVRV?: number;
   STH_REALIZED_PRICE?: number;

@@ -34,10 +34,10 @@ async function main() {
     );
   }
 
-  console.log('\nlowQ floor:', fit.lowQ, '(risk snaps to 0 when percentile < this)');
+  console.log('\npBuy floor:', fit.pBuy, '(risk snaps to 0 when percentile < this)');
 
-  // Simulate softer low mapping: extend linear map from pct=0..lowQ instead of clamp
-  console.log('\nHypothetical soft-low (linear pct 0→lowQ maps riskZ 0→0.15):');
+  // Simulate softer low mapping: extend linear map from pct=0..pBuy instead of clamp
+  console.log('\nHypothetical soft-low (linear pct 0→pBuy maps riskZ 0→0.15):');
   for (const d of dates) {
     const s = fitGated.signals.find((x) => x.date === d);
     if (!s) continue;

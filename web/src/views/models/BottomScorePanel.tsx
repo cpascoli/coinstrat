@@ -11,6 +11,7 @@ import {
   Typography,
 } from '@mui/material';
 import type { SignalData } from '../../App';
+import ChartsView from '../ChartsView';
 
 interface Props {
   current: SignalData;
@@ -18,10 +19,12 @@ interface Props {
 }
 
 /**
- * Bottom Accumulation Score panel — headline score, suggested deployment range
- * and the five component sub-scores. Used on the Bottom model's Overview tab.
+ * Bottom Accumulation Score panel — headline score, suggested deployment range,
+ * the six component sub-scores, and the score-vs-price history chart. Used on
+ * the Bottom model's Overview tab.
  */
-const BottomScorePanel: React.FC<Props> = ({ current }) => (
+const BottomScorePanel: React.FC<Props> = ({ current, history }) => (
+  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
   <Card
     sx={{
       border: '1px solid',
@@ -66,15 +69,18 @@ const BottomScorePanel: React.FC<Props> = ({ current }) => (
           <Grid container spacing={1.25}>
             <BottomScoreChip label="On-chain value" value={current.BOTTOM_ONCHAIN_SCORE} />
             <BottomScoreChip label="Capitulation" value={current.BOTTOM_CAPITULATION_SCORE} />
-            <BottomScoreChip label="Liquidity turn" value={current.BOTTOM_LIQUIDITY_SCORE} />
+            <BottomScoreChip label="Price damage" value={current.BOTTOM_PRICE_SETUP_SCORE} max={10} />
+            <BottomScoreChip label="Liquidity" value={current.BOTTOM_LIQUIDITY_SCORE} />
             <BottomScoreChip label="Macro support" value={current.BOTTOM_MACRO_SCORE} />
-            <BottomScoreChip label="Price setup" value={current.BOTTOM_PRICE_SETUP_SCORE} max={10} />
             <BottomScoreChip label="Price repair" value={current.BOTTOM_PRICE_REPAIR_SCORE} max={10} />
           </Grid>
         </Grid>
       </Grid>
     </CardContent>
   </Card>
+
+  <ChartsView data={history} chartIds={['bottom-score']} embedded />
+  </Box>
 );
 
 function BottomScoreChip(props: { label: string; value?: number; max?: number }) {

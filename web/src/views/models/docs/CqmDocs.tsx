@@ -68,9 +68,13 @@ const CqmDocs: React.FC = () => (
     </Typography>
     <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5, lineHeight: 1.8 }}>
       <strong>Tail auto-calibration (causal).</strong> Rather than hand-anchoring the top of the
-      fan, the QR&nbsp;50% endpoint is scaled so the median log-residual over the trailing{' '}
-      <strong>3 years</strong> is zero, ramping in over the last <strong>4 years</strong>. It uses
-      only data up to the evaluation date, so walk-forward (causal) fits never peek at the future.
+      fan, the QR&nbsp;50% endpoint is gently re-centred on recent price action using two windows:
+      a <strong>3-year measurement window</strong> sets <em>how much</em> to scale (the multiplier
+      that makes the median log-residual over the trailing 3 years zero), and a separate{' '}
+      <strong>4-year ramp window</strong> controls <em>how gradually</em> it is applied — the scale
+      blends from 1.0× (4 years ago, raw regression untouched) to full strength at the latest date,
+      leaving deep history on its original fit. Both windows are anchored to the evaluation date, so
+      walk-forward (causal) fits never peek at the future.
     </Typography>
 
     {/* ---------------------------------------------------------------- */}
@@ -82,16 +86,16 @@ const CqmDocs: React.FC = () => (
     </Typography>
     <Formula>{`residual(t) = log(price) − log(QR_50%(t))
 pct(t)      = empirical_percentile(residual(t), all residuals)   // 0..1
-z(t)        = clamp( (pct − 0.06) / (highQ − 0.06), 0, 1 )
-risk(t)     = z(t) ^ γ`}</Formula>
+risk(t)     = clamp( (pct − pBuy) / (pSell − pBuy), 0, 1 )`}</Formula>
     <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.8 }}>
-      The lower knot <Box component="code" sx={codeSx}>0.06</Box> means the cheapest ~6% of history
-      maps to 0% risk, and the upper knot <Box component="code" sx={codeSx}>highQ</Box> maps to 100%.
-      Both <Box component="code" sx={codeSx}>highQ</Box> and the curvature exponent{' '}
-      <Box component="code" sx={codeSx}>γ</Box> are <strong>cycle-aware</strong>: earlier cycles
-      (2014/2018/2022) used a higher upper quantile and stronger γ so early blow-off moves don&apos;t
-      all hard-clip at 100%, decaying toward today&apos;s calibration so the current snapshot stays
-      faithful.
+      The mapping is a single static line with two knots in percentile space. The lower knot{' '}
+      <Box component="code" sx={codeSx}>pBuy</Box> (currently <Box component="code" sx={codeSx}>0.06</Box>)
+      means the cheapest ~6% of history pins to 0% risk (maximum accumulate); the upper knot{' '}
+      <Box component="code" sx={codeSx}>pSell</Box> (currently <Box component="code" sx={codeSx}>0.72</Box>)
+      pins to 100% risk (maximum de-risk), with a straight line in between. Setting{' '}
+      <Box component="code" sx={codeSx}>pBuy = 0</Box>, <Box component="code" sx={codeSx}>pSell = 1</Box>{' '}
+      would make risk the raw valuation percentile itself; lowering <Box component="code" sx={codeSx}>pSell</Box>{' '}
+      makes the model treat a more modest valuation as fully &ldquo;rich&rdquo; and de-risk earlier.
     </Typography>
     <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5, lineHeight: 1.8 }}>
       The same mapping run in reverse (holding fair value fixed and sweeping price) produces the{' '}

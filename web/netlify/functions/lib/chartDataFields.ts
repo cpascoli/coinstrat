@@ -19,6 +19,8 @@ export const CHART_DATA_FIELDS = [
   'RRPONTSYD',
   'SAHM',
   'YC_M',
+  'UST_10Y',
+  'UST_3M',
   'NO',
   'NO_YOY',
   'ISM_PMI',

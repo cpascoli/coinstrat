@@ -50,8 +50,9 @@ For each day with a BTC price, the model produces:
         │  raw QR 0.1%, 50%, 99.9% at each date
         ▼
   ┌─────────────────────────────────────┐
-  │ 2. Tail scale (uniform)             │  × tailScale(t) on all three quantiles
-  │    ramp 2022 → 2026-05-28           │  pins QR 50% ≈ $100.8K at calibration
+  │ 2. Tail scale (uniform, causal)     │  × tailScale(t) on all three quantiles
+  │    auto-cal: re-centre on trailing  │  zeroes trailing-3y median residual,
+  │    3y median, 4y ramp               │  ramped in over 4y (no look-ahead)
   └─────────────────────────────────────┘
         │
         ├──────────────────────┬────────────────────────┐
@@ -69,7 +70,7 @@ For each day with a BTC price, the model produces:
    solid gold = 20-week SMA( geometric_mean(price, QR50%, w=0.5) )
 ```
 
-In the current production model the **tail scale** adjusts the QR fan in the recent cycle.
+In the current production model the **tail scale** adjusts the QR fan in the recent cycle, derived **causally** (auto-calibration — see Step 2).
 
 ---
 
@@ -113,7 +114,7 @@ At any calendar date `t`, evaluate the three parabolas → **raw** floor / media
 
 ---
 
-## Step 2 — Tail scale
+## Step 2 — Tail scale (causal auto-calibration)
 
 Recent-cycle calibration applies a **single positive multiplier** `tailScale(t)` to **all three** QR quantiles equally:
 
@@ -121,34 +122,36 @@ Recent-cycle calibration applies a **single positive multiplier** `tailScale(t)`
   scaled_QRτ(t) = raw_QRτ(t) × tailScale(t)
 ```
 
-**Tail ramp** (defaults):
+**Production uses causal auto-calibration** (`qrAutoCalibrate = true`), not a hand-picked
+anchor. Two windows, both anchored to the **evaluation date** `t` (so walk-forward / causal
+fits never peek at the future):
 
-| Date | `tailScale` |
-|------|-------------|
-| before 2022-01-01 | `1.0` |
-| 2022-01-01 → 2026-05-28 | linear ramp in time (power = 1) |
-| from 2026-05-28 onward | `endScale` |
-
-`endScale` is chosen so that **raw QR 50%** on the calibration date matches the target:
-
-```
-  endScale = $100,800 / raw_QR50%(2026-05-28)
-```
+- **How much** — `endScale(t)` re-centres the median so the **median log-residual over the
+  trailing 3 years** (`qrAutoCalTrailingDays = 365×3`) is zero. Equivalently
+  `endScale(t) = exp(−median_{τ ∈ [t−3y, t]} [ ln(price) − ln(raw_QR50%) ])`.
+- **How gradually** — the scale ramps in over **4 years** (`qrAutoCalRampYears = 4`),
+  blending from `1.0×` (4 years before `t`, raw regression untouched) to full
+  `endScale(t)` at the latest date. Deep history keeps its original fit.
 
 ```
-  tailScale(t)
+  tailScale(τ)            (for a fit evaluated at date t)
        1.0 ┤████████████████
-           │               ╱
-           │             ╱
-  endScale ┤···········●······  (~0.84 on 2026-05-28)
-           └────────────────────► time
-                2022          2026-05-28
+           │               ╲
+           │                 ╲
+  endScale ┤···················●   (full strength at t)
+           └────────────────────► time τ
+                t − 4y            t
 ```
 
-After scaling, on **2026-05-28**:
+So at each evaluation date the QR 50% line is gently re-centred on the trailing-3-year price
+action, and the 0.1% / 99.9% tails scale by the same factor (absolute dollar spread widens).
 
-- **QR 50% (dashed)** ≈ **$100,800** — risk fair value  
-- **QR 0.1%** and **99.9%** are scaled by the same factor (absolute spread widens in dollars)
+> **Legacy manual anchor (not used in production).** When `qrAutoCalibrate = false`, the model
+> instead pins **raw QR 50%** on a fixed date to a fixed target via
+> `endScale = qrCalibrationMedianUsd / raw_QR50%(qrCalibrationDate)` (e.g. `$100,800` on
+> `2026-05-28`), ramping from `qrScaleRampStartDate` (`2022-01-01`). These three knobs are
+> **ignored** whenever auto-calibration is on, which is the production default; they remain only
+> for legacy/diagnostic fits.
 
 ---
 
@@ -235,30 +238,53 @@ Sort **all** daily `residual(t)` values from 2014 onward (full sample). For toda
 
 ### Soft risk mapping
 
-Raw percentile is mapped to **Risk ∈ [0, 1]** with cycle-aware anchors:
+Raw percentile is mapped to **Risk ∈ [0, 1]** with a single **static linear** line
+between two knots in percentile space — no calendar dependence and no curvature:
 
 ```
-  riskHighQ(t) = interpolated knot: 2014→0.999, 2018→0.990, 2022→0.950, today→0.68
-  γ(t)         = interpolated knot: 2014→1.35, 2018→1.20, 2022→1.08, today→fitted
+  Risk(t) = clamp( (pct − pBuy) / (pSell − pBuy),  0, 1 )
 
-  z = clamp( (pct − lowQ) / (riskHighQ(t) − lowQ),  0, 1 )     lowQ = 0.06
-  Risk(t) = z^γ(t)
+  pBuy = 0.06     pSell = 0.72
 ```
 
-- **lowQ = 6%** — bottom of the risk scale (max accumulation zone)  
-- **highQ = 68%** — today's upper percentile anchor (not everything clips at 100%)  
-- **γ > 1** — compresses mid-range, sharpens euphoric peaks (older cycles use higher γ)
+- **pBuy = 6%** — at/below this percentile risk pins to 0 (maximum accumulate)
+- **pSell = 72%** — at/above this percentile risk pins to 1 (maximum de-risk)
+- linear in between; `pBuy = 0, pSell = 1` recovers the identity (raw percentile)
 
 ```
   Risk %
-  100 ┤                              ●  (z→1, pct at blow-off)
-      │                            ╱
-   50 ┤                      ╱
-      │                 ╱           ← γ power bends the middle
-    0 ┤────────●────────
+  100 ┤                         ●────────  (pct ≥ pSell)
+      │                       ╱
+   50 ┤                  ╱            ← straight line, no γ
+      │             ╱
+    0 ┤────────●
       └──────────────────────────────► pct (empirical percentile)
-           6%              68%+
+           6%              72%
 ```
+
+> **History note.** Earlier versions used a *cycle-aware* mapping: the upper
+> anchor and a curvature exponent γ were interpolated by calendar date
+> (2014→0.999, 2018→0.990, 2022→0.950, today→0.68; γ 1.35→1.20→1.08→fitted),
+> originally to reproduce BTCAnalytica's published curve. A walk-forward
+> calibration study found γ was effectively inert forward (it resolved to 1.0 at
+> the fit endpoint) and the cycle anchors only ever shaped *historical backtest*
+> values, never the live/forward decision. They were removed in favour of the
+> two static knots above. The reparameterization was behaviour-preserving at
+> first — the old endpoint already evaluated to `clamp((pct − 0.06) / 0.62, 0, 1)`
+> (i.e. `pSell = 0.68`).
+>
+> **Calibration note (2026-06-21).** `pBuy`/`pSell` are now the only risk-mapping
+> dials. A walk-forward sweep plus forward scenario stress (compressed/base/larger
+> next-cycle tops) showed the historical objective is ill-conditioned — the
+> in-sample optimum flips between a passive "just hold" map (high `pSell`, best on
+> the violent 2017 cycle) and an aggressive de-risking map (low `pSell`, best in
+> compressed forward scenarios), and cross-cycle out-of-sample is unstable. Rather
+> than point-fit, `pBuy` is left at `0.06` (low-impact) and `pSell` is treated as a
+> policy dial for next-cycle amplitude. Tuned for a **compressed / diminishing-returns**
+> prior (prioritise drawdown protection), `pSell` was set to **0.72** — slightly
+> softer than the old `0.68` endpoint to reduce 2017-style premature-sell tail risk
+> while keeping most of the drawdown protection (forward stress: ~30% max drawdown
+> vs ~48% for a passive map, while still beating DCA in compressed/base tops).
 
 **Production default:** `riskMode = 'global'` — full-sample percentile only. Legacy gated/rolling modes exist for diagnostics but are **not** used in charts or the DCA bot.
 
@@ -282,49 +308,74 @@ At a fixed date, hold `fair` and the residual history fixed, sweep hypothetical 
 
 The chart plots this curve with a dot at `(price_today, Risk_today)`. The curve is **monotonic** but slightly **jagged** because the empirical CDF has discrete steps.
 
-**Example knot prices on 2026-05-28** (from `run_eqm.py`):
+**Example knot prices on 2026-05-28** (production model, `qrAutoCalibrate` default, via `priceForRiskFair`):
 
 | Risk | Implied price |
 |------|---------------|
-| 0% | ~$54K |
-| 25% | ~$69K |
-| 50% | ~$84K |
-| 75% | ~$112K |
-| 100% | ~$146K |
+| 0% | ~$53K |
+| 25% | ~$70K |
+| 50% | ~$88K |
+| 75% | ~$121K |
+| 100% | ~$155K |
 
-At spot ~$73.6K → **Risk ≈ 34%**.
+At spot ~$73.5K → **Risk ≈ 32%**. (QR 50% fair ≈ $110K under causal auto-calibration.)
 
 ---
 
 ## DCA bot formula
 
-The CQM bot sizes daily trades from Risk:
+The bot and backtester share one sizing function (`web/src/utils/cqmSizing.ts`).
+Given the period's base amount, the current Risk `r`, and the live cash / BTC
+balances, it computes a buy or a sell:
 
 ```
-  daily_usd = base × (1 − 2 × Risk)
+# Buy zone  (r < 0.50)
+taper    = (0.50 − r) / 0.50                 # 1 at r=0 → 0 at fair value
+cashFrac = maxCashFraction × taper           # maxCashFraction = 6%
+buy      = max( base × (1 − 2·r),  cashFrac × cash )
+buy      = min( buy, cash )                  # never overspend
+
+# Hold zone (0.50 ≤ r ≤ sellThreshold)        # sellThreshold = 0.75
+→ do nothing
+
+# Sell zone (r > sellThreshold)
+sellScale = (r − sellThreshold) / (1 − sellThreshold)   # 0 at 0.75 → 1 at 1.0
+size      = max( base, btcSellFraction × btc_value )    # btcSellFraction = 1%
+sell      = min( size × sellScale, btc_value )
 ```
 
-| Risk | Daily action (base = $100) |
-|------|----------------------------|
-| 0% | Buy $100 (2× base) |
-| 25% | Buy $50 |
+The key term over a plain linear rule is `cashFrac × cash`: at low risk it
+deploys a fraction of the **accumulated idle cash**, not just a multiple of the
+base — which fixes the "cash drag" where a purely linear rule leaves large
+undeployed balances during deep-value windows. The linear `base × (1 − 2·r)`
+term stays as a floor.
+
+| Risk | Daily action (base = $100, before the cash-pile term) |
+|------|-------------------------------------------------------|
+| 0% | Buy ≥ $100 (2× base; more if idle cash is sizeable) |
+| 25% | Buy ≥ $50 |
 | 50% | $0 (flat) |
-| 75% | Sell $50 |
-| 100% | Sell $100 |
+| 51–75% | $0 (hold / dead zone) |
+| 75% | $0 (sell zone starts) |
+| 100% | Sell `max(base, 1% × BTC value)` |
+
+**Defaults** — `maxCashFraction = 6%`, `sellThreshold = 75%`,
+`btcSellFraction = 1%` — were tuned on a walk-forward grid across five historical
+windows (Jun 2026); both are adjustable in the Lab and the bot's Strategy Settings.
 
 ---
 
 ## Worked examples
 
-### Example A — 2026-05-28 (calibration snapshot)
+### Example A — 2026-05-28 (recent snapshot, illustrative)
 
 | Field | Value |
 |-------|-------|
-| BTC price | ~$73,600 |
-| QR 50% fair (risk) | ~$100,800 |
+| BTC price | ~$73,500 |
+| QR 50% fair (risk) | ~$110,300 (causal auto-calibration; the old manual anchor was $100,800) |
 | Gold SMA (display) | ~$84,700 |
-| **Risk** | **~34%** |
-| DCA (base $100) | buy ~$32/day |
+| **Risk** | **~32%** |
+| DCA (base $100) | buy ≥ ~$37/day (linear floor; more if idle cash has built up) |
 
 Price is **below** QR fair → negative residual → moderate risk, not euphoric.
 
@@ -332,10 +383,10 @@ Price is **below** QR fair → negative residual → moderate risk, not euphoric
 
 | Field | Value |
 |-------|-------|
-| BTC price | ~$60,600 |
-| QR 50% fair | ~$101,600 |
-| **Risk** | **~8–12%** (closer to BTCAnalytica ~9.5%) |
-| DCA (base $100) | buy ~$84/day |
+| BTC price | ~$60,900 |
+| QR 50% fair | ~$111,100 (causal auto-calibration) |
+| **Risk** | **~11%** |
+| DCA (base $100) | buy ≥ ~$79/day (linear floor; the 6%-of-cash term deploys more at this low risk) |
 
 Cheaper vs fair → lower percentile → lower risk → **larger buys**.
 
@@ -365,15 +416,21 @@ Risk is **global ranking**, not “distance to floor line.”
 | Parameter | Value | Meaning |
 |-----------|-------|---------|
 | `startDate` | 2014-01-01 | Earliest BTC day in risk/band sample |
-| `qrScaleRampStartDate` | 2022-01-01 | Tail ramp begins |
-| `qrCalibrationDate` | 2026-05-28 | Tail ramp ends |
-| `qrCalibrationMedianUsd` | 100,800 | QR 50% target at calibration |
+| `qrAutoCalibrate` | `true` | Causal tail calibration (manual anchors below ignored) |
+| `qrAutoCalTrailingDays` | 1095 (3y) | Window whose median residual is zeroed |
+| `qrAutoCalRampYears` | 4 | Years over which the tail scale ramps in |
+| `qrScaleRampStartDate` | 2022-01-01 | *(legacy, manual mode only)* tail ramp begins |
+| `qrCalibrationDate` | 2026-05-28 | *(legacy, manual mode only)* tail ramp ends |
+| `qrCalibrationMedianUsd` | 100,800 | *(legacy, manual mode only)* QR 50% target |
 | `fairBlendPriceWeight` | 0.5 | Gold SMA: 50% price / 50% QR |
 | `fairGoldSmaWeeks` | 20 | Gold SMA window |
-| `lowQ` | 0.06 | Risk floor percentile anchor |
-| `highQ` | 0.68 | Risk ceiling percentile anchor (today) |
+| `pBuy` | 0.06 | Risk floor percentile knot (risk pins to 0 at/below) |
+| `pSell` | 0.72 | Risk ceiling percentile knot (risk pins to 1 at/above; tuned 2026-06 for a compressed-cycle / drawdown-protection prior) |
 | `scorePower` | 1.5 | Score = risk^1.5 |
 | `riskMode` | `global` | Full-sample empirical risk |
+| `maxCashFraction` | 0.06 | Sizing: max % of idle cash deployed/period at risk 0 |
+| `sellThreshold` | 0.75 | Sizing: risk above which the bot sells (dead zone 0.50–0.75) |
+| `btcSellFraction` | 0.01 | Sizing: sell size = max(base, 1% × BTC value) scaled by risk |
 
 ---
 
@@ -392,4 +449,4 @@ Output: `EQM-model/output/eqm_replica.png` (five panels: bands, gold, risk, risk
 
 ## Mental model (one paragraph)
 
-CQM fits a **long-run BTC valuation fan** (asymmetric quantiles in log-price vs log-time), **scales** it in the recent cycle so QR 50% matches a calibration target, and reads off **floor / fair / ceiling** from the 0.1% / blended-SMA / 99.9% lines. **Risk** is not “distance to a line”—it is your **percentile rank** in the history of `(price ÷ fair)` residuals, passed through a **soft power map** that remembers how extreme each cycle could get. Cheap vs fair → low risk → buy more; expensive vs fair → high risk → trim or sell.
+CQM fits a **long-run BTC valuation fan** (asymmetric quantiles in log-price vs log-time), **causally re-centres** it in the recent cycle (zeroing the trailing-3-year median residual, ramped in over 4 years), and reads off **floor / fair / ceiling** from the 0.1% / blended-SMA / 99.9% lines. **Risk** is not “distance to a line”—it is your **percentile rank** in the history of `(price ÷ fair)` residuals, passed through a **static linear map** between two percentile knots (`pBuy` → 0% risk, `pSell` → 100% risk). Cheap vs fair → low risk → buy more; expensive vs fair → high risk → trim or sell.

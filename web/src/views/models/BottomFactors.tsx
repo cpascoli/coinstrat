@@ -1,10 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
   Box,
-  Button,
   Chip,
   Link as MuiLink,
   Paper,
@@ -14,10 +10,80 @@ import {
   Typography,
 } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
-import { ChevronDown } from 'lucide-react';
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import type { SignalData } from '../../App';
-import ChartsView, { type ChartsSection } from '../ChartsView';
 import { BOTTOM_FACTORS, type BottomFactor, type BottomFactorKey, type SubScore } from '../../utils/bottomScore';
+
+/** Per-factor line colour for the sub-score history chart. */
+const FACTOR_COLOR: Record<BottomFactorKey, string> = {
+  onchain: '#a78bfa',
+  capitulation: '#fb7185',
+  liquidity: '#60a5fa',
+  macro: '#34d399',
+  setup: '#f97316',
+  repair: '#4ade80',
+};
+
+function fmtXTick(ts: number): string {
+  return new Date(ts).toLocaleDateString('en-US', { month: 'short', year: '2-digit', timeZone: 'UTC' });
+}
+
+/** Time series of a single factor's sub-score (0..max) with BTC price for context. */
+const FactorScoreChart: React.FC<{ data: SignalData[]; factor: BottomFactor }> = ({ data, factor }) => {
+  const color = FACTOR_COLOR[factor.key] ?? '#facc15';
+  const points = useMemo(
+    () =>
+      data
+        .map((d) => ({
+          ts: Date.parse(`${d.Date}T00:00:00Z`),
+          score: Number(d[factor.field]),
+          btc: Number(d.BTCUSD),
+        }))
+        .filter((p) => Number.isFinite(p.ts) && Number.isFinite(p.score)),
+    [data, factor.field],
+  );
+
+  const btcDomain = useMemo<[number, number]>(() => {
+    const vals = points.map((p) => p.btc).filter((v) => Number.isFinite(v) && v > 0);
+    if (!vals.length) return [1, 10];
+    return [Math.min(...vals) * 0.9, Math.max(...vals) * 1.1];
+  }, [points]);
+
+  if (points.length < 2) return null;
+
+  return (
+    <Box sx={{ mt: 2 }}>
+      <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
+        {factor.label} sub-score history
+      </Typography>
+      <Box sx={{ height: { xs: 240, sm: 300 }, width: '100%', minWidth: 0 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={points} margin={{ top: 5, right: 28, left: 4, bottom: 5 }}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2a44" />
+            <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} scale="time" tickFormatter={fmtXTick} minTickGap={36} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+            <YAxis yAxisId="score" domain={[0, factor.max]} allowDecimals={false} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={28} />
+            <YAxis yAxisId="btc" orientation="right" scale="log" domain={btcDomain} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => (typeof v === 'number' ? `$${Math.round(v).toLocaleString()}` : '')} />
+            <Tooltip
+              contentStyle={{ background: '#0f172a', border: '1px solid #1f2a44', borderRadius: 8, fontSize: 12 }}
+              labelFormatter={(ts) => new Date(Number(ts)).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })}
+              formatter={(val, name) => (name === 'BTCUSD' ? [`$${Math.round(Number(val)).toLocaleString()}`, 'BTC'] : [Number(val).toFixed(0), factor.label])}
+            />
+            <Line yAxisId="score" type="monotone" dataKey="score" name={factor.label} stroke={color} strokeWidth={2} dot={false} isAnimationActive={false} />
+            <Line yAxisId="btc" type="monotone" dataKey="btc" name="BTCUSD" stroke="#e5e7eb" strokeWidth={1.4} dot={false} isAnimationActive={false} opacity={0.4} />
+          </LineChart>
+        </ResponsiveContainer>
+      </Box>
+    </Box>
+  );
+};
 
 /** Tab display order + concise labels (independent of the scoring spec order). */
 const FACTOR_TAB_ORDER: { key: BottomFactorKey; label: string }[] = [
@@ -146,23 +212,7 @@ const FactorCard: React.FC<{ factor: BottomFactor; data: SignalData[]; current: 
         </Typography>
       )}
 
-      <Accordion
-        disableGutters
-        elevation={0}
-        TransitionProps={{ unmountOnExit: true }}
-        sx={{ mt: 1.5, bgcolor: 'transparent', '&:before': { display: 'none' }, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}
-      >
-        <AccordionSummary expandIcon={<ChevronDown size={18} />} sx={{ minHeight: 44 }}>
-          <Typography variant="body2" sx={{ fontWeight: 700 }}>Contributing charts</Typography>
-        </AccordionSummary>
-        <AccordionDetails>
-          {factor.chartIds && factor.chartIds.length > 0 ? (
-            <ChartsView data={data} chartIds={factor.chartIds} embedded showRange={false} />
-          ) : (
-            <ChartsView data={data} sections={factor.sections as ChartsSection[]} embedded showRange={false} />
-          )}
-        </AccordionDetails>
-      </Accordion>
+      <FactorScoreChart data={data} factor={factor} />
     </Paper>
   );
 };

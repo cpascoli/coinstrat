@@ -148,7 +148,7 @@ describe('CoinStrat Quantile Model', () => {
     const snapshot = snapshotAt(fit, ts);
     expect(snapshot).not.toBeNull();
     if (!snapshot) return;
-    expect(snapshot.price).toBeCloseTo(73531.95, -1);
+    expect(snapshot.price).toBeCloseTo(73515.7, -1);
     expect(snapshot.risk * 100).toBeGreaterThan(28);
     expect(snapshot.risk * 100).toBeLessThan(42);
     expect(snapshot.qrDashedMedian / 1000).toBeCloseTo(100.8, 0);
@@ -247,7 +247,12 @@ describe('CoinStrat Quantile Model', () => {
       expect(gated, date).not.toBeNull();
       if (!g || !gated) continue;
       expect(gated.risk).toBeLessThanOrEqual(g.risk + 1e-9);
-      expect(gated.risk).toBeLessThanOrEqual(0.20);
+      // Bottoms stay firmly in the accumulate zone (risk < fair = 0.5). The
+      // absolute bound is looser than the legacy 0.20 because the risk map is
+      // now a static [pBuy, pSell] line: removing the old calendar-interpolated
+      // upper quantile (≈0.95–0.999 in early cycles) lifts early-cycle bottom
+      // risk modestly. Gating still pulls it below the global reading above.
+      expect(gated.risk).toBeLessThanOrEqual(0.40);
     }
   });
 

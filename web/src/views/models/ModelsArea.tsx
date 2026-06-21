@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Box,
   Button,
@@ -8,6 +8,8 @@ import {
   Stack,
   Tab,
   Tabs,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography,
 } from '@mui/material';
 import {
@@ -21,7 +23,7 @@ import {
 } from 'react-router-dom';
 import { Layers } from 'lucide-react';
 import type { SignalData } from '../../App';
-import ChartsView, { type ChartsSection } from '../ChartsView';
+import ChartsView, { type ChartsSection, type RangeKey } from '../ChartsView';
 import Backtest from '../Backtest';
 import MemberGate from '../../components/MemberGate';
 import {
@@ -131,6 +133,12 @@ const ModelOverview: React.FC<{ model: ModelDef; data: SignalData[]; onOpenAuth?
   const Extra = model.OverviewExtra;
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Typography variant="h6" sx={{ fontWeight: 800, mb: 1 }}>About this model</Typography>
+        {model.summary.map((p, i) => (
+          <Typography key={i} variant="body2" color="text.secondary" sx={{ mb: 1, lineHeight: 1.8 }}>{p}</Typography>
+        ))}
+      </Paper>
       {Extra && current ? (
         <Extra current={current} history={data} />
       ) : (
@@ -142,20 +150,6 @@ const ModelOverview: React.FC<{ model: ModelDef; data: SignalData[]; onOpenAuth?
           <StateMetrics state={state} />
         </Paper>
       )}
-      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
-        <Typography variant="h6" sx={{ fontWeight: 800, mb: 1 }}>About this model</Typography>
-        {model.summary.map((p, i) => (
-          <Typography key={i} variant="body2" color="text.secondary" sx={{ mb: 1, lineHeight: 1.8 }}>{p}</Typography>
-        ))}
-        <Stack direction="row" spacing={1.5} useFlexGap flexWrap="wrap" sx={{ mt: 1 }}>
-          <Button component={RouterLink} to={`/models/${model.id}/charts`} variant="contained" sx={{ fontWeight: 700 }}>View charts</Button>
-          {model.factorGroups && (
-            <Button component={RouterLink} to={`/models/${model.id}/factors`} variant="outlined" sx={{ fontWeight: 700 }}>Factors</Button>
-          )}
-          <Button component={RouterLink} to="/lab" variant="outlined" sx={{ fontWeight: 700 }}>Compare in Lab</Button>
-          <Button component={RouterLink} to={`/models/${model.id}/docs`} variant="text" sx={{ fontWeight: 700 }}>Docs</Button>
-        </Stack>
-      </Paper>
     </Box>
   );
 };
@@ -250,6 +244,31 @@ const ModelChartTabs: React.FC<{ tabs: NonNullable<ModelDef['chartTabs']>; data:
   );
 };
 
+/**
+ * Renders a model's curated Charts tab in the exact order of `chartIds` (each as
+ * its own embedded single-chart ChartsView), driven by one shared range toggle.
+ * Needed because a single ChartsView renders charts in fixed file order.
+ */
+const OrderedModelCharts: React.FC<{ data: SignalData[]; chartIds: string[] }> = ({ data, chartIds }) => {
+  const [range, setRange] = useState<RangeKey>('all');
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <ToggleButtonGroup color="primary" exclusive value={range} onChange={(_, v: RangeKey | null) => v && setRange(v)} size="small">
+          <ToggleButton value="1y">1Y</ToggleButton>
+          <ToggleButton value="2y">2Y</ToggleButton>
+          <ToggleButton value="5y">5Y</ToggleButton>
+          <ToggleButton value="10y">10Y</ToggleButton>
+          <ToggleButton value="all">All</ToggleButton>
+        </ToggleButtonGroup>
+      </Box>
+      {chartIds.map((id) => (
+        <ChartsView key={id} data={data} chartIds={[id]} embedded showRange={false} range={range} onRangeChange={setRange} />
+      ))}
+    </Box>
+  );
+};
+
 const ModelLayout: React.FC<AreaProps> = ({ data, onOpenAuth }) => {
   const { modelId } = useParams();
   const location = useLocation();
@@ -303,6 +322,8 @@ const ModelLayout: React.FC<AreaProps> = ({ data, onOpenAuth }) => {
           element={
             model.chartTabs && model.chartTabs.length ? (
               <ModelChartTabs tabs={model.chartTabs} data={data} />
+            ) : model.chartIds && model.chartIds.length ? (
+              <OrderedModelCharts data={data} chartIds={model.chartIds} />
             ) : (
               <ChartsView data={data} sections={model.chartSections} embedded />
             )
