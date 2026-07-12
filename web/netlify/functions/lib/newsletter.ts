@@ -226,16 +226,74 @@ const openAiApiKey = process.env.OPENAI_API_KEY;
 const openAiModel = process.env.OPENAI_NEWSLETTER_MODEL || process.env.OPENAI_NEWS_MODEL || 'gpt-4.1-mini';
 const newsLookbackDays = Number(process.env.NEWS_LOOKBACK_DAYS || 7);
 
-const NEWS_QUERIES = [
-  `Bitcoin OR BTC (ETF OR treasury OR adoption OR mining OR regulation OR Lightning OR mempool OR macro) when:${newsLookbackDays}d`,
-  `(Bitcoin OR BTC) (site:coindesk.com OR site:bitcoinmagazine.com OR site:cointelegraph.com OR site:decrypt.co) when:${newsLookbackDays}d`,
-  `(bitcoin OR btc) (market OR treasury OR mining OR policy OR adoption OR lightning) when:${newsLookbackDays}d`,
+/**
+ * Weekly headlines are sourced per topic so the digest is not wall-to-wall
+ * finance: each bucket has its own Google News queries and a quota in the
+ * final selection. Candidates are re-classified by keyword after fetching
+ * (a query can surface stories from any topic); the query's topic is only the
+ * fallback when no keywords match.
+ */
+export type NewsTopic = 'markets' | 'development' | 'culture';
+
+const NEWS_QUERY_SETS: Array<{ topic: NewsTopic; query: string }> = [
+  { topic: 'markets', query: `Bitcoin OR BTC (ETF OR treasury OR adoption OR mining OR regulation OR macro OR institution) when:${newsLookbackDays}d` },
+  { topic: 'markets', query: `(Bitcoin OR BTC) (site:coindesk.com OR site:cointelegraph.com OR site:decrypt.co OR site:theblock.co) when:${newsLookbackDays}d` },
+  { topic: 'development', query: `Bitcoin ("Bitcoin Core" OR BIP OR "soft fork" OR covenant OR "Lightning Network" OR mempool OR self-custody OR "open source" OR wallet OR node OR protocol) when:${newsLookbackDays}d` },
+  { topic: 'development', query: `(Bitcoin OR Lightning) developer (release OR upgrade OR privacy OR security OR software) when:${newsLookbackDays}d` },
+  { topic: 'culture', query: `Bitcoin (conference OR community OR education OR "human rights" OR "circular economy" OR Nostr OR meetup OR documentary OR grassroots) when:${newsLookbackDays}d` },
+  { topic: 'culture', query: `(Bitcoin OR BTC) site:bitcoinmagazine.com when:${newsLookbackDays}d` },
 ];
-const MAX_ENRICHED_STORIES = 4;
+
+/** How many stories each topic contributes to the final selection. */
+const NEWS_TOPIC_QUOTAS: Record<NewsTopic, number> = {
+  markets: 4,
+  development: 3,
+  culture: 3,
+};
+
+/** Total links in the Weekly Bitcoin Headlines section (sum of the quotas). */
+const MAX_WEEKLY_STORIES = 10;
+
+const NEWS_TOPIC_KEYWORDS: Record<NewsTopic, string[]> = {
+  development: [
+    'bitcoin core', 'bip', 'soft fork', 'softfork', 'covenant', 'op_cat', 'taproot',
+    'lightning', 'mempool', 'full node', 'self-custody', 'multisig', 'open source',
+    'open-source', 'developer', 'protocol', 'utxo', 'wallet release', 'privacy tech',
+  ],
+  culture: [
+    'conference', 'community', 'meetup', 'education', 'human rights', 'circular economy',
+    'nostr', 'documentary', 'film', 'book', 'podcast', 'grassroots', 'culture',
+    'el salvador', 'remittance', 'unbanked', 'financial freedom',
+  ],
+  markets: [
+    'etf', 'treasury', 'fund', 'institution', 'price', 'macro', 'fed', 'rate',
+    'regulation', 'sec', 'mining', 'miner', 'custody', 'reserve', 'inflow', 'holdings',
+  ],
+};
+
+const TITLE_STOPWORDS = new Set([
+  'the', 'and', 'for', 'with', 'that', 'this', 'from', 'will', 'has', 'have', 'its',
+  'are', 'was', 'says', 'after', 'over', 'amid', 'into', 'more', 'than', 'what',
+  'why', 'how', 'could', 'their', 'about', 'bitcoin', 'btc', 'crypto', 'cryptocurrency',
+]);
+
+/**
+ * Two titles are the "same story" when they share enough meaningful tokens
+ * both in absolute terms (guards short titles, where one shared entity name
+ * would dominate the ratio) and relative to the shorter title (guards long
+ * titles, where 3 shared generic tokens can be coincidence).
+ */
+const NEAR_DUPLICATE_MIN_SHARED_TOKENS = 3;
+const NEAR_DUPLICATE_TITLE_OVERLAP = 0.5;
+const MAX_ENRICHED_STORIES = 6;
 const ARTICLE_FETCH_TIMEOUT_MS = 3500;
 const ARTICLE_EXCERPT_MAX_CHARS = 1800;
 const PROMPT_EXCERPT_MAX_CHARS = 700;
-const OPENAI_TIMEOUT_MS = 30000;
+// Client-side cap on the OpenAI draft call. Compose always runs inside a
+// background function (15-min budget), so this only needs to cover a slow
+// model response — the draft now returns the full narrative layer (subject,
+// summary, section intros, headlines), so give it comfortable headroom.
+const OPENAI_TIMEOUT_MS = 60000;
 const newsletterImageEnabled = (process.env.NEWSLETTER_IMAGE ?? 'true').toLowerCase() !== 'false';
 // Time-box the hero image so synchronous admin compose (60s gateway) still fits;
 // the weekly auto-send runs in a background function and is not gated by this.
@@ -975,28 +1033,147 @@ export function scoreNewsCandidate(candidate: NewsCandidate): number {
   return score;
 }
 
+/** Keyword-classify a candidate; `fallback` is the topic of the query that surfaced it. */
+export function classifyNewsTopic(candidate: NewsCandidate, fallback: NewsTopic): NewsTopic {
+  const haystack = `${candidate.title} ${candidate.summary}`.toLowerCase();
+  let best: NewsTopic | null = null;
+  let bestHits = 0;
+
+  for (const topic of Object.keys(NEWS_TOPIC_KEYWORDS) as NewsTopic[]) {
+    const hits = NEWS_TOPIC_KEYWORDS[topic].reduce(
+      (count, keyword) => count + (haystack.includes(keyword) ? 1 : 0),
+      0,
+    );
+    if (hits > bestHits) {
+      best = topic;
+      bestHits = hits;
+    }
+  }
+
+  return best ?? fallback;
+}
+
+function titleTokens(title: string): Set<string> {
+  return new Set(
+    title
+      .toLowerCase()
+      // Google News titles carry a trailing " - Source" that would dilute similarity.
+      .replace(/\s+-\s+[^-]+$/, '')
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((token) => token.length > 2 && !TITLE_STOPWORDS.has(token)),
+  );
+}
+
+/**
+ * Detect the same story written up by two outlets: enough shared meaningful
+ * tokens in absolute count AND relative to the shorter title (overlap
+ * coefficient, which catches a short headline being a subset of a longer one).
+ */
+export function isNearDuplicateTitle(a: string, b: string): boolean {
+  const tokensA = titleTokens(a);
+  const tokensB = titleTokens(b);
+  if (tokensA.size === 0 || tokensB.size === 0) return false;
+
+  let intersection = 0;
+  for (const token of tokensA) {
+    if (tokensB.has(token)) intersection += 1;
+  }
+
+  return (
+    intersection >= NEAR_DUPLICATE_MIN_SHARED_TOKENS &&
+    intersection / Math.min(tokensA.size, tokensB.size) >= NEAR_DUPLICATE_TITLE_OVERLAP
+  );
+}
+
+interface TopicCandidate extends NewsCandidate {
+  topic: NewsTopic;
+}
+
+/**
+ * Pick the weekly stories with per-topic quotas and near-duplicate filtering.
+ *
+ * Candidates are sorted by score and admitted greedily: a story is skipped if
+ * its title substantially overlaps one already picked (same story from another
+ * outlet) or its topic quota is full. If quotas leave slots unfilled (thin
+ * dev/culture week), the best remaining non-duplicate stories backfill. The
+ * final list is interleaved across topics so the top stories — the ones that
+ * get article excerpts and drive the LLM narrative — span topics instead of
+ * being finance-only.
+ */
+export function selectWeeklyStories(candidates: TopicCandidate[], limit = MAX_WEEKLY_STORIES): TopicCandidate[] {
+  const byScore = [...candidates].sort((a, b) => scoreNewsCandidate(b) - scoreNewsCandidate(a));
+
+  const picked: TopicCandidate[] = [];
+  const overflow: TopicCandidate[] = [];
+  const remainingQuota: Record<NewsTopic, number> = { ...NEWS_TOPIC_QUOTAS };
+
+  const isNearDuplicate = (candidate: TopicCandidate): boolean =>
+    picked.some((existing) => isNearDuplicateTitle(existing.title, candidate.title));
+
+  for (const candidate of byScore) {
+    if (picked.length >= limit) break;
+    if (isNearDuplicate(candidate)) continue;
+    if (remainingQuota[candidate.topic] <= 0) {
+      overflow.push(candidate);
+      continue;
+    }
+    remainingQuota[candidate.topic] -= 1;
+    picked.push(candidate);
+  }
+
+  for (const candidate of overflow) {
+    if (picked.length >= limit) break;
+    if (isNearDuplicate(candidate)) continue;
+    picked.push(candidate);
+  }
+
+  // Interleave topics (markets, development, culture, markets, ...) so the
+  // excerpt-enriched head of the list is topically diverse.
+  const byTopic = new Map<NewsTopic, TopicCandidate[]>();
+  for (const candidate of picked) {
+    const list = byTopic.get(candidate.topic) ?? [];
+    list.push(candidate);
+    byTopic.set(candidate.topic, list);
+  }
+
+  const topicOrder: NewsTopic[] = ['markets', 'development', 'culture'];
+  const interleaved: TopicCandidate[] = [];
+  while (interleaved.length < picked.length) {
+    for (const topic of topicOrder) {
+      const next = byTopic.get(topic)?.shift();
+      if (next) interleaved.push(next);
+    }
+  }
+
+  return interleaved;
+}
+
 async function sourceWeeklyStories(
   context: WeeklyContext,
   existingLinks: CuratedLinkInput[],
 ): Promise<CuratedLinkInput[]> {
   try {
     const candidateResults = await Promise.allSettled(
-      NEWS_QUERIES.map((query) => fetchNewsCandidates(query)),
+      NEWS_QUERY_SETS.map(({ query }) => fetchNewsCandidates(query)),
     );
 
-    const allCandidates = candidateResults.flatMap((result) => (
-      result.status === 'fulfilled' ? result.value : []
+    const allCandidates: TopicCandidate[] = candidateResults.flatMap((result, index) => (
+      result.status === 'fulfilled'
+        ? result.value.map((candidate) => ({
+          ...candidate,
+          topic: classifyNewsTopic(candidate, NEWS_QUERY_SETS[index].topic),
+        }))
+        : []
     ));
 
-    const deduped = new Map<string, NewsCandidate>();
+    const deduped = new Map<string, TopicCandidate>();
     for (const candidate of allCandidates) {
       const key = candidate.url || candidate.title.toLowerCase();
       if (!deduped.has(key)) deduped.set(key, candidate);
     }
 
-    const selected = Array.from(deduped.values())
-      .sort((a, b) => scoreNewsCandidate(b) - scoreNewsCandidate(a))
-      .slice(0, 8);
+    const selected = selectWeeklyStories(Array.from(deduped.values()));
 
     const enrichedResults = await Promise.allSettled(
       selected.slice(0, MAX_ENRICHED_STORIES).map((candidate) => fetchArticleExcerpt(candidate)),
@@ -1542,10 +1719,10 @@ function fallbackDraft(
       },
     ],
     headlinesNarrative,
-    curatedLinks: curatedLinks.map((link) => ({
-      ...link,
-      commentary: link.note?.trim() || 'Relevant Bitcoin context selected for this week’s digest.',
-    })),
+    // No commentary in the fallback scaffold: the raw note is a long scraped
+    // excerpt and a canned sentence reads worse than nothing. Rendering skips
+    // links without commentary.
+    curatedLinks: curatedLinks.map((link) => ({ ...link })),
     cta: {
       label: ctaLabel?.trim() || 'Open Dashboard',
       href: ctaHref?.trim() || `${appUrl}/dashboard`,
@@ -1556,58 +1733,48 @@ function fallbackDraft(
   };
 }
 
-function normalizeDraft(raw: any, fallback: NewsletterDraft): NewsletterDraft {
-  const signalSections = Array.isArray(raw?.signalSections)
-    ? raw.signalSections
-      .map((section: any) => ({
-        title: typeof section?.title === 'string' && section.title.trim() ? section.title.trim() : 'Section',
-        body: typeof section?.body === 'string' && section.body.trim() ? section.body.trim() : '',
-        bullets: Array.isArray(section?.bullets)
-          ? section.bullets.filter((bullet: unknown) => typeof bullet === 'string' && bullet.trim())
-          : [],
-      }))
-      .filter((section: NewsletterSection) => section.body || section.bullets.length > 0)
-    : fallback.signalSections;
+/**
+ * Compact, purely factual bullets for the "Regime posture" section when the LLM
+ * writes the interpretation. The verbose canned sentences (dynamicCoreSentence
+ * et al.) are only kept for the no-LLM fallback scaffold.
+ */
+function regimeFactBullets(current: Record<string, number | string | null>): string[] {
+  return [
+    `Core Accumulation: ${signalStatusLabel(current.CORE_ON)}`,
+    `Macro Accelerator: ${signalStatusLabel(current.MACRO_ON)}`,
+    `Valuation score: ${current.VAL_SCORE ?? 'n/a'}/3`,
+    `Liquidity score: ${current.LIQ_SCORE ?? 'n/a'}/2`,
+    `Dollar score: ${current.DXY_SCORE ?? 'n/a'}/2`,
+    `Business Cycle score: ${current.BIZ_CYCLE_SCORE ?? 'n/a'}/2`,
+  ];
+}
 
-  const curatedLinks = Array.isArray(raw?.curatedLinks)
-    ? raw.curatedLinks
-      .map((link: any, index: number) => ({
-        title: typeof link?.title === 'string' && link.title.trim() ? link.title.trim() : fallback.curatedLinks[index]?.title ?? 'Link',
-        url: typeof link?.url === 'string' && link.url.trim() ? link.url.trim() : fallback.curatedLinks[index]?.url ?? appUrl,
-        source: typeof link?.source === 'string' && link.source.trim() ? link.source.trim() : fallback.curatedLinks[index]?.source ?? 'Source',
-        note: typeof link?.note === 'string' ? link.note.trim() : fallback.curatedLinks[index]?.note ?? null,
-        commentary: typeof link?.commentary === 'string' && link.commentary.trim()
-          ? link.commentary.trim()
-          : fallback.curatedLinks[index]?.commentary ?? 'Relevant additional context for this week.',
-      }))
-    : fallback.curatedLinks;
+const NEWSLETTER_SYSTEM_PROMPT = [
+  'You are the analyst writing the CoinStrat Weekly newsletter for Bitcoin accumulators. You write the narrative layer of the email; all numeric bullets are computed separately and appended after your prose, so never restate a full list of stats.',
+  'You will receive (a) this week\'s signal digest — price, deltas, model scores, state changes — and (b) article source packets with title, source, url, and cleaned excerpts.',
+  'Voice: a calm, specific, professional analyst writing to informed readers. Every sentence must be anchored in this week\'s data or this week\'s stories. Never invent, round, or extrapolate numbers — only cite values exactly as they appear in the digest. Ban filler and boilerplate: no "taken together", "remains to be seen", "navigate", "landscape", "in the ever-evolving world of", no restating the model\'s general methodology, and no sentence that could be copy-pasted into any other week\'s issue unchanged.',
+  'Return valid JSON with exactly these keys:',
+  '`subject`: max 78 characters, specific to this week (lead with the single most consequential change or story; may include one key number).',
+  '`previewText`: max 140 characters, complements the subject without repeating it.',
+  '`headline`: max 90 characters, the email H1; concrete, this week only, no colon-stuffed stat dumps.',
+  '`summary`: 2-3 sentences opening the email — what actually happened this week (price move, biggest signal shift, dominant news thread) and what it means for an accumulator.',
+  '`sectionIntros`: object with keys `whatChanged`, `quantileDca`, `bottomGauge`, `regimePosture`, `whyItMatters`. Each value is 1-3 sentences introducing that section, specific to this week\'s deltas and state changes, and not repeating the other intros. `whatChanged` frames the most meaningful week-over-week moves. `quantileDca` says what this week\'s CQM risk level implies for DCA sizing right now. `bottomGauge` interprets the bottom-accumulation score and its largest mover. `regimePosture` interprets the ON/OFF switches and the valuation/liquidity/dollar/cycle scores as one coherent read. `whyItMatters` is 2-4 sentences of practical takeaway for someone accumulating on a schedule; if an editor note is supplied, weave its substance in.',
+  '`headlinesNarrative`: 160-240 words in 2 or 3 short paragraphs separated by blank lines, stitching the sourced stories into one narrative. The stories deliberately span markets, Bitcoin development/technology, and culture/community — give each thread that is present its own weight instead of reducing the week to price action or institutional flows. Focus on the actual developments, firms, events, macro drivers, and risks in the excerpts. Do not repeat headlines verbatim and do not output a list.',
+  '`curatedLinks`: array in the same order as the supplied links; each item has `url` and `commentary` (one short sentence on why that story mattered this week).',
+  '`imagePrompt`: a single sophisticated visual metaphor for the week\'s key takeaway, suitable for an illustration; no Bitcoin or cryptocurrency coin logos, coin symbols, text, words, numbers, brand logos, charts, or identifiable real people.',
+  '`imageAlt`: max 120 characters of alt text for that illustration.',
+].join('\n');
 
-  return {
-    subject: typeof raw?.subject === 'string' && raw.subject.trim() ? raw.subject.trim() : fallback.subject,
-    previewText: typeof raw?.previewText === 'string' && raw.previewText.trim()
-      ? raw.previewText.trim()
-      : fallback.previewText,
-    headline: typeof raw?.headline === 'string' && raw.headline.trim() ? raw.headline.trim() : fallback.headline,
-    summary: typeof raw?.summary === 'string' && raw.summary.trim() ? raw.summary.trim() : fallback.summary,
-    headlinesNarrative: typeof raw?.headlinesNarrative === 'string' && raw.headlinesNarrative.trim()
-      ? raw.headlinesNarrative.trim()
-      : fallback.headlinesNarrative,
-    signalSections: signalSections.length > 0 ? signalSections : fallback.signalSections,
-    curatedLinks,
-    cta: {
-      label: typeof raw?.cta?.label === 'string' && raw.cta.label.trim()
-        ? raw.cta.label.trim()
-        : fallback.cta.label,
-      href: typeof raw?.cta?.href === 'string' && raw.cta.href.trim()
-        ? raw.cta.href.trim()
-        : fallback.cta.href,
-    },
-    complianceFooter: typeof raw?.complianceFooter === 'string' && raw.complianceFooter.trim()
-      ? raw.complianceFooter.trim()
-      : fallback.complianceFooter,
-    imageUrl: typeof raw?.imageUrl === 'string' && raw.imageUrl.trim() ? raw.imageUrl.trim() : fallback.imageUrl ?? null,
-    imageAlt: typeof raw?.imageAlt === 'string' && raw.imageAlt.trim() ? raw.imageAlt.trim() : fallback.imageAlt ?? null,
-  };
+interface GeneratedSectionIntros {
+  whatChanged?: string;
+  quantileDca?: string;
+  bottomGauge?: string;
+  regimePosture?: string;
+  whyItMatters?: string;
+}
+
+function cleanString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 async function generateNewsletterDraft(
@@ -1628,6 +1795,9 @@ async function generateNewsletterDraft(
     throw new Error('Newsletter generation failed: no article excerpts were available for the selected headlines.');
   }
 
+  const bottom = context.bottomAccum;
+  const cqm = context.cqm;
+
   const payload = {
     model: openAiModel,
     temperature: 0.4,
@@ -1635,8 +1805,7 @@ async function generateNewsletterDraft(
     messages: [
       {
         role: 'system',
-        content:
-          'You are writing only the Weekly Bitcoin Headlines section of the CoinStrat newsletter. You will receive a small set of article source packets containing title, source, url, and cleaned excerpts. Use those excerpts to write a compelling, engaging and specific market narrative that stitches the stories together. Focus on actual developments, firms, events, macro drivers, and risks mentioned in the excerpts. Avoid generic crypto-market boilerplate. Do not repeat the headlines verbatim and do not output a list of headlines. Return valid JSON with exactly these keys: `headlinesNarrative`, `curatedLinks`, `imagePrompt`, and `imageAlt`. `headlinesNarrative` must be 160-240 words split into 2 or 3 short paragraphs separated by blank lines. `curatedLinks` must be an array in the same order as the supplied links, where each item has `url` and `commentary`. Each `commentary` must be one short sentence explaining why that link mattered this week. `imagePrompt` must describe a single sophisticated visual metaphor for the one key takeaway of the week, suitable for an illustration; do NOT include any Bitcoin or cryptocurrency coin logos, coin symbols, text, words, numbers, brand logos, charts, or identifiable real people. `imageAlt` must be a concise (max 120 characters) alt-text description of that illustration.',
+        content: NEWSLETTER_SYSTEM_PROMPT,
       },
       {
         role: 'user',
@@ -1644,16 +1813,35 @@ async function generateNewsletterDraft(
           brandVoice: 'Concise analytical newsletter for bitcoin accumulators. Professional, calm, persuasive, and specific. Avoid hype.',
           weekOf: context.weekOf,
           referenceDate: context.referenceDate,
-          currentMarket: {
-            BTCUSD: context.current.BTCUSD,
-            VAL_SCORE: context.current.VAL_SCORE,
-            LIQ_SCORE: context.current.LIQ_SCORE,
-            BIZ_CYCLE_SCORE: context.current.BIZ_CYCLE_SCORE,
-            DXY_SCORE: context.current.DXY_SCORE,
-            CORE_ON: context.current.CORE_ON,
-            MACRO_ON: context.current.MACRO_ON,
+          editorNote: editorNote || null,
+          signalDigest: {
+            highlights: context.highlights,
+            stateChanges: context.stateChanges,
+            current: context.current,
+            deltas: context.deltas,
+            bottomAccumulation: {
+              score: bottom.current.score,
+              band: bottom.current.band,
+              deployment: bottom.current.deployment,
+              scoreDelta: bottom.deltas.score,
+              largestMover: bottom.largestMover,
+              components: {
+                onchain: bottom.current.onchain,
+                capitulation: bottom.current.capitulation,
+                liquidity: bottom.current.liquidity,
+                macro: bottom.current.macro,
+                priceSetup: bottom.current.priceSetup,
+                priceRepair: bottom.current.priceRepair,
+              },
+            },
+            cqm: {
+              riskPct: typeof cqm.current?.risk === 'number' ? Number((cqm.current.risk * 100).toFixed(1)) : null,
+              riskDeltaPp: typeof cqm.deltas.risk === 'number' ? Number((cqm.deltas.risk * 100).toFixed(1)) : null,
+              price: cqm.current?.price ?? null,
+              qrFairValue: cqm.current?.qrDashedMedian ?? null,
+              dcaHint: cqm.dcaHint ?? null,
+            },
           },
-          highlights: context.highlights.slice(0, 4),
           links: curatedLinks.map((link) => ({
             title: link.title,
             source: link.source,
@@ -1698,33 +1886,55 @@ async function generateNewsletterDraft(
       );
     }
 
-    const headlinesNarrative = typeof (parsed as any)?.headlinesNarrative === 'string'
-      ? (parsed as any).headlinesNarrative.trim()
-      : '';
+    const generated = parsed as Record<string, unknown>;
+    const headlinesNarrative = cleanString(generated.headlinesNarrative);
 
     if (!headlinesNarrative) {
       throw new Error('Newsletter generation failed: OpenAI response did not include `headlinesNarrative`.');
     }
 
     const commentaryByUrl = new Map<string, string>();
-    if (Array.isArray((parsed as any)?.curatedLinks)) {
-      for (const link of (parsed as any).curatedLinks) {
+    if (Array.isArray(generated.curatedLinks)) {
+      for (const link of generated.curatedLinks as any[]) {
         if (typeof link?.url !== 'string') continue;
-        const commentary = typeof link?.commentary === 'string' ? link.commentary.trim() : '';
+        const commentary = cleanString(link.commentary);
         if (commentary) commentaryByUrl.set(link.url.trim(), commentary);
       }
     }
 
-    const imagePrompt = typeof (parsed as any)?.imagePrompt === 'string'
-      ? (parsed as any).imagePrompt.trim()
-      : '';
-    const imageAlt = typeof (parsed as any)?.imageAlt === 'string'
-      ? (parsed as any).imageAlt.trim()
-      : '';
+    const intros: GeneratedSectionIntros = typeof generated.sectionIntros === 'object' && generated.sectionIntros !== null
+      ? generated.sectionIntros as GeneratedSectionIntros
+      : {};
+
+    // Swap each section's canned body for the LLM intro when one came back.
+    // Bullets stay computed (exact numbers); the regime section additionally
+    // drops its verbose canned sentences in favour of compact facts, since the
+    // interpretation now lives in the intro.
+    const introBySectionTitle = new Map<string, string>([
+      ['What changed this week', cleanString(intros.whatChanged)],
+      ['Quantile model & DCA sizing', cleanString(intros.quantileDca)],
+      ['Bottom deployment gauge', cleanString(intros.bottomGauge)],
+      ['Regime posture', cleanString(intros.regimePosture)],
+      ['Why It Matters', cleanString(intros.whyItMatters)],
+    ]);
+
+    const signalSections = fallback.signalSections.map((section) => {
+      const intro = introBySectionTitle.get(section.title);
+      if (!intro) return section;
+      if (section.title === 'Regime posture') {
+        return { ...section, body: intro, bullets: regimeFactBullets(context.current) };
+      }
+      return { ...section, body: intro };
+    });
 
     return {
       draft: {
         ...fallback,
+        subject: cleanString(generated.subject) || fallback.subject,
+        previewText: cleanString(generated.previewText) || fallback.previewText,
+        headline: cleanString(generated.headline) || fallback.headline,
+        summary: cleanString(generated.summary) || fallback.summary,
+        signalSections,
         headlinesNarrative,
         curatedLinks: fallback.curatedLinks.map((link) => ({
           ...link,
@@ -1733,8 +1943,8 @@ async function generateNewsletterDraft(
       },
       provider: 'openai',
       model: openAiModel,
-      imagePrompt,
-      imageAlt,
+      imagePrompt: cleanString(generated.imagePrompt),
+      imageAlt: cleanString(generated.imageAlt),
     };
   } catch (error) {
     console.error('[newsletter/openai]', error);
@@ -1783,6 +1993,7 @@ function renderNewsletterContent(issue: {
           <div style="margin-bottom:14px;">
             <a href="${escapeHtml(link.url)}" style="color:#93c5fd;font-weight:700;text-decoration:none;">${escapeHtml(link.title)}</a>
             <div style="color:#94a3b8;font-size:12px;margin-top:2px;">${escapeHtml(link.source)}</div>
+            ${link.commentary?.trim() ? `<p style="margin:4px 0 0;color:#cbd5e1;font-size:13px;line-height:1.6;">${escapeHtml(link.commentary.trim())}</p>` : ''}
           </div>
         `).join('')}
       </div>
@@ -1860,6 +2071,7 @@ function renderNewsletterContent(issue: {
         '',
         ...issue.draft.curatedLinks.flatMap((link) => [
           `${link.title} (${link.source})`,
+          ...(link.commentary?.trim() ? [link.commentary.trim()] : []),
           link.url,
           '',
         ]),

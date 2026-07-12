@@ -201,7 +201,7 @@ export const endpointGroups: EndpointGroup[] = [
         path: '/api/admin/newsletter',
         summary: 'Newsletter dashboard',
         description:
-          'Returns newsletter settings, subscriber counts, and issue history. Supports composing, sending, and test-sending newsletter issues via POST/PUT.',
+          'Returns newsletter settings, subscriber counts, and issue history. Supports sending and test-sending newsletter issues via POST and updating settings via PUT. Composing runs in the admin-newsletter-background function.',
         auth: 'admin_jwt',
       },
     ],

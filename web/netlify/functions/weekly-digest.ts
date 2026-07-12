@@ -1,7 +1,6 @@
 import type { Handler } from '@netlify/functions';
 import { authorizeAdminOrCron } from './lib/auth';
 import {
-  composeNewsletterIssue,
   getAutomaticNewsletterStatus,
   getIssueById,
   getIssueByWeek,
@@ -10,7 +9,10 @@ import {
   sendNewsletterIssue,
 } from './lib/newsletter';
 
-type DigestAction = 'auto_send' | 'status' | 'compose' | 'preview' | 'send' | 'send_test';
+// Composing is NOT handled here: it exceeds Netlify's synchronous cap, so it
+// only runs inside background functions (`admin-newsletter-background` for the
+// admin UI, `newsletter-send-background` for the weekly auto-send).
+type DigestAction = 'auto_send' | 'status' | 'preview' | 'send' | 'send_test';
 
 export const handler: Handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
@@ -43,24 +45,6 @@ export const handler: Handler = async (event) => {
         return {
           statusCode: 200,
           body: JSON.stringify(result),
-        };
-      }
-      case 'compose': {
-        if (auth.kind !== 'admin') {
-          return { statusCode: 403, body: JSON.stringify({ error: 'Admin access required.' }) };
-        }
-
-        const issue = await composeNewsletterIssue({
-          actorId: auth.user.id,
-          weekOf: body.weekOf,
-          editorNote: body.editor_note ?? null,
-          ctaLabel: body.cta_label ?? null,
-          ctaHref: body.cta_href ?? null,
-        });
-
-        return {
-          statusCode: 200,
-          body: JSON.stringify({ ok: true, issue }),
         };
       }
       case 'preview': {

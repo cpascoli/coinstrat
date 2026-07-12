@@ -1,7 +1,6 @@
 import type { Handler } from '@netlify/functions';
 import { requireAdmin } from './lib/auth';
 import {
-  composeNewsletterIssue,
   getComposeJob,
   getIssueById,
   getIssueByWeek,
@@ -11,7 +10,9 @@ import {
   updateNewsletterSettings,
 } from './lib/newsletter';
 
-type AdminNewsletterAction = 'compose' | 'send' | 'send_test';
+// Composing is NOT handled here: it exceeds Netlify's synchronous cap, so the
+// admin UI fires `admin-newsletter-background` and polls `?composeStatus=`.
+type AdminNewsletterAction = 'send' | 'send_test';
 
 export const handler: Handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
@@ -64,20 +65,6 @@ export const handler: Handler = async (event) => {
     const action = body.action as AdminNewsletterAction | undefined;
 
     switch (action) {
-      case 'compose': {
-        const issue = await composeNewsletterIssue({
-          actorId: admin.id,
-          weekOf: body.weekOf,
-          editorNote: body.editor_note ?? null,
-          ctaLabel: body.cta_label ?? null,
-          ctaHref: body.cta_href ?? null,
-        });
-
-        return {
-          statusCode: 200,
-          body: JSON.stringify({ ok: true, issue }),
-        };
-      }
       case 'send':
       case 'send_test': {
         let issue = body.issueId ? await getIssueById(body.issueId) : null;
