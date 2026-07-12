@@ -28,7 +28,9 @@ import { loadBtcPricePoints } from './cqmSnapshot';
 import {
   computeVirtualBalances,
   LEDGER_ORDER_STATUSES,
+  type LedgerDeposit,
   type LedgerOrderRow,
+  type LedgerSettingsChange,
   type VirtualBalances,
 } from './cqmLedger';
 
@@ -116,6 +118,25 @@ export async function saveSettings(patch: Partial<BotSettings>): Promise<BotSett
 
   if (error || !data) {
     throw new Error(`Failed to save CQM bot settings: ${error?.message ?? 'no row'}`);
+  }
+
+  // Append to the settings history whenever the deposit-relevant parameters
+  // change, so the virtual ledger accrues past slots at the rates that were
+  // actually in force (instead of retroactively applying the new base).
+  const depositParamsChanged =
+    next.base_amount_gbp !== current.base_amount_gbp
+    || next.frequency !== current.frequency;
+  if (depositParamsChanged) {
+    const { error: historyError } = await serviceSupabase
+      .from('cqm_bot_settings_history')
+      .insert({
+        base_amount_gbp: next.base_amount_gbp,
+        frequency: next.frequency,
+        effective_at: new Date().toISOString(),
+      });
+    if (historyError) {
+      throw new Error(`Failed to record CQM bot settings history: ${historyError.message}`);
+    }
   }
 
   return {
@@ -344,26 +365,137 @@ export async function computeLatestRisk(): Promise<RiskSnapshot> {
 // ---------------------------------------------------------------------------
 
 /**
+ * Loads the append-only settings history used to replay the deposit
+ * schedule. Returns an empty array when the table has no rows (the ledger
+ * then falls back to the current settings for the whole span).
+ */
+export async function loadSettingsHistory(): Promise<LedgerSettingsChange[]> {
+  const { data, error } = await serviceSupabase
+    .from('cqm_bot_settings_history')
+    .select('base_amount_gbp, frequency, effective_at')
+    .order('effective_at', { ascending: true })
+    .limit(10000);
+
+  if (error) {
+    throw new Error(`Failed to load CQM bot settings history: ${error.message}`);
+  }
+
+  return (data ?? []).map((row) => ({
+    base_amount_gbp: Number(row.base_amount_gbp),
+    frequency: row.frequency as BotFrequency,
+    effective_at: row.effective_at as string,
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Lump deposits (explicit capital injections)
+// ---------------------------------------------------------------------------
+
+export interface BotDeposit {
+  id: string;
+  amount_gbp: number;
+  deposited_at: string;
+  note: string | null;
+  created_at: string;
+}
+
+export async function listLumpDeposits(): Promise<BotDeposit[]> {
+  const { data, error } = await serviceSupabase
+    .from('cqm_bot_deposits')
+    .select('id, amount_gbp, deposited_at, note, created_at')
+    .order('deposited_at', { ascending: false })
+    .limit(1000);
+
+  if (error) {
+    throw new Error(`Failed to load CQM bot deposits: ${error.message}`);
+  }
+
+  return (data ?? []).map((row) => ({
+    id: row.id as string,
+    amount_gbp: Number(row.amount_gbp),
+    deposited_at: row.deposited_at as string,
+    note: (row.note as string | null) ?? null,
+    created_at: row.created_at as string,
+  }));
+}
+
+export async function addLumpDeposit(input: {
+  amountGbp: number;
+  note?: string;
+  depositedAt?: string;
+}): Promise<BotDeposit> {
+  const amount = Math.round(Number(input.amountGbp) * 100) / 100;
+  if (!Number.isFinite(amount) || amount === 0) {
+    throw new Error('Deposit amount must be a non-zero number of GBP.');
+  }
+
+  const { data, error } = await serviceSupabase
+    .from('cqm_bot_deposits')
+    .insert({
+      amount_gbp: amount,
+      note: input.note?.slice(0, 500) ?? null,
+      ...(input.depositedAt ? { deposited_at: input.depositedAt } : {}),
+    })
+    .select('id, amount_gbp, deposited_at, note, created_at')
+    .single();
+
+  if (error || !data) {
+    throw new Error(`Failed to record CQM bot deposit: ${error?.message ?? 'no row'}`);
+  }
+
+  return {
+    id: data.id as string,
+    amount_gbp: Number(data.amount_gbp),
+    deposited_at: data.deposited_at as string,
+    note: (data.note as string | null) ?? null,
+    created_at: data.created_at as string,
+  };
+}
+
+export async function deleteLumpDeposit(id: string): Promise<void> {
+  const { error } = await serviceSupabase
+    .from('cqm_bot_deposits')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    throw new Error(`Failed to delete CQM bot deposit: ${error.message}`);
+  }
+}
+
+/**
  * Reconstructs the GBP cash and BTC the strategy controls from its own order
- * history plus accrued base deposits (one base amount per cadence slot since
- * the first executed order). See cqmLedger.ts for the exact rules.
+ * history plus the funding line: accrued base deposits (one per cadence slot
+ * since the first executed order, each at the base amount in force at that
+ * slot per the settings history) plus any lump deposits due so far. See
+ * cqmLedger.ts for the exact rules.
  */
 export async function loadVirtualBalances(
   settings: Pick<BotSettings, 'base_amount_gbp' | 'frequency'>,
   now: Date = new Date(),
 ): Promise<VirtualBalances> {
-  const { data, error } = await serviceSupabase
-    .from('cqm_bot_orders')
-    .select('side, triggered_at, coinbase_status, target_amount_gbp, btc_gbp_ref, base_filled, quote_filled, fees_gbp')
-    .in('coinbase_status', [...LEDGER_ORDER_STATUSES])
-    .order('triggered_at', { ascending: true })
-    .limit(20000);
+  const [{ data, error }, settingsHistory, lumpDeposits] = await Promise.all([
+    serviceSupabase
+      .from('cqm_bot_orders')
+      .select('side, triggered_at, coinbase_status, target_amount_gbp, btc_gbp_ref, base_filled, quote_filled, fees_gbp')
+      .in('coinbase_status', [...LEDGER_ORDER_STATUSES])
+      .order('triggered_at', { ascending: true })
+      .limit(20000),
+    loadSettingsHistory(),
+    listLumpDeposits(),
+  ]);
 
   if (error) {
     throw new Error(`Failed to load CQM bot orders for the ledger: ${error.message}`);
   }
 
-  return computeVirtualBalances((data ?? []) as LedgerOrderRow[], settings, now);
+  return computeVirtualBalances(
+    (data ?? []) as LedgerOrderRow[],
+    settings,
+    now,
+    settingsHistory,
+    lumpDeposits as LedgerDeposit[],
+  );
 }
 
 // ---------------------------------------------------------------------------

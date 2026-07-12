@@ -128,6 +128,7 @@ export const handler: Handler = async (event) => {
             cash_gbp: ledger.cashGbp,
             btc_held: ledger.btcHeld,
             deposits_gbp: ledger.depositsGbp,
+            lump_deposits_gbp: ledger.lumpDepositsGbp,
             buys_gbp: ledger.buysGbp,
             sells_gbp: ledger.sellsGbp,
             periods_accrued: ledger.periodsAccrued,

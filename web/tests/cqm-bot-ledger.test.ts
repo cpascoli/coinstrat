@@ -104,6 +104,100 @@ describe('computeVirtualBalances', () => {
     expect(b.btcHeld).toBe(0);
   });
 
+  it('accrues past slots at the historical base, not the current one', () => {
+    const orders = [
+      order({ triggered_at: daysAgo(10), quote_filled: 99.5, fees_gbp: 0.5, base_filled: 0.002 }),
+    ];
+    // Base raised 100 → 900 a day and a half ago. Current settings say 900.
+    const history = [
+      { base_amount_gbp: 100, frequency: 'daily' as const, effective_at: daysAgo(30) },
+      { base_amount_gbp: 900, frequency: 'daily' as const, effective_at: daysAgo(1.5) },
+    ];
+    const b = computeVirtualBalances(
+      orders,
+      { base_amount_gbp: 900, frequency: 'daily' },
+      NOW,
+      history,
+    );
+    // Slots T-10 … T-2 (9 slots) accrue at £100; slots T-1 and T-0 at £900.
+    expect(b.periodsAccrued).toBe(11);
+    expect(b.depositsGbp).toBe(9 * 100 + 2 * 900);
+    // Without history this would have been 11 × 900 = 9900.
+    expect(b.cashGbp).toBe(2700 - 100);
+  });
+
+  it('switches cadence from a frequency change onward', () => {
+    const orders = [order({ triggered_at: daysAgo(15), quote_filled: 100, fees_gbp: 0 })];
+    const history = [
+      { base_amount_gbp: 100, frequency: 'daily' as const, effective_at: daysAgo(30) },
+      { base_amount_gbp: 200, frequency: 'weekly' as const, effective_at: daysAgo(12.5) },
+    ];
+    const b = computeVirtualBalances(
+      orders,
+      { base_amount_gbp: 200, frequency: 'weekly' },
+      NOW,
+      history,
+    );
+    // Daily slots T-15, T-14, T-13 at £100; then weekly kicks in at the
+    // T-12 slot → weekly slots T-12 and T-5 at £200 (next would be T+2).
+    expect(b.periodsAccrued).toBe(5);
+    expect(b.depositsGbp).toBe(3 * 100 + 2 * 200);
+  });
+
+  it('uses the earliest known settings for slots before the first history row', () => {
+    const orders = [order({ triggered_at: daysAgo(4), quote_filled: 100, fees_gbp: 0 })];
+    // History only starts 2 days ago; earlier slots fall back to its first row.
+    const history = [
+      { base_amount_gbp: 50, frequency: 'daily' as const, effective_at: daysAgo(2) },
+    ];
+    const b = computeVirtualBalances(orders, SETTINGS, NOW, history);
+    expect(b.periodsAccrued).toBe(5);
+    expect(b.depositsGbp).toBe(5 * 50);
+  });
+
+  it('falls back to current settings when the history is empty', () => {
+    const orders = [order({ triggered_at: daysAgo(10), quote_filled: 100, fees_gbp: 0 })];
+    const b = computeVirtualBalances(orders, SETTINGS, NOW, []);
+    expect(b.periodsAccrued).toBe(11);
+    expect(b.depositsGbp).toBe(1100);
+  });
+
+  it('adds lump deposits to the funding line from their deposit date', () => {
+    const orders = [order({ triggered_at: daysAgo(4), quote_filled: 100, fees_gbp: 0 })];
+    const lumps = [
+      { amount_gbp: 50_000, deposited_at: daysAgo(2) },
+    ];
+    const b = computeVirtualBalances(orders, SETTINGS, NOW, undefined, lumps);
+    // 5 drip slots × £100 + £50,000 lump − £100 buy.
+    expect(b.depositsGbp).toBe(50_500);
+    expect(b.lumpDepositsGbp).toBe(50_000);
+    expect(b.cashGbp).toBe(50_400);
+  });
+
+  it('ignores future-dated lump deposits until they are due', () => {
+    const lumps = [
+      { amount_gbp: 10_000, deposited_at: daysAgo(-3) }, // 3 days in the future
+    ];
+    const b = computeVirtualBalances([], SETTINGS, NOW, undefined, lumps);
+    expect(b.lumpDepositsGbp).toBe(0);
+    expect(b.cashGbp).toBe(100); // just the current drip slot
+  });
+
+  it('treats negative lump amounts as mandate withdrawals, floored at zero cash', () => {
+    const lumps = [
+      { amount_gbp: 5_000, deposited_at: daysAgo(3) },
+      { amount_gbp: -2_000, deposited_at: daysAgo(1) },
+    ];
+    const b = computeVirtualBalances([], SETTINGS, NOW, undefined, lumps);
+    expect(b.lumpDepositsGbp).toBe(3_000);
+    expect(b.cashGbp).toBe(3_100); // 1 drip slot + net lump
+
+    const overdrawn = computeVirtualBalances([], SETTINGS, NOW, undefined, [
+      { amount_gbp: -9_999, deposited_at: daysAgo(1) },
+    ]);
+    expect(overdrawn.cashGbp).toBe(0);
+  });
+
   it('never reports negative cash or BTC', () => {
     const orders = [
       // Buy larger than all accrued deposits (e.g. settings were lowered later).

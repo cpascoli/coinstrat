@@ -28,7 +28,8 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { Activity, Banknote, LineChart as LineChartIcon, Pause, Play, RefreshCw, Save, Settings as SettingsIcon, TrendingUp } from 'lucide-react';
+import { Activity, Banknote, LineChart as LineChartIcon, Pause, PiggyBank, Play, RefreshCw, Save, Settings as SettingsIcon, Trash2, TrendingUp } from 'lucide-react';
+import { IconButton } from '@mui/material';
 import {
   Area,
   AreaChart,
@@ -78,6 +79,7 @@ interface StatusResponse {
     cash_gbp: number;
     btc_held: number;
     deposits_gbp: number;
+    lump_deposits_gbp: number;
     buys_gbp: number;
     sells_gbp: number;
     periods_accrued: number;
@@ -123,6 +125,18 @@ interface OrdersResponse {
     bot_roi_pct: number | null;
   };
   partial_errors: Record<string, string> | null;
+}
+
+interface DepositRow {
+  id: string;
+  amount_gbp: number;
+  deposited_at: string;
+  note: string | null;
+}
+
+interface DepositsResponse {
+  deposits: DepositRow[];
+  total_gbp: number;
 }
 
 interface CqmBotTabProps {
@@ -177,6 +191,15 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
     { severity: 'success' | 'error'; text: string } | null
   >(null);
   const [togglingEnabled, setTogglingEnabled] = useState(false);
+
+  const [fundingOpen, setFundingOpen] = useState(false);
+  const [deposits, setDeposits] = useState<DepositsResponse | null>(null);
+  const [depositAmount, setDepositAmount] = useState<string>('');
+  const [depositNote, setDepositNote] = useState<string>('');
+  const [savingDeposit, setSavingDeposit] = useState(false);
+  const [depositMessage, setDepositMessage] = useState<
+    { severity: 'success' | 'error'; text: string } | null
+  >(null);
 
   const loadAll = useCallback(async () => {
     setError(null);
@@ -252,6 +275,70 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
       setTogglingEnabled(false);
     }
   }, [authHeaders, loadAll, status]);
+
+  const loadDeposits = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/cqm-bot/deposits', { headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Failed to load deposits');
+      setDeposits(data);
+    } catch (err: any) {
+      setDepositMessage({ severity: 'error', text: err?.message ?? 'Failed to load deposits' });
+    }
+  }, [authHeaders]);
+
+  const handleOpenFunding = useCallback(() => {
+    setDepositMessage(null);
+    setDepositAmount('');
+    setDepositNote('');
+    setFundingOpen(true);
+    loadDeposits();
+  }, [loadDeposits]);
+
+  const handleAddDeposit = useCallback(async () => {
+    const amount = Number(depositAmount);
+    if (!Number.isFinite(amount) || amount === 0) {
+      setDepositMessage({ severity: 'error', text: 'Enter a non-zero GBP amount.' });
+      return;
+    }
+    setSavingDeposit(true);
+    setDepositMessage(null);
+    try {
+      const res = await fetch('/api/admin/cqm-bot/deposits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ amount_gbp: amount, note: depositNote || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Failed to add deposit');
+      setDepositMessage({
+        severity: 'success',
+        text: `${amount > 0 ? 'Deposit' : 'Withdrawal'} of £${Math.abs(amount).toFixed(2)} recorded.`,
+      });
+      setDepositAmount('');
+      setDepositNote('');
+      await Promise.all([loadDeposits(), loadAll()]);
+    } catch (err: any) {
+      setDepositMessage({ severity: 'error', text: err?.message ?? 'Failed to add deposit' });
+    } finally {
+      setSavingDeposit(false);
+    }
+  }, [authHeaders, depositAmount, depositNote, loadAll, loadDeposits]);
+
+  const handleDeleteDeposit = useCallback(async (id: string) => {
+    setDepositMessage(null);
+    try {
+      const res = await fetch(`/api/admin/cqm-bot/deposits?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: authHeaders(),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Failed to delete deposit');
+      await Promise.all([loadDeposits(), loadAll()]);
+    } catch (err: any) {
+      setDepositMessage({ severity: 'error', text: err?.message ?? 'Failed to delete deposit' });
+    }
+  }, [authHeaders, loadAll, loadDeposits]);
 
   const handleExecute = useCallback(async () => {
     setExecuting(true);
@@ -523,6 +610,18 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
             <Button
               size="small"
               variant="outlined"
+              color="inherit"
+              onClick={handleOpenFunding}
+              disabled={!status}
+              startIcon={<PiggyBank size={14} />}
+              sx={{ textTransform: 'none', fontWeight: 700 }}
+              title="Add or remove lump capital from the strategy's virtual ledger"
+            >
+              Fund
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
               onClick={handleRefresh}
               disabled={refreshing}
               startIcon={refreshing ? <CircularProgress size={14} /> : <RefreshCw size={14} />}
@@ -552,6 +651,9 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
             value={status?.virtual_ledger ? `£${status.virtual_ledger.cash_gbp.toFixed(2)}` : '—'}
             sub={status?.virtual_ledger
               ? `£${status.virtual_ledger.deposits_gbp.toFixed(0)} deposited over ${status.virtual_ledger.periods_accrued} slots`
+                + (status.virtual_ledger.lump_deposits_gbp
+                  ? ` (incl. £${status.virtual_ledger.lump_deposits_gbp.toFixed(0)} lump funding)`
+                  : '')
               : undefined}
           />
           <KV
@@ -941,6 +1043,119 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
             sx={{ textTransform: 'none', fontWeight: 800 }}
           >
             {executing ? 'Submitting…' : 'Confirm market order'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* --- Strategy Funding Dialog ------------------------------------- */}
+      <Dialog open={fundingOpen} onClose={() => !savingDeposit && setFundingOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 800 }}>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <PiggyBank size={18} />
+            <span>Strategy Funding</span>
+          </Stack>
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ mb: 2 }}>
+            Lump deposits add capital to the strategy's virtual ledger on top of the
+            per-slot base drip. The dynamic sizing rule deploys idle cash at up to
+            {' '}{(CQM_DEFAULT_MAX_CASH_FRACTION * 100).toFixed(0)}% per period at Risk 0,
+            tapering to 0 at fair value — so a large deposit is spent faster the lower
+            the Risk. Use a negative amount to withdraw idle cash from the mandate.
+          </DialogContentText>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            This funds the ledger only — make sure the GBP actually exists on the
+            Coinbase account, or sized buys will fail at submission.
+          </Alert>
+
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'flex-start' }} sx={{ mb: 2 }}>
+            <TextField
+              label="Amount (GBP)"
+              size="small"
+              type="number"
+              value={depositAmount}
+              onChange={(e) => setDepositAmount(e.target.value)}
+              sx={{ maxWidth: 180 }}
+            />
+            <TextField
+              label="Note (optional)"
+              size="small"
+              value={depositNote}
+              onChange={(e) => setDepositNote(e.target.value)}
+              fullWidth
+            />
+            <Button
+              variant="contained"
+              startIcon={savingDeposit ? <CircularProgress size={14} color="inherit" /> : <Save size={14} />}
+              onClick={handleAddDeposit}
+              disabled={savingDeposit || !Number(depositAmount)}
+              sx={{ textTransform: 'none', fontWeight: 700, whiteSpace: 'nowrap' }}
+            >
+              Add
+            </Button>
+          </Stack>
+
+          {depositMessage && (
+            <Alert sx={{ mb: 2 }} severity={depositMessage.severity} onClose={() => setDepositMessage(null)}>
+              {depositMessage.text}
+            </Alert>
+          )}
+
+          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
+            Deposits {deposits ? `· net £${deposits.total_gbp.toFixed(2)}` : ''}
+          </Typography>
+          <TableContainer sx={{ maxHeight: 260 }}>
+            <Table size="small" stickyHeader>
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ fontWeight: 700 }}>Date</TableCell>
+                  <TableCell align="right" sx={{ fontWeight: 700 }}>Amount</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Note</TableCell>
+                  <TableCell />
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {(deposits?.deposits ?? []).length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={4} align="center" sx={{ color: 'text.secondary', py: 2 }}>
+                      No lump deposits yet.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  deposits!.deposits.map((d) => (
+                    <TableRow key={d.id} hover>
+                      <TableCell>
+                        <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>
+                          {new Date(d.deposited_at).toLocaleString()}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="right" sx={{ fontFamily: 'monospace', fontWeight: 700, color: d.amount_gbp >= 0 ? '#22c55e' : '#ef4444' }}>
+                        {d.amount_gbp >= 0 ? '+' : '−'}£{Math.abs(d.amount_gbp).toFixed(2)}
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="caption" color="text.secondary">
+                          {d.note ?? '—'}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="right">
+                        <IconButton
+                          size="small"
+                          onClick={() => handleDeleteDeposit(d.id)}
+                          title="Delete this deposit (corrects the funding line)"
+                        >
+                          <Trash2 size={14} />
+                        </IconButton>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setFundingOpen(false)} disabled={savingDeposit} sx={{ textTransform: 'none' }}>
+            Close
           </Button>
         </DialogActions>
       </Dialog>

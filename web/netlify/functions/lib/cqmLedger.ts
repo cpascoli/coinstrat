@@ -14,8 +14,20 @@
  * 'pending' / 'cancelled' / 'failed' rows do not. When fills are missing
  * (e.g. still open), the target amount and reference price stand in.
  *
- * Simplification: deposits accrue at the *current* base amount and frequency
- * across the whole history; past settings changes are not replayed.
+ * Deposits are replayed against the settings history
+ * (`cqm_bot_settings_history`): each cadence slot deposits the base amount
+ * in effect at that slot's start, and the gap to the next slot uses that
+ * slot's frequency. Changing the base therefore only affects slots from the
+ * change onward — it does NOT retroactively rewrite the funding line (which
+ * previously inflated the virtual cash pile and could trigger an oversized
+ * %-of-cash buy). When no history is supplied, the current settings apply
+ * across the whole span, matching the pre-history behavior.
+ *
+ * Lump deposits (`cqm_bot_deposits`) are explicit capital injections on top
+ * of the drip: each row's amount joins the funding line from its
+ * `deposited_at` onward (future-dated rows are ignored until due). Negative
+ * amounts withdraw idle cash from the mandate; the cash balance stays
+ * floored at 0.
  */
 
 export type LedgerFrequency = 'daily' | 'weekly' | 'monthly';
@@ -36,11 +48,29 @@ export interface VirtualBalances {
   cashGbp: number;
   /** BTC accumulated by the strategy. */
   btcHeld: number;
+  /** Total funding line: dripped base deposits + lump deposits. */
   depositsGbp: number;
+  /** Lump deposits due so far (net; negatives are withdrawals). */
+  lumpDepositsGbp: number;
   buysGbp: number;
   sellsGbp: number;
   /** Cadence slots accrued (≥ 1; the current slot counts). */
   periodsAccrued: number;
+}
+
+/** One settings-history entry: the parameters in force from `effective_at`. */
+export interface LedgerSettingsChange {
+  base_amount_gbp: number;
+  frequency: LedgerFrequency;
+  /** ISO timestamp from which these settings apply. */
+  effective_at: string;
+}
+
+/** One lump capital injection (negative = withdraw idle cash from the mandate). */
+export interface LedgerDeposit {
+  amount_gbp: number | string;
+  /** ISO timestamp from which this amount is part of the funding line. */
+  deposited_at: string;
 }
 
 const LEDGER_INTERVAL_MS: Record<LedgerFrequency, number> = {
@@ -62,10 +92,53 @@ function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+/**
+ * Replay the deposit schedule from `firstTs` through `nowTs`. Slots are
+ * walked sequentially: each slot deposits the base amount of the settings in
+ * effect at its start time, and the next slot follows after that settings'
+ * cadence interval. Slots before the first history entry use the earliest
+ * known settings (best available guess).
+ */
+function accrueDeposits(
+  history: LedgerSettingsChange[],
+  firstTs: number,
+  nowTs: number,
+): { depositsGbp: number; periodsAccrued: number } {
+  const changes = history
+    .map((h) => ({
+      base: Number(h.base_amount_gbp),
+      interval: LEDGER_INTERVAL_MS[h.frequency],
+      ts: new Date(h.effective_at).getTime(),
+    }))
+    .filter((h) => Number.isFinite(h.base) && h.base > 0 && Number.isFinite(h.ts))
+    .sort((a, b) => a.ts - b.ts);
+
+  if (changes.length === 0) return { depositsGbp: 0, periodsAccrued: 0 };
+
+  let deposits = 0;
+  let periods = 0;
+  let idx = 0;
+  let slotTs = firstTs;
+  while (slotTs <= nowTs) {
+    while (idx + 1 < changes.length && changes[idx + 1].ts <= slotTs) idx++;
+    deposits += changes[idx].base;
+    periods += 1;
+    slotTs += changes[idx].interval;
+  }
+  // The current slot always counts, even if `now` precedes the first slot.
+  if (periods === 0) {
+    deposits = changes[0].base;
+    periods = 1;
+  }
+  return { depositsGbp: deposits, periodsAccrued: periods };
+}
+
 export function computeVirtualBalances(
   orders: LedgerOrderRow[],
   settings: { base_amount_gbp: number; frequency: LedgerFrequency },
   now: Date = new Date(),
+  settingsHistory?: LedgerSettingsChange[],
+  lumpDeposits?: LedgerDeposit[],
 ): VirtualBalances {
   const allowed = new Set<string>(LEDGER_ORDER_STATUSES);
 
@@ -96,16 +169,36 @@ export function computeVirtualBalances(
     }
   }
 
-  const interval = LEDGER_INTERVAL_MS[settings.frequency];
-  const periodsAccrued = Number.isFinite(firstTs)
-    ? Math.max(1, Math.floor((now.getTime() - firstTs) / interval) + 1)
-    : 1;
-  const depositsGbp = periodsAccrued * settings.base_amount_gbp;
+  const fallbackHistory: LedgerSettingsChange[] = [{
+    base_amount_gbp: settings.base_amount_gbp,
+    frequency: settings.frequency,
+    effective_at: new Date(0).toISOString(),
+  }];
+  const history = settingsHistory && settingsHistory.length > 0 ? settingsHistory : fallbackHistory;
+  const accrualStart = Number.isFinite(firstTs) ? firstTs : now.getTime();
+  let accrual = accrueDeposits(history, accrualStart, now.getTime());
+  if (accrual.periodsAccrued === 0) {
+    // History rows were all invalid — accrue on the current settings instead.
+    accrual = accrueDeposits(fallbackHistory, accrualStart, now.getTime());
+  }
+  const { periodsAccrued } = accrual;
+
+  let lumpGbp = 0;
+  for (const d of lumpDeposits ?? []) {
+    const amount = toFinite(d.amount_gbp);
+    const ts = new Date(d.deposited_at).getTime();
+    if (amount === null || amount === 0 || !Number.isFinite(ts)) continue;
+    if (ts > now.getTime()) continue; // future-dated: not funded yet
+    lumpGbp += amount;
+  }
+
+  const depositsGbp = accrual.depositsGbp + lumpGbp;
 
   return {
     cashGbp: Math.max(0, round2(depositsGbp - buysGbp + sellsGbp)),
     btcHeld: Math.max(0, btcNet),
     depositsGbp: round2(depositsGbp),
+    lumpDepositsGbp: round2(lumpGbp),
     buysGbp: round2(buysGbp),
     sellsGbp: round2(sellsGbp),
     periodsAccrued,

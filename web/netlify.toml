@@ -163,6 +163,11 @@
   to = "/.netlify/functions/admin-cqm-bot-orders"
   status = 200
 
+[[redirects]]
+  from = "/api/admin/cqm-bot/deposits"
+  to = "/.netlify/functions/admin-cqm-bot-deposits"
+  status = 200
+
 # --- Email ---
 
 [[redirects]]
