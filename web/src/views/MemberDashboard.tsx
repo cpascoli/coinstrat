@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { Box, Button, Chip, Divider, Paper, Stack, Typography } from '@mui/material';
 import {
@@ -7,6 +7,8 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   Bell,
+  ChevronDown,
+  ChevronUp,
   FlaskConical,
   Layers,
   LayoutDashboard,
@@ -18,7 +20,7 @@ import { SignalData } from '../App';
 import { getRecommendation, type RecommendationAction } from '../lib/recommendation';
 import { fitCQM, riskForPriceFair, snapshotAt, type CQMSnapshot } from '../utils/cqm';
 import { CQM_RISK_GRADIENT_CSS, colorAtRisk } from '../utils/cqmRiskGradient';
-import { deriveModelEvents, type EventTone, type ModelEvent, type RiskPoint } from '../utils/modelEvents';
+import { deriveModelEvents, EVENT_WINDOW_DAYS, type EventTone, type ModelEvent, type RiskPoint } from '../utils/modelEvents';
 
 export interface MemberDashboardProps {
   current: SignalData;
@@ -174,10 +176,15 @@ const SectionTitle: React.FC<{ children: React.ReactNode; action?: React.ReactNo
   </Stack>
 );
 
+const EVENTS_PAGE_SIZE = 5;
+
 const MemberDashboard: React.FC<MemberDashboardProps> = ({ current, history }) => {
   const { snap, riskSeries } = useDashModel(history);
   const rec = getRecommendation(current);
   const events = useMemo(() => deriveModelEvents(history, riskSeries), [history, riskSeries]);
+  const [visibleEvents, setVisibleEvents] = useState(EVENTS_PAGE_SIZE);
+  const shownEvents = events.slice(0, visibleEvents);
+  const hiddenEvents = events.length - shownEvents.length;
 
   const btcPrice = Number(current.BTCUSD);
   const change7d = pctChangeOverDays(history, 7);
@@ -338,13 +345,39 @@ const MemberDashboard: React.FC<MemberDashboardProps> = ({ current, history }) =
             What changed recently
           </SectionTitle>
           {events.length === 0 ? (
-            <Typography variant="body2" color="text.secondary">No model transitions detected in the recent history.</Typography>
+            <Typography variant="body2" color="text.secondary">No model transitions in the last {EVENT_WINDOW_DAYS} days.</Typography>
           ) : (
-            <Stack divider={<Divider flexItem />} spacing={0}>
-              {events.map((e) => (
-                <EventRow key={e.id} event={e} />
-              ))}
-            </Stack>
+            <>
+              <Stack divider={<Divider flexItem />} spacing={0}>
+                {shownEvents.map((e) => (
+                  <EventRow key={e.id} event={e} />
+                ))}
+              </Stack>
+              {(hiddenEvents > 0 || visibleEvents > EVENTS_PAGE_SIZE) && (
+                <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
+                  {hiddenEvents > 0 && (
+                    <Button
+                      size="small"
+                      startIcon={<ChevronDown size={15} />}
+                      onClick={() => setVisibleEvents((n) => n + EVENTS_PAGE_SIZE)}
+                      sx={{ fontWeight: 700 }}
+                    >
+                      Show older ({hiddenEvents} more)
+                    </Button>
+                  )}
+                  {visibleEvents > EVENTS_PAGE_SIZE && (
+                    <Button
+                      size="small"
+                      startIcon={<ChevronUp size={15} />}
+                      onClick={() => setVisibleEvents(EVENTS_PAGE_SIZE)}
+                      sx={{ fontWeight: 700 }}
+                    >
+                      Show less
+                    </Button>
+                  )}
+                </Stack>
+              )}
+            </>
           )}
         </Paper>
 
