@@ -35,6 +35,12 @@ export interface ModelState {
   headline: string;
   tone: 'pos' | 'neutral' | 'neg';
   metrics: { label: string; value: string }[];
+  /** Optional week-over-week movement, shown as a chip next to the state badge. */
+  delta?: { text: string; tone: 'pos' | 'neutral' | 'neg' };
+  /** Optional trailing daily series for the hub sparkline (most recent last). */
+  spark?: { label: string; values: number[] };
+  /** Optional 0–100 reading for the hub's gradient risk bar (featured card). */
+  gaugePct?: number;
 }
 
 export interface ModelDef {
@@ -44,6 +50,8 @@ export interface ModelDef {
   tagline: string;
   status: 'live' | 'beta';
   Icon: LucideIcon;
+  /** Identity colour for the model's icon and hub card action (hex). */
+  accent: string;
   /** Highlight this model on the public homepage suite (e.g. the flagship model). */
   featured?: boolean;
   summary: string[];
@@ -95,6 +103,29 @@ function lastRow(rows: SignalData[]): SignalData | null {
   return rows && rows.length ? rows[rows.length - 1] : null;
 }
 
+/** Row roughly `days` calendar rows back from the latest (data is daily). */
+function rowBack(rows: SignalData[], days: number): SignalData | null {
+  const idx = rows.length - 1 - days;
+  return idx >= 0 ? rows[idx] : null;
+}
+
+/**
+ * Trailing daily values of `field` over the last `days` rows (finite only).
+ * `skipZeros` treats exact 0 as missing — composite scores collapse to 0 on
+ * days where a component series has no data (weekends), which would render as
+ * a square-wave artifact on a sparkline.
+ */
+function trailingSeries(rows: SignalData[], field: string, days = 90, skipZeros = false): number[] {
+  const out: number[] = [];
+  for (const d of rows.slice(-days)) {
+    const v = Number(d[field]);
+    if (!Number.isFinite(v)) continue;
+    if (skipZeros && v === 0) continue;
+    out.push(v);
+  }
+  return out;
+}
+
 const coreMacroModel: ModelDef = {
   id: 'core-macro',
   name: 'CORE + MACRO',
@@ -102,6 +133,7 @@ const coreMacroModel: ModelDef = {
   tagline: 'The original accumulation engine: a valuation/price CORE switch gated by a liquidity, business-cycle and USD MACRO regime.',
   status: 'live',
   Icon: Workflow,
+  accent: '#60a5fa',
   summary: [
     'CORE is driven by valuation (VAL_SCORE) and the price regime; MACRO combines the liquidity and business-cycle regimes with a persistence-filtered USD gate.',
     'Together they form the master accumulation switches that pace deployment across the cycle.',
@@ -128,6 +160,14 @@ const coreMacroModel: ModelDef = {
     const core = Number(d.CORE_ON) === 1;
     const macro = Number(d.MACRO_ON) === 1;
     const headline = core && macro ? 'CORE + MACRO ON' : core ? 'CORE ON' : macro ? 'MACRO ON' : 'Risk-off';
+
+    const prev = rowBack(rows, 7);
+    const btcNow = Number(d.BTCUSD);
+    const btcPrev = Number(prev?.BTCUSD);
+    const btcWowPct = Number.isFinite(btcNow) && Number.isFinite(btcPrev) && btcPrev > 0
+      ? ((btcNow - btcPrev) / btcPrev) * 100
+      : null;
+
     return {
       headline,
       tone: core ? 'pos' : macro ? 'neutral' : 'neg',
@@ -137,6 +177,13 @@ const coreMacroModel: ModelDef = {
         { label: 'Valuation', value: String(d.VAL_SCORE ?? '—') },
         { label: 'Liquidity', value: String(d.LIQ_SCORE ?? '—') },
       ],
+      delta: btcWowPct !== null
+        ? {
+          text: `BTC ${btcWowPct >= 0 ? '+' : ''}${btcWowPct.toFixed(1)}% w/w`,
+          tone: btcWowPct >= 0 ? 'pos' : 'neg',
+        }
+        : undefined,
+      spark: { label: 'BTC · last 90 days', values: trailingSeries(rows, 'BTCUSD') },
     };
   },
 };
@@ -148,6 +195,7 @@ const bottomModel: ModelDef = {
   tagline: 'A 0–100 composite that grades how attractive current conditions are for staged accumulation, blending on-chain value, capitulation, liquidity, macro and price structure.',
   status: 'live',
   Icon: Anchor,
+  accent: '#2dd4bf',
   summary: [
     'The score sums five buckets (each out of 20): on-chain value, capitulation/holder stress, liquidity turn, macro risk and price structure.',
     'Higher scores indicate deeper value and stronger accumulation setups; the band and deployment range translate the score into action.',
@@ -183,6 +231,10 @@ const bottomModel: ModelDef = {
     const score = Number(d.BOTTOM_ACCUM_SCORE);
     if (!Number.isFinite(score)) return null;
     const band = d.BOTTOM_ACCUM_BAND ?? `${score.toFixed(0)} / 100`;
+
+    const prevScore = Number(rowBack(rows, 7)?.BOTTOM_ACCUM_SCORE);
+    const scoreWow = Number.isFinite(prevScore) ? score - prevScore : null;
+
     return {
       headline: band,
       tone: score >= 70 ? 'pos' : score >= 50 ? 'neutral' : 'neg',
@@ -191,6 +243,13 @@ const bottomModel: ModelDef = {
         { label: 'Band', value: String(band) },
         { label: 'Deployment', value: String(d.BOTTOM_DEPLOYMENT_RANGE ?? '—') },
       ],
+      delta: scoreWow !== null
+        ? {
+          text: `${scoreWow >= 0 ? '+' : ''}${scoreWow.toFixed(0)} pts w/w`,
+          tone: scoreWow > 0 ? 'pos' : scoreWow < 0 ? 'neg' : 'neutral',
+        }
+        : undefined,
+      spark: { label: 'Score · last 90 days', values: trailingSeries(rows, 'BOTTOM_ACCUM_SCORE', 90, true) },
     };
   },
 };
@@ -202,6 +261,7 @@ const cqmModel: ModelDef = {
   tagline: 'A quantile-regression fair-value model that maps BTC price to a 0–100% cycle risk, with quantile bands and a risk-vs-price curve.',
   status: 'live',
   Icon: Waves,
+  accent: '#a78bfa',
   featured: true,
   summary: [
     'CQM fits quantile bands across BTC history and converts the latest price into a fair-value risk between 0% (deep value) and 100% (euphoric).',
@@ -228,6 +288,10 @@ const cqmModel: ModelDef = {
       if (!snap) return null;
       const riskPct = snap.risk * 100;
       const headline = riskPct < 25 ? 'Buy zone' : riskPct < 50 ? 'Accumulate' : riskPct < 75 ? 'Trim' : 'Sell zone';
+
+      const prevRisk = fit.signals[fit.signals.length - 8]?.risk;
+      const riskWowPp = typeof prevRisk === 'number' ? riskPct - prevRisk * 100 : null;
+
       return {
         headline,
         tone: riskPct < 50 ? 'pos' : riskPct < 75 ? 'neutral' : 'neg',
@@ -238,6 +302,18 @@ const cqmModel: ModelDef = {
           { label: 'QR 99.9%', value: `$${Math.round(snap.solidUpper).toLocaleString()}` },
           { label: 'QR 0.1%', value: `$${Math.round(snap.solidLower).toLocaleString()}` },
         ],
+        delta: riskWowPp !== null
+          ? {
+            text: `${riskWowPp >= 0 ? '+' : ''}${riskWowPp.toFixed(1)} pp w/w`,
+            // Falling risk = better accumulation conditions.
+            tone: riskWowPp < 0 ? 'pos' : riskWowPp > 0 ? 'neg' : 'neutral',
+          }
+          : undefined,
+        spark: {
+          label: 'Risk % · last 90 days',
+          values: fit.signals.slice(-90).map((s) => s.risk * 100).filter((v) => Number.isFinite(v)),
+        },
+        gaugePct: riskPct,
       };
     } catch {
       return null;
