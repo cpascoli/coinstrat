@@ -1,5 +1,5 @@
 /**
- * Scheduled CQM Risk DCA bot — runs every day at 07:00 UTC.
+ * Scheduled CQM Risk DCA bot — fires every day at 07:00 UTC.
  *
  * Timing note: analysis of 9 quarters of Kraken hourly BTC data (XBTUSD/XBTGBP)
  * found the daily low lands most often in the 00:00 UTC hour (~13-14% of days,
@@ -9,53 +9,23 @@
  * cheapest hour is small relative to the dynamic-sizing decision, so execution
  * time is treated as an operational choice rather than an alpha source.
  *
- * Behavior:
- *   - If the bot is paused (`cqm_bot_settings.enabled = false`)
- *       → skip (logged as "paused").
- *   - If we're inside the frequency window of the previous order (e.g. the
- *     bot is on weekly frequency and the last order was 3 days ago)
- *       → skip (logged as "frequency_guard").
- *   - Otherwise, run the exact same pipeline as the admin "Execute trade"
- *     button: recompute CQM Risk from cached signals, size the target,
- *     insert a pending row, submit a market BTC-GBP order, poll for fills,
- *     and persist the outcome to `cqm_bot_orders`.
- *
- * Because the schedule fires daily but the bot may be configured weekly or
- * monthly, the frequency hard-guard inside `runCqmBotExecution` is what
- * actually gates whether a trade goes through on any given cron tick. This
- * keeps the schedule simple (one cron, fires every day) while supporting
- * any DCA cadence the admin picks.
- *
- * Safety:
- *   - Pause toggle (`settings.enabled`) is the kill switch.
- *   - Frequency hard-guard prevents double trades within a cadence window —
- *     this also means a manual admin trade earlier in the day will defer
- *     the scheduled trade by a full cadence.
- *   - An execution lease (unique per frequency + execution_date) is acquired
- *     immediately after the frequency guard and before fitCQM(), so overlapping
- *     Netlify invocations cannot both reach Coinbase.
- *   - All decisions are made server-side from authoritative DB state and
- *     signed Coinbase responses; nothing about this function trusts caller
- *     input.
- *
- * The function returns 200 in all branches (including skips) so that the
- * Netlify scheduler treats it as a successful run. Failures of the trade
- * itself are recorded in `cqm_bot_orders` and surfaced in the Admin UI;
- * only an unexpected exception returns 500.
+ * Scheduled functions are hard-capped at 30s. Cold start plus `fitCQM()` on the
+ * signal history already consumes that budget (the 27 Sep 2026 run was killed
+ * during the fit, and the 25 Sep run was killed after Coinbase had filled).
+ * This function only starts `scheduled-cqm-bot-background` (15-minute limit)
+ * and returns. The trade pipeline, pause guard, and execution lease live there.
  */
 import type { Config } from '@netlify/functions';
-
-import { runCqmBotExecution, type ExecutionResult } from './lib/cqmBotExecutor';
-
-interface ScheduledInvocationBody {
-  next_run?: string;
-}
 
 export const config: Config = {
   // Every day at 07:00 UTC.
   // Standard 5-field cron (m h dom mon dow); Netlify always interprets it as UTC.
   schedule: '0 7 * * *',
 };
+
+interface ScheduledInvocationBody {
+  next_run?: string;
+}
 
 async function readScheduledBody(request: Request): Promise<ScheduledInvocationBody> {
   try {
@@ -66,21 +36,41 @@ async function readScheduledBody(request: Request): Promise<ScheduledInvocationB
 }
 
 export default async (request: Request): Promise<Response> => {
+  const base = process.env.URL || process.env.DEPLOY_PRIME_URL || process.env.VITE_APP_URL || '';
+  const cronSecret = process.env.CRON_SECRET || '';
+
   try {
+    if (!base) {
+      throw new Error('Site URL (process.env.URL) is unavailable; cannot invoke background function.');
+    }
+
     const body = await readScheduledBody(request);
-    const result = await runCqmBotExecution({ source: 'scheduled' });
-
-    const payload = {
-      scheduled_for: body.next_run ?? null,
-      ...summarize(result),
-    };
-
-    console.log('[scheduled-cqm-bot]', JSON.stringify(payload));
-
-    return new Response(JSON.stringify(payload), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
+    const res = await fetch(`${base}/.netlify/functions/scheduled-cqm-bot-background`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${cronSecret}`,
+      },
+      body: JSON.stringify({
+        trigger: 'scheduled',
+        next_run: body.next_run ?? null,
+      }),
     });
+
+    console.log('[scheduled-cqm-bot] triggered background function', res.status);
+
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        triggered: true,
+        status: res.status,
+        scheduled_for: body.next_run ?? null,
+      }),
+      {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      },
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error('[scheduled-cqm-bot]', error);
@@ -91,38 +81,3 @@ export default async (request: Request): Promise<Response> => {
     });
   }
 };
-
-/**
- * Flatten the ExecutionResult discriminated union into a log-friendly shape.
- * Keeping the fields stable makes it easy to search Netlify logs later.
- */
-function summarize(result: ExecutionResult): Record<string, unknown> {
-  switch (result.kind) {
-    case 'submitted':
-      return {
-        ok: true,
-        action: 'submitted',
-        coinbase_order_id: result.coinbase_order_id,
-        coinbase_status: result.coinbase_status,
-        order_row_id: (result.order as { id?: string })?.id ?? null,
-        side: (result.order as { side?: string })?.side ?? null,
-        target_amount_gbp: (result.order as { target_amount_gbp?: number })?.target_amount_gbp ?? null,
-        cqm_risk: (result.order as { cqm_risk?: number })?.cqm_risk ?? null,
-      };
-    case 'skipped':
-      return {
-        ok: true,
-        action: 'skipped',
-        reason: result.reason,
-        message: result.message,
-        ...(result.details ?? {}),
-      };
-    case 'failed':
-      return {
-        ok: false,
-        action: 'failed',
-        message: result.message,
-        order_row_id: result.order_row_id ?? null,
-      };
-  }
-}

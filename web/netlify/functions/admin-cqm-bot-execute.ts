@@ -9,9 +9,10 @@
  * The actual trade-execution pipeline (pause guard → frequency hard guard →
  * CQM Risk → target sizing → BTC-GBP price → pending row → market order →
  * poll for fills → persist outcome) lives in `lib/cqmBotExecutor.ts`, so
- * this endpoint and the scheduled cron (`scheduled-cqm-bot.ts`) run the
- * same code path. The only differences here are the admin auth gate, the
- * explicit `confirm` flag, and the HTTP status mapping for the result.
+ * this endpoint and the scheduled background worker
+ * (`scheduled-cqm-bot-background.ts`) run the same code path. The only
+ * differences here are the admin auth gate, the explicit `confirm` flag,
+ * and the HTTP status mapping for the result.
  */
 import type { Handler } from '@netlify/functions';
 

@@ -4,8 +4,10 @@
  * Called from two places:
  *   1. The admin-gated `admin-cqm-bot-execute.ts` Netlify function when the
  *      admin clicks "Execute trade" in the UI.
- *   2. The Netlify scheduled function `scheduled-cqm-bot.ts` that fires on a
- *      cron at 07:00 UTC every day.
+ *   2. `scheduled-cqm-bot-background.ts`, started by the 07:00 UTC cron.
+ *      The cron itself only kicks this background function: scheduled
+ *      functions are capped at 30s, which is shorter than cold start +
+ *      fitCQM() + the Coinbase round-trip.
  *
  * Both callers use the same business logic: pause guard → frequency hard
  * guard → execution lease → CQM Risk → BTC-GBP price → virtual ledger
@@ -18,7 +20,7 @@
  *
  * Returns a discriminated `ExecutionResult` rather than HTTP responses so
  * each caller can adapt the result to its own envelope (JSON HTTP for the
- * admin endpoint, log-and-200 for the scheduler).
+ * admin endpoint, a log line for the background worker).
  */
 import crypto from 'crypto';
 
@@ -269,6 +271,24 @@ async function executeWithLease(
   }
 
   const coinbaseOrderId = submitResp.order_id ?? null;
+
+  // Persist the Coinbase id before polling. A kill in the poll window used
+  // to leave a filled exchange order as `pending` with a null id (25 Sep 2026).
+  const { error: ackErr } = await serviceSupabase
+    .from('cqm_bot_orders')
+    .update({
+      coinbase_order_id: coinbaseOrderId,
+      coinbase_status: coinbaseOrderId ? 'submitted' : 'failed',
+      error_summary: coinbaseOrderId ? null : 'Coinbase response did not include an order id',
+      raw_response: { submit: submitResp.response, ledger },
+    })
+    .eq('id', orderRowId);
+  if (ackErr) {
+    console.warn(
+      `[cqm-bot:${ctx.source}] failed to persist order id before poll:`,
+      ackErr.message,
+    );
+  }
 
   // ---- Poll for fills ---------------------------------------------------
   let filled: CoinbaseOrder | null = null;
