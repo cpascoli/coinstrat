@@ -10,6 +10,7 @@ import { patchCqmFieldsInCache } from './cqmCache';
 import { triggerWalkForwardRecompute } from './cqmWalkForwardCache';
 import { writeBtcSeriesBlob } from './btcSeriesCache';
 import { persistSignalAlertChanges, detectAlertChanges } from './signalAlerts';
+import { applyChartGapBackfill } from './chartBackfill';
 import { signalsStore } from './store';
 import { evaluateActiveStrategies } from './strategyAlerts';
 import { refreshDerivativesCache } from './derivativesCache';
@@ -56,6 +57,17 @@ export type SignalRefreshResult =
     ok: true;
     mode: 'patch_treasury_yields';
     patched: number;
+    total: number;
+    cached_at: string;
+  }
+  | {
+    ok: true;
+    mode: 'patch_chart_gaps';
+    patched: number;
+    ismPatched: number;
+    lthNuplPatched: number;
+    sipPatched: number;
+    bottomPatched: number;
     total: number;
     cached_at: string;
   }
@@ -416,6 +428,51 @@ export async function patchTreasuryYieldsInCache(): Promise<SignalRefreshResult>
     mode: 'patch_treasury_yields',
     patched,
     total: rows.length,
+    cached_at: cachedAt,
+  };
+}
+
+/**
+ * Back-fill three chart holes the 14-day incremental refresh never rewrites:
+ * ISM prints after the Investing.com fetch started failing, the flat LTH NUPL
+ * week, and the stuck addresses-in-profit stretch.
+ */
+export async function patchChartGapsInCache(): Promise<SignalRefreshResult> {
+  const store = signalsStore();
+  const cached = await loadCachedSignals();
+  const cachedData = cached?.data ?? [];
+
+  if (cachedData.length === 0) {
+    throw new Error('Cache is empty — seed the cache first before patching chart gaps.');
+  }
+
+  const [lthNupl, profitLoss] = await Promise.all([
+    fetchBGeometrics('lth_nupl'),
+    fetchBGeometrics('profit_loss'),
+  ]);
+
+  const patched = applyChartGapBackfill(cachedData, { lthNupl, profitLoss });
+  const cachedAt = new Date().toISOString();
+  await store.setJSON('signals_latest', {
+    timestamp: Date.now(),
+    count: patched.rows.length,
+    data: patched.rows,
+  });
+
+  const changed = patched.ismPatched + patched.lthNuplPatched + patched.sipPatched;
+  console.log(
+    `[signal-refresh] Chart gap patch complete — ISM ${patched.ismPatched}, LTH NUPL ${patched.lthNuplPatched}, SIP ${patched.sipPatched}, bottom ${patched.bottomPatched} of ${patched.rows.length} rows.`,
+  );
+
+  return {
+    ok: true,
+    mode: 'patch_chart_gaps',
+    patched: changed,
+    ismPatched: patched.ismPatched,
+    lthNuplPatched: patched.lthNuplPatched,
+    sipPatched: patched.sipPatched,
+    bottomPatched: patched.bottomPatched,
+    total: patched.rows.length,
     cached_at: cachedAt,
   };
 }
