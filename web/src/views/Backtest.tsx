@@ -7,6 +7,13 @@ import { Link as RouterLink, useSearchParams } from 'react-router-dom';
 import { SignalData } from '../App';
 import {
   runBacktest, BacktestConfig, StrategyResult, DcaFrequency, OffSignalMode, Trade,
+  EMA_DEFAULT_FAST_PERIOD, EMA_DEFAULT_SLOW_PERIOD,
+  LLI_DEFAULT_MODE, LLI_DEFAULT_PERIODS,
+  LLI_DEFAULT_FAST_PERIOD, LLI_DEFAULT_SLOW_PERIOD,
+  LLI_DEFAULT_ATR_PERIOD, LLI_DEFAULT_ATR_MULT,
+  CRYPTO_TREND_DEFAULT_JAW, CRYPTO_TREND_DEFAULT_LIPS, CRYPTO_TREND_DEFAULT_BAND_MODE,
+  CRYPTO_TREND_DEFAULT_PCT, CRYPTO_TREND_DEFAULT_ATR_PERIOD, CRYPTO_TREND_DEFAULT_ATR_MULT,
+  type LliMode, type CryptoTrendBandMode,
 } from '../services/backtest';
 import {
   CQM_DEFAULT_MAX_CASH_FRACTION,
@@ -18,8 +25,17 @@ import { generateForwardPrices } from '../utils/cqmForwardSim';
 import { usePersistentState } from '../utils/usePersistentState';
 import { buildRiskGradientStops } from '../utils/cqmRiskGradient';
 import ChartsView from './ChartsView';
+import LabInspectView from './lab/LabInspectView';
+import {
+  STRATEGY_COLORS,
+  LAB_INSPECT_STRATEGIES,
+  STRATEGY_DESCRIPTIONS,
+  isLabInspectStrategy,
+  type LabMode,
+  type LabInspectStrategy,
+} from './lab/labTypes';
 import { format } from 'date-fns';
-import { FlaskConical, TrendingUp, Coins, BarChart3, ShieldAlert, DollarSign, ArrowDownToLine, Wallet, Download, ArrowUpDown } from 'lucide-react';
+import { FlaskConical, TrendingUp, Coins, BarChart3, ShieldAlert, DollarSign, Wallet, Download, ArrowUpDown, ArrowLeft } from 'lucide-react';
 import {
   Box,
   Button,
@@ -68,13 +84,6 @@ const ALL_START_DATE = '2013-01-01';
 // Furthest the CQM simulator will project synthetic future prices (end of the
 // next ~4-year cycle: lows 2026 / 2030 / 2034).
 const FUTURE_MAX_DATE = '2034-12-31';
-
-const STRATEGY_COLORS: Record<string, string> = {
-  'Baseline DCA': '#94a3b8',
-  'CORE DCA': '#60a5fa',
-  'CORE DCA + MACRO 3x': '#22c55e',
-  'CQM Risk DCA': '#a855f7',
-};
 
 // Build system-state spans for regime shading (same logic as ChartsView)
 type SystemSpan = { x1: number; x2: number; value: 0 | 1 | 2 | 3 };
@@ -229,7 +238,7 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
   const dcaAmountOverride = useMemo<number | undefined>(() => {
     if (dcaAmountParam === null) return undefined;
     const v = parseFloat(dcaAmountParam);
-    return Number.isFinite(v) && v > 0 ? v : undefined;
+    return Number.isFinite(v) && v >= 0 ? v : undefined;
   }, [dcaAmountParam]);
   const frequencyOverride = useMemo<DcaFrequency | undefined>(() => {
     const v = (dcaFrequencyParam ?? '').toLowerCase();
@@ -246,6 +255,10 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
   // CQM defaults to a daily $100 base DCA; other variants/Lab keep weekly.
   const [frequency, setFrequency] = usePersistentState<DcaFrequency>(`${ps}:frequency`, () => (variant === 'cqm' ? 'daily' : 'weekly'), frequencyOverride);
   const [dcaAmount, setDcaAmount] = usePersistentState<number>(`${ps}:dcaAmount`, 100, dcaAmountOverride);
+  // Opening balances (Lab only). With DCA = 0 this simulates a fixed pot
+  // being traded by the strategy with no new money coming in.
+  const [startingCash, setStartingCash] = usePersistentState<number>(`${ps}:startingCash`, 0);
+  const [startingBtc, setStartingBtc] = usePersistentState<number>(`${ps}:startingBtc`, 0);
 
   const [offSignalMode, setOffSignalMode] = usePersistentState<OffSignalMode>(`${ps}:offSignalMode`, 'pause');
   const [macroAccel, setMacroAccel] = usePersistentState<boolean>(`${ps}:macroAccel`, true);
@@ -256,6 +269,34 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
   // Legacy flat reserve-scaling (Lab only). When enabled, disables dynamic sizing.
   const [cqmTradeFraction, setCqmTradeFraction] = usePersistentState<number>(`${ps}:cqmTradeFraction`, 0.01);
   const [cqmFractionEnabled, setCqmFractionEnabled] = usePersistentState<boolean>(`${ps}:cqmFractionEnabled`, false);
+  // EMA Trend periods (Inspect only — not offered on Compare).
+  const [emaFastPeriod, setEmaFastPeriod] = usePersistentState<number>(`${ps}:emaFastPeriod`, EMA_DEFAULT_FAST_PERIOD);
+  const [emaSlowPeriod, setEmaSlowPeriod] = usePersistentState<number>(`${ps}:emaSlowPeriod`, EMA_DEFAULT_SLOW_PERIOD);
+  // LLI+CQM hybrid (Lab only): Larsson-Line-style 3-state filter gates CQM DCA.
+  const [lliCqmDca, setLliCqmDca] = usePersistentState<boolean>(`${ps}:lliCqmDca`, false);
+  const [lliMode, setLliMode] = usePersistentState<LliMode>(`${ps}:lliMode`, LLI_DEFAULT_MODE);
+  const [lliSeries, setLliSeries] = usePersistentState<'risk' | 'price'>(`${ps}:lliSeries`, 'risk');
+  const [lliP1, setLliP1] = usePersistentState<number>(`${ps}:lliP1`, LLI_DEFAULT_PERIODS[0]);
+  const [lliP2, setLliP2] = usePersistentState<number>(`${ps}:lliP2`, LLI_DEFAULT_PERIODS[1]);
+  const [lliP3, setLliP3] = usePersistentState<number>(`${ps}:lliP3`, LLI_DEFAULT_PERIODS[2]);
+  const [lliP4, setLliP4] = usePersistentState<number>(`${ps}:lliP4`, LLI_DEFAULT_PERIODS[3]);
+  const [lliFastPeriod, setLliFastPeriod] = usePersistentState<number>(`${ps}:lliFastPeriod`, LLI_DEFAULT_FAST_PERIOD);
+  const [lliSlowPeriod, setLliSlowPeriod] = usePersistentState<number>(`${ps}:lliSlowPeriod`, LLI_DEFAULT_SLOW_PERIOD);
+  const [lliAtrPeriod, setLliAtrPeriod] = usePersistentState<number>(`${ps}:lliAtrPeriod`, LLI_DEFAULT_ATR_PERIOD);
+  const [lliAtrMult, setLliAtrMult] = usePersistentState<number>(`${ps}:lliAtrMult`, LLI_DEFAULT_ATR_MULT);
+  // CryptoTrend (Inspect only): jaw/lips SMMA ribbon with a % or ATR neutral band.
+  const [ctJaw, setCtJaw] = usePersistentState<number>(`${ps}:ctJaw`, CRYPTO_TREND_DEFAULT_JAW);
+  const [ctLips, setCtLips] = usePersistentState<number>(`${ps}:ctLips`, CRYPTO_TREND_DEFAULT_LIPS);
+  const [ctBandMode, setCtBandMode] = usePersistentState<CryptoTrendBandMode>(`${ps}:ctBandMode`, CRYPTO_TREND_DEFAULT_BAND_MODE);
+  const [ctPct, setCtPct] = usePersistentState<number>(`${ps}:ctPct`, CRYPTO_TREND_DEFAULT_PCT);
+  const [ctAtrPeriod, setCtAtrPeriod] = usePersistentState<number>(`${ps}:ctAtrPeriod`, CRYPTO_TREND_DEFAULT_ATR_PERIOD);
+  const [ctAtrMult, setCtAtrMult] = usePersistentState<number>(`${ps}:ctAtrMult`, CRYPTO_TREND_DEFAULT_ATR_MULT);
+  // Lab Compare | Inspect mode (persisted). Model-specific tabs ignore this.
+  const [labMode, setLabMode] = usePersistentState<LabMode>(`${ps}:labMode`, 'compare');
+  const [inspectStrategy, setInspectStrategy] = usePersistentState<LabInspectStrategy>(
+    `${ps}:inspectStrategy`,
+    'CQM Risk DCA',
+  );
   const [cqmRiskByDate, setCqmRiskByDate] = useState<Map<string, number>>(new Map());
   const [cqmRiskLoading, setCqmRiskLoading] = useState(false);
   const [cqmRiskProgress, setCqmRiskProgress] = useState(0); // 0..1
@@ -274,17 +315,46 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
   const isLab = !variant;
   const isCore = variant === 'core-macro';
   const isCqm = variant === 'cqm';
-  // Effective config flags after applying the variant's locks.
-  const effMacroAccel = isCqm ? false : macroAccel;
-  const effCqmDca = isCqm ? true : isCore ? false : cqmDca;
+  // Lab Inspect auto-enables the engine flags for the selected strategy so
+  // drill-down works even when that strategy's Compare toggle is off.
+  const isLabInspect = isLab && labMode === 'inspect';
+  const isLabCompare = isLab && labMode === 'compare';
+
+  // Effective config flags after applying the variant's locks + Lab mode.
+  const effMacroAccel = isCqm
+    ? false
+    : isLabInspect
+      ? inspectStrategy === 'CORE DCA + MACRO 3x'
+      : macroAccel;
+  const effCqmDca = isCqm
+    ? true
+    : isCore
+      ? false
+      : isLabInspect
+        ? inspectStrategy === 'CQM Risk DCA'
+        : cqmDca;
   const effCqmDynamicSizing = isCqm || !cqmFractionEnabled;
   const effCqmTradeFraction = cqmFractionEnabled ? cqmTradeFraction : 0;
+  // EMA Trend is Inspect-only (removed from Compare).
+  const effEmaDca = isLabInspect && inspectStrategy === 'EMA Trend DCA';
+  const effCryptoTrendDca = isLabInspect && inspectStrategy === 'CryptoTrend DCA';
+  const effLliCqmDca = isLabInspect
+    ? inspectStrategy === 'LLI+CQM DCA'
+    : isLab && lliCqmDca;
+  // LLI-on-risk (and plain CQM) both need the walk-forward risk map.
+  const needsCqmRisk = effCqmDca || (effLliCqmDca && lliSeries === 'risk');
+
+  const openInspect = (name: string) => {
+    if (!isLabInspectStrategy(name)) return;
+    setInspectStrategy(name);
+    setLabMode('inspect');
+  };
 
   // --- CoinStrat Quantile Model (CQM) -------------------------------------
   // Walk-forward risk: causal expanding-window refits (no look-ahead).
   // First run can take ~1 minute on the full BTC history.
   const cqmPricePoints = useMemo(() => {
-    if (!effCqmDca || !data.length) return [];
+    if (!needsCqmRisk || !data.length) return [];
     const points: { date: string; ts: number; price: number }[] = [];
     for (const d of data) {
       const price = Number((d as { BTCUSD?: number }).BTCUSD);
@@ -294,10 +364,10 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
       points.push({ date: d.Date, ts, price });
     }
     return points;
-  }, [data, effCqmDca]);
+  }, [data, needsCqmRisk]);
 
   useEffect(() => {
-    if (!effCqmDca || cqmPricePoints.length < 365) {
+    if (!needsCqmRisk || cqmPricePoints.length < 365) {
       setCqmRiskByDate(new Map());
       setCqmRiskLoading(false);
       setCqmRiskProgress(0);
@@ -398,7 +468,7 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
       worker?.terminate();
       if (fallbackTimer) window.clearTimeout(fallbackTimer);
     };
-  }, [cqmPricePoints, effCqmDca]);
+  }, [cqmPricePoints, needsCqmRisk]);
 
   // Last day of real BTC history ("today" for the simulator).
   const lastHistoryDate = useMemo(
@@ -513,6 +583,8 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
       startDate,
       endDate,
       dcaAmount,
+      startingCash: isLab ? startingCash : 0,
+      startingBtc: isLab ? startingBtc : 0,
       frequency,
       offSignalMode,
       macroAccel: effMacroAccel,
@@ -524,18 +596,54 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
       cqmSellThreshold,
       cqmTradeFraction: effCqmTradeFraction,
       cashAnnualYieldPct: cashYieldPct,
+      emaDca: effEmaDca,
+      emaFastPeriod,
+      emaSlowPeriod,
+      lliCqmDca: effLliCqmDca && (lliSeries === 'price' || (effectiveRiskByDate.size > 0 && !cqmRiskLoading)),
+      lliMode,
+      lliSeries,
+      lliPeriods: [lliP1, lliP2, lliP3, lliP4],
+      lliFastPeriod,
+      lliSlowPeriod,
+      lliAtrPeriod,
+      lliAtrMult,
+      cryptoTrendDca: effCryptoTrendDca,
+      cryptoTrendJaw: ctJaw,
+      cryptoTrendLips: ctLips,
+      cryptoTrendBandMode: ctBandMode,
+      cryptoTrendPct: ctPct,
+      cryptoTrendAtrPeriod: ctAtrPeriod,
+      cryptoTrendAtrMult: ctAtrMult,
     };
     const all = runBacktest(simData, config);
     return allowedStrategies ? all.filter((r) => allowedStrategies.has(r.name)) : all;
   }, [
-    simData, startDate, endDate, dcaAmount, frequency, offSignalMode, effMacroAccel,
+    simData, startDate, endDate, dcaAmount, startingCash, startingBtc, isLab, frequency, offSignalMode, effMacroAccel,
     effCqmDca, effectiveRiskByDate, cqmRiskLoading, effCqmDynamicSizing, cqmMaxCashFraction,
     cqmSellThreshold, effCqmTradeFraction, cashYieldPct, allowedStrategies,
+    effEmaDca, emaFastPeriod, emaSlowPeriod,
+    effLliCqmDca, lliMode, lliSeries, lliP1, lliP2, lliP3, lliP4,
+    lliFastPeriod, lliSlowPeriod, lliAtrPeriod, lliAtrMult,
+    effCryptoTrendDca, ctJaw, ctLips, ctBandMode, ctPct, ctAtrPeriod, ctAtrMult,
   ]);
 
   // For the CQM tab's tested-vs-baseline comparison tiles.
   const cqmResult = useMemo(() => results.find((r) => r.name === 'CQM Risk DCA'), [results]);
   const baselineResult = useMemo(() => results.find((r) => r.name === 'Baseline DCA'), [results]);
+
+  const cryptoTrendParams = useMemo(() => ({
+    jawLength: ctJaw,
+    lipsLength: ctLips,
+    bandMode: ctBandMode,
+    pct: ctPct,
+    atrPeriod: ctAtrPeriod,
+    atrMult: ctAtrMult,
+  }), [ctJaw, ctLips, ctBandMode, ctPct, ctAtrPeriod, ctAtrMult]);
+
+  const inspectedResult = useMemo(() => {
+    if (!isLabInspect) return null;
+    return results.find((r) => r.name === inspectStrategy) ?? null;
+  }, [results, isLabInspect, inspectStrategy]);
 
   // Build chart data by merging strategy series with signal data for regime shading
   const chartData = useMemo(() => {
@@ -771,18 +879,36 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       {/* Header */}
       <Box sx={{ pb: 1.5, borderBottom: '1px solid', borderColor: 'divider' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5 }}>
-          <FlaskConical className="h-8 w-8 text-blue-400" />
-          <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: -0.5 }}>
-            {isCore ? 'CORE / MACRO Backtest' : isCqm ? 'CQM Backtest' : 'Backtest'}
-          </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap', mb: 0.5 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <FlaskConical className="h-8 w-8 text-blue-400" />
+            <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: -0.5 }}>
+              {isCore ? 'CORE / MACRO Backtest' : isCqm ? 'CQM Backtest' : 'Lab'}
+            </Typography>
+          </Box>
+          {isLab && (
+            <ToggleButtonGroup
+              exclusive
+              size="small"
+              value={labMode}
+              onChange={(_, next) => next && setLabMode(next)}
+              sx={{
+                '& .MuiToggleButton-root': { textTransform: 'none', px: 2, fontWeight: 700 },
+              }}
+            >
+              <ToggleButton value="compare">Compare</ToggleButton>
+              <ToggleButton value="inspect">Inspect</ToggleButton>
+            </ToggleButtonGroup>
+          )}
         </Box>
         <Typography variant="body2" color="text.secondary">
           {isCore
             ? 'How CORE accumulation (with the optional MACRO 3× accelerator) would have performed versus a plain baseline DCA.'
             : isCqm
             ? 'CQM Risk DCA deposits the same base amount as Baseline each period, then sizes trades dynamically from walk-forward Risk (no look-ahead): it deploys a risk-scaled fraction of its cash pile when Risk is low, holds between 50% and the sell threshold, and trims BTC above it. Sells are capped by holdings.'
-            : 'Compare how different DCA strategies would have performed using CoinStrat signals over historical data.'}
+            : isLabInspect
+            ? 'Drill into one strategy: equity versus Baseline DCA, strategy-specific signals, and the trade log. Shared funding and date range stay in sync with Compare.'
+            : 'Compare strategies side by side. Click a strategy card (or switch to Inspect) to drill into charts built for that strategy.'}
         </Typography>
         {!isLab && (
           <MuiLink component={RouterLink} to="/lab" sx={{ display: 'inline-block', mt: 1, fontSize: 13, fontWeight: 700 }}>
@@ -906,8 +1032,10 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
                 value={dcaAmount}
                 onChange={(e) => {
                   const v = parseFloat(e.target.value);
-                  if (Number.isFinite(v) && v > 0) setDcaAmount(v);
+                  // Lab allows 0 (fixed pot, no new money); model tabs need a deposit.
+                  if (Number.isFinite(v) && (isLab ? v >= 0 : v > 0)) setDcaAmount(v);
                 }}
+                inputProps={{ min: isLab ? 0 : 1 }}
                 InputProps={{
                   startAdornment: <InputAdornment position="start">$</InputAdornment>,
                 }}
@@ -915,6 +1043,61 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
               />
             </Stack>
           </Grid>
+
+          {/* Opening balances (Lab only) */}
+          {isLab && (
+            <>
+              <Grid item xs={6} sm="auto">
+                <Stack spacing={0.5}>
+                  <Typography variant="overline" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
+                    Starting USDC
+                  </Typography>
+                  <TextField
+                    type="number"
+                    size="small"
+                    value={startingCash}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      if (Number.isFinite(v) && v >= 0) setStartingCash(v);
+                    }}
+                    inputProps={{ min: 0, step: 100 }}
+                    InputProps={{
+                      startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                    }}
+                    sx={{ width: { xs: '100%', sm: 130 } }}
+                  />
+                </Stack>
+              </Grid>
+              <Grid item xs={6} sm="auto">
+                <Stack spacing={0.5}>
+                  <Typography variant="overline" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
+                    Starting BTC
+                  </Typography>
+                  <TextField
+                    type="number"
+                    size="small"
+                    value={startingBtc}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      if (Number.isFinite(v) && v >= 0) setStartingBtc(v);
+                    }}
+                    inputProps={{ min: 0, step: 0.01 }}
+                    InputProps={{
+                      startAdornment: <InputAdornment position="start">₿</InputAdornment>,
+                    }}
+                    sx={{ width: { xs: '100%', sm: 120 } }}
+                  />
+                </Stack>
+              </Grid>
+              {dcaAmount === 0 && startingCash === 0 && startingBtc === 0 && (
+                <Grid item xs={12}>
+                  <Typography variant="caption" sx={{ color: 'warning.main', fontWeight: 700 }}>
+                    DCA amount and both starting balances are 0 — there is no capital to simulate.
+                  </Typography>
+                </Grid>
+              )}
+            </>
+          )}
 
           {/* Cash yield on idle USD (applies to every strategy's cash balance) */}
           <Grid item xs={6} sm="auto">
@@ -940,8 +1123,47 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
             </Stack>
           </Grid>
 
-          {/* Off-Signal Mode (CORE-based strategies only) */}
-          {!isCqm && (
+          {/* Lab Inspect: strategy picker + short description */}
+          {isLabInspect && (
+            <Grid item xs={12} sm="auto" sx={{ flex: { sm: '1 1 360px' }, minWidth: { sm: 360 } }}>
+              <Stack spacing={0.5}>
+                <Typography variant="overline" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
+                  Strategy
+                </Typography>
+                <Stack
+                  direction={{ xs: 'column', sm: 'row' }}
+                  alignItems={{ xs: 'stretch', sm: 'center' }}
+                  spacing={1.5}
+                >
+                  <FormControl size="small" sx={{ minWidth: 200, width: { xs: '100%', sm: 220 }, flexShrink: 0 }}>
+                    <Select
+                      value={inspectStrategy}
+                      onChange={(e) => setInspectStrategy(e.target.value as LabInspectStrategy)}
+                    >
+                      {LAB_INSPECT_STRATEGIES.map((name) => (
+                        <MenuItem key={name} value={name}>{name}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                    sx={{
+                      fontSize: '0.8rem',
+                      lineHeight: 1.35,
+                      maxWidth: 420,
+                      pt: { sm: 0.25 },
+                    }}
+                  >
+                    {STRATEGY_DESCRIPTIONS[inspectStrategy]}
+                  </Typography>
+                </Stack>
+              </Stack>
+            </Grid>
+          )}
+
+          {/* Off-Signal Mode (CORE strategies — Compare, CORE tab, or Inspect CORE) */}
+          {!isCqm && (!isLabInspect || inspectStrategy === 'CORE DCA' || inspectStrategy === 'CORE DCA + MACRO 3x') && (
           <Grid item xs={6} sm="auto">
             <Stack spacing={0.5}>
               <Typography variant="overline" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
@@ -961,8 +1183,8 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
           </Grid>
           )}
 
-          {/* MACRO 3x Toggle (CORE-based strategies only) */}
-          {!isCqm && (
+          {/* MACRO 3x Toggle (Compare / CORE tab — Inspect locks it via strategy choice) */}
+          {!isCqm && !isLabInspect && (
           <Grid item xs={6} sm="auto">
             <Stack spacing={0.5}>
               <Typography variant="overline" aria-hidden sx={{ fontSize: '0.65rem', visibility: 'hidden', userSelect: 'none' }}>
@@ -983,8 +1205,8 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
           </Grid>
           )}
 
-          {/* CQM Risk DCA Toggle (Lab only — locked on in the CQM model tab) */}
-          {isLab && (
+          {/* Strategy toggles (Lab Compare): keep on one row — MACRO / CQM / LLI */}
+          {isLabCompare && (
           <Grid item xs={6} sm="auto">
             <Stack spacing={0.5}>
               <Typography variant="overline" aria-hidden sx={{ fontSize: '0.65rem', visibility: 'hidden', userSelect: 'none' }}>
@@ -1014,8 +1236,329 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
           </Grid>
           )}
 
-          {/* CQM dynamic sizing knobs (tuned defaults; walk-forward risk) */}
-          {effCqmDca && effCqmDynamicSizing && (
+          {isLabCompare && (
+          <Grid item xs={6} sm="auto">
+            <Stack spacing={0.5}>
+              <Typography variant="overline" aria-hidden sx={{ fontSize: '0.65rem', visibility: 'hidden', userSelect: 'none' }}>
+                .
+              </Typography>
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ height: 40 }}>
+              <Switch
+                checked={lliCqmDca}
+                onChange={(_, checked) => setLliCqmDca(checked)}
+                size="small"
+                sx={{
+                  '& .MuiSwitch-switchBase.Mui-checked': { color: '#f59e0b' },
+                  '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': {
+                    backgroundColor: '#f59e0b',
+                  },
+                }}
+              />
+              <Typography
+                variant="body2"
+                sx={{ fontWeight: 700 }}
+                title="Larsson-Line-style 3-state filter (gold/blue/gray) gates CQM Risk DCA. Gold = run CQM sizing; Blue = sell to cash; Gray = hold (no new trades). Default: four EMAs on walk-forward CQM Risk (EQM twist)."
+              >
+                LLI+CQM DCA
+              </Typography>
+              </Stack>
+            </Stack>
+          </Grid>
+          )}
+
+          {/* EMA Trend parameters (Inspect only) */}
+          {effEmaDca && (
+            <Grid item xs={12}>
+              <Stack spacing={0.5}>
+                <Typography variant="overline" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
+                  EMA Trend Periods
+                </Typography>
+                <Stack direction="row" alignItems="center" spacing={1.5} useFlexGap flexWrap="wrap">
+                  <TextField
+                    type="number"
+                    size="small"
+                    label="Fast EMA (days)"
+                    value={emaFastPeriod}
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value, 10);
+                      if (Number.isFinite(v) && v >= 1 && v <= 400) setEmaFastPeriod(v);
+                    }}
+                    inputProps={{ min: 1, max: 400, step: 1 }}
+                    sx={{ width: 140 }}
+                  />
+                  <TextField
+                    type="number"
+                    size="small"
+                    label="Slow EMA (days)"
+                    value={emaSlowPeriod}
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value, 10);
+                      if (Number.isFinite(v) && v >= 1 && v <= 400) setEmaSlowPeriod(v);
+                    }}
+                    inputProps={{ min: 1, max: 400, step: 1 }}
+                    sx={{ width: 140 }}
+                  />
+                  <Typography variant="caption" color="text.secondary" sx={{ maxWidth: 520 }}>
+                    Allocation shifts between cash and BTC in proportion to (EMA fast − EMA slow) ÷ price,
+                    saturating at a ±1% spread — a weak signal near the crossover only moves a small
+                    slice of the portfolio. Defaults (8/200) come from a sweep across six BTC cycle
+                    windows; the paper&apos;s 12/26 underperformed plain DCA in most of them.
+                    {emaFastPeriod >= emaSlowPeriod && (
+                      <Box component="span" sx={{ color: 'warning.main', fontWeight: 700 }}>
+                        {' '}Fast period should be shorter than slow.
+                      </Box>
+                    )}
+                  </Typography>
+                </Stack>
+              </Stack>
+            </Grid>
+          )}
+
+          {/* CryptoTrend parameters (Inspect only) */}
+          {effCryptoTrendDca && (
+            <Grid item xs={12}>
+              <Stack spacing={1}>
+                <Typography variant="overline" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
+                  CryptoTrend Filter
+                </Typography>
+                <Stack direction="row" alignItems="center" spacing={1} useFlexGap flexWrap="wrap">
+                  <TextField
+                    type="number"
+                    size="small"
+                    label="Jaw SMMA (slow)"
+                    value={ctJaw}
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value, 10);
+                      if (Number.isFinite(v) && v >= 1 && v <= 400) setCtJaw(v);
+                    }}
+                    inputProps={{ min: 1, max: 400, step: 1 }}
+                    sx={{ width: 140 }}
+                  />
+                  <TextField
+                    type="number"
+                    size="small"
+                    label="Lips SMMA (fast)"
+                    value={ctLips}
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value, 10);
+                      if (Number.isFinite(v) && v >= 1 && v <= 400) setCtLips(v);
+                    }}
+                    inputProps={{ min: 1, max: 400, step: 1 }}
+                    sx={{ width: 140 }}
+                  />
+                  <ToggleButtonGroup
+                    exclusive
+                    size="small"
+                    value={ctBandMode}
+                    onChange={(_, next) => next && setCtBandMode(next)}
+                    sx={{
+                      '& .MuiToggleButton-root.Mui-selected': {
+                        color: '#e879f9',
+                        borderColor: '#e879f9',
+                        backgroundColor: 'rgba(232, 121, 249, 0.12)',
+                      },
+                    }}
+                  >
+                    <ToggleButton value="pct" sx={{ textTransform: 'none' }}>Fixed %</ToggleButton>
+                    <ToggleButton value="atr" sx={{ textTransform: 'none' }}>ATR</ToggleButton>
+                  </ToggleButtonGroup>
+                  {ctBandMode === 'pct' ? (
+                    <TextField
+                      type="number"
+                      size="small"
+                      label="Neutral band (%)"
+                      value={+(ctPct * 100).toFixed(3)}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        if (Number.isFinite(v) && v >= 0 && v <= 20) setCtPct(v / 100);
+                      }}
+                      inputProps={{ min: 0, max: 20, step: 0.1 }}
+                      sx={{ width: 140 }}
+                    />
+                  ) : (
+                    <>
+                      <TextField
+                        type="number"
+                        size="small"
+                        label="ATR period"
+                        value={ctAtrPeriod}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value, 10);
+                          if (Number.isFinite(v) && v >= 1 && v <= 400) setCtAtrPeriod(v);
+                        }}
+                        inputProps={{ min: 1, max: 400, step: 1 }}
+                        sx={{ width: 110 }}
+                      />
+                      <TextField
+                        type="number"
+                        size="small"
+                        label="ATR mult"
+                        value={ctAtrMult}
+                        onChange={(e) => {
+                          const v = parseFloat(e.target.value);
+                          if (Number.isFinite(v) && v >= 0 && v <= 10) setCtAtrMult(v);
+                        }}
+                        inputProps={{ min: 0, max: 10, step: 0.05 }}
+                        sx={{ width: 110 }}
+                      />
+                    </>
+                  )}
+                </Stack>
+                <Typography variant="caption" color="text.secondary" sx={{ maxWidth: 640 }}>
+                  {ctBandMode === 'pct'
+                    ? 'Neutral (orange) while jaw ÷ lips is within ±band — the original Pine rule (1.5%).'
+                    : 'Neutral (orange) while |jaw − lips| < mult × ATR, so the band widens in volatile markets. ATR uses daily close-to-close moves (no intraday high/low in the dataset).'}
+                  {' '}Uptrend DCAs and redeploys cash on the flip; downtrend sells to cash; neutral freezes.
+                  {ctLips >= ctJaw && (
+                    <Box component="span" sx={{ color: 'warning.main', fontWeight: 700 }}>
+                      {' '}Lips (fast) should be shorter than jaw (slow).
+                    </Box>
+                  )}
+                </Typography>
+              </Stack>
+            </Grid>
+          )}
+
+          {/* LLI+CQM parameters */}
+          {effLliCqmDca && (
+            <Grid item xs={12}>
+              <Stack spacing={1}>
+                <Typography variant="overline" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
+                  LLI+CQM Filter
+                </Typography>
+                <Stack direction="row" alignItems="center" spacing={1.5} useFlexGap flexWrap="wrap">
+                  <ToggleButtonGroup
+                    exclusive
+                    size="small"
+                    value={lliSeries}
+                    onChange={(_, next) => next && setLliSeries(next)}
+                    sx={{
+                      '& .MuiToggleButton-root.Mui-selected': {
+                        color: '#f59e0b',
+                        borderColor: '#f59e0b',
+                        backgroundColor: 'rgba(245, 158, 11, 0.12)',
+                      },
+                    }}
+                  >
+                    <ToggleButton value="risk" sx={{ textTransform: 'none' }}>On CQM Risk</ToggleButton>
+                    <ToggleButton value="price" sx={{ textTransform: 'none' }}>On Price</ToggleButton>
+                  </ToggleButtonGroup>
+                  <ToggleButtonGroup
+                    exclusive
+                    size="small"
+                    value={lliMode}
+                    onChange={(_, next) => next && setLliMode(next)}
+                    sx={{
+                      '& .MuiToggleButton-root.Mui-selected': {
+                        color: '#f59e0b',
+                        borderColor: '#f59e0b',
+                        backgroundColor: 'rgba(245, 158, 11, 0.12)',
+                      },
+                    }}
+                  >
+                    <ToggleButton value="ribbon4" sx={{ textTransform: 'none' }}>4-EMA ribbon</ToggleButton>
+                    <ToggleButton value="emaAtr" sx={{ textTransform: 'none' }}>EMA+ATR</ToggleButton>
+                  </ToggleButtonGroup>
+                  {lliSeries === 'risk' && cqmRiskLoading && (
+                    <Stack direction="row" alignItems="center" spacing={0.75}>
+                      <CircularProgress size={14} sx={{ color: '#f59e0b' }} />
+                      <Typography variant="caption" color="text.secondary">
+                        Computing walk-forward risk… {Math.round(cqmRiskProgress * 100)}%
+                      </Typography>
+                    </Stack>
+                  )}
+                </Stack>
+                {lliMode === 'ribbon4' ? (
+                  <Stack direction="row" alignItems="center" spacing={1} useFlexGap flexWrap="wrap">
+                    {([
+                      [lliP1, setLliP1, 'EMA 1'],
+                      [lliP2, setLliP2, 'EMA 2'],
+                      [lliP3, setLliP3, 'EMA 3'],
+                      [lliP4, setLliP4, 'EMA 4'],
+                    ] as const).map(([val, setVal, label]) => (
+                      <TextField
+                        key={label}
+                        type="number"
+                        size="small"
+                        label={`${label} (days)`}
+                        value={val}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value, 10);
+                          if (Number.isFinite(v) && v >= 1 && v <= 400) setVal(v);
+                        }}
+                        inputProps={{ min: 1, max: 400, step: 1 }}
+                        sx={{ width: 120 }}
+                      />
+                    ))}
+                    <Typography variant="caption" color="text.secondary" sx={{ maxWidth: 480 }}>
+                      Gold when EMA1 &gt; EMA2 &gt; EMA3 &gt; EMA4; blue when inverted; gray when tangled.
+                      {lliSeries === 'risk'
+                        ? ' Running on CQM Risk (EQM-style twist).'
+                        : ' Running on BTC price.'}
+                    </Typography>
+                  </Stack>
+                ) : (
+                  <Stack direction="row" alignItems="center" spacing={1} useFlexGap flexWrap="wrap">
+                    <TextField
+                      type="number"
+                      size="small"
+                      label="Fast EMA"
+                      value={lliFastPeriod}
+                      onChange={(e) => {
+                        const v = parseInt(e.target.value, 10);
+                        if (Number.isFinite(v) && v >= 1 && v <= 400) setLliFastPeriod(v);
+                      }}
+                      inputProps={{ min: 1, max: 400, step: 1 }}
+                      sx={{ width: 110 }}
+                    />
+                    <TextField
+                      type="number"
+                      size="small"
+                      label="Slow EMA"
+                      value={lliSlowPeriod}
+                      onChange={(e) => {
+                        const v = parseInt(e.target.value, 10);
+                        if (Number.isFinite(v) && v >= 1 && v <= 400) setLliSlowPeriod(v);
+                      }}
+                      inputProps={{ min: 1, max: 400, step: 1 }}
+                      sx={{ width: 110 }}
+                    />
+                    <TextField
+                      type="number"
+                      size="small"
+                      label="ATR period"
+                      value={lliAtrPeriod}
+                      onChange={(e) => {
+                        const v = parseInt(e.target.value, 10);
+                        if (Number.isFinite(v) && v >= 1 && v <= 400) setLliAtrPeriod(v);
+                      }}
+                      inputProps={{ min: 1, max: 400, step: 1 }}
+                      sx={{ width: 110 }}
+                    />
+                    <TextField
+                      type="number"
+                      size="small"
+                      label="ATR mult"
+                      value={lliAtrMult}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        if (Number.isFinite(v) && v >= 0 && v <= 5) setLliAtrMult(v);
+                      }}
+                      inputProps={{ min: 0, max: 5, step: 0.05 }}
+                      sx={{ width: 110 }}
+                    />
+                    <Typography variant="caption" color="text.secondary" sx={{ maxWidth: 420 }}>
+                      UniqueCharts reconstruction: gold/blue when |EMA fast − EMA slow| &gt; mult × ATR;
+                      gray inside the band (defaults 30/60 / 0.3×ATR60).
+                    </Typography>
+                  </Stack>
+                )}
+              </Stack>
+            </Grid>
+          )}
+
+          {/* CQM dynamic sizing knobs (used by CQM Risk DCA and by LLI+CQM in gold) */}
+          {(effCqmDca || effLliCqmDca) && effCqmDynamicSizing && (
             <Grid item xs={12}>
               <Stack spacing={0.5}>
                 <Typography variant="overline" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
@@ -1151,9 +1694,62 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
         </Grid>
       </Paper>
 
-      {/* Summary — CQM tab uses comparison tiles (tested vs baseline); other
-          variants keep the per-strategy cards. */}
-      {cqmRiskLoading && isCqm ? (
+      {/* Lab Inspect: single-strategy deep dive */}
+      {isLabInspect && needsCqmRisk && cqmRiskLoading ? (
+        <Paper sx={{ p: 3, textAlign: 'center' }}>
+          <Stack direction="row" alignItems="center" justifyContent="center" spacing={1.5}>
+            <CircularProgress size={22} sx={{ color: '#a855f7' }} />
+            <Typography variant="body2" color="text.secondary">
+              Computing walk-forward CQM risk… {Math.round(cqmRiskProgress * 100)}%
+            </Typography>
+          </Stack>
+        </Paper>
+      ) : isLabInspect && inspectedResult && baselineResult ? (
+        <>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <Button
+              size="small"
+              startIcon={<ArrowLeft size={16} />}
+              onClick={() => setLabMode('compare')}
+              sx={{ textTransform: 'none', fontWeight: 700 }}
+            >
+              Back to Compare
+            </Button>
+          </Stack>
+          <LabInspectView
+            strategyName={inspectStrategy}
+            inspected={inspectedResult}
+            baseline={baselineResult}
+            signalData={data}
+            riskByDate={effectiveRiskByDate}
+            seriesData={simData}
+            emaFastPeriod={emaFastPeriod}
+            emaSlowPeriod={emaSlowPeriod}
+            lliMode={lliMode}
+            lliSeries={lliSeries}
+            lliPeriods={[lliP1, lliP2, lliP3, lliP4]}
+            lliFastPeriod={lliFastPeriod}
+            lliSlowPeriod={lliSlowPeriod}
+            lliAtrPeriod={lliAtrPeriod}
+            lliAtrMult={lliAtrMult}
+            cryptoTrendParams={cryptoTrendParams}
+            tradesTable={
+              inspectedResult.trades.length > 0 ? (
+                <TradesTable trades={inspectedResult.trades} strategyName={inspectedResult.name} />
+              ) : null
+            }
+          />
+        </>
+      ) : isLabInspect && !inspectedResult ? (
+        <Paper sx={{ p: 3 }}>
+          <Typography color="text.secondary">
+            No results for {inspectStrategy}. Try a wider date range or wait for risk to finish computing.
+          </Typography>
+        </Paper>
+      ) : null}
+
+      {/* Compare / model-tab summary — CQM tab uses comparison tiles; Lab Compare uses cards. */}
+      {!isLabInspect && (cqmRiskLoading && isCqm ? (
         <Paper sx={{ p: 3, mb: 2, textAlign: 'center' }}>
           <Stack direction="row" alignItems="center" justifyContent="center" spacing={1.5}>
             <CircularProgress size={22} sx={{ color: '#a855f7' }} />
@@ -1170,16 +1766,33 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
         <Grid container spacing={2}>
           {results.map((r) => {
             const color = STRATEGY_COLORS[r.name] ?? '#94a3b8';
-            // 2 strategies → md=6; 3 → md=4; 4 → md=3 (1 row of 4 on desktop, 2x2 on tablet)
             const colSize = results.length >= 4 ? 3 : results.length === 3 ? 4 : 6;
+            const canInspect = isLab && isLabInspectStrategy(r.name);
             return (
               <Grid item xs={12} sm={6} md={colSize} key={r.name}>
-                <Card sx={{ borderTop: `3px solid ${color}` }}>
+                <Card
+                  sx={{
+                    borderTop: `3px solid ${color}`,
+                    cursor: canInspect ? 'pointer' : 'default',
+                    transition: 'box-shadow 0.15s ease, transform 0.15s ease',
+                    '&:hover': canInspect
+                      ? { boxShadow: 6, transform: 'translateY(-1px)' }
+                      : undefined,
+                  }}
+                  onClick={() => canInspect && openInspect(r.name)}
+                >
                   <CardHeader
                     title={
-                      <Typography sx={{ fontWeight: 900, fontSize: '0.95rem' }}>
-                        {r.name}
-                      </Typography>
+                      <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+                        <Typography sx={{ fontWeight: 900, fontSize: '0.95rem' }}>
+                          {r.name}
+                        </Typography>
+                        {canInspect && (
+                          <Typography variant="caption" sx={{ color, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                            Inspect →
+                          </Typography>
+                        )}
+                      </Stack>
                     }
                   />
                   <Divider />
@@ -1252,10 +1865,10 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
           })}
         </Grid>
         )
-      )}
+      ))}
 
-      {/* Chart 1: Portfolio Value */}
-      {chartData.length > 0 && (
+      {/* Chart 1: Portfolio Value (Compare / model tabs — not Lab Inspect) */}
+      {!isLabInspect && chartData.length > 0 && (
         <Paper sx={{ p: { xs: 2, sm: 3 } }}>
           <Box sx={{ mb: 2.5 }}>
             <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1282,6 +1895,12 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
                   )}
                   {effCqmDca && !effCqmDynamicSizing && cqmFractionEnabled && (
                     <> CQM Risk DCA uses legacy flat fraction scaling.</>
+                  )}
+                  {effLliCqmDca && (
+                    <> LLI+CQM DCA uses a Larsson-Line-style gold/blue/gray filter
+                      {lliSeries === 'risk' ? ' on walk-forward CQM Risk' : ' on BTC price'}
+                      {' '}({lliMode === 'ribbon4' ? `${lliP1}/${lliP2}/${lliP3}/${lliP4}-day ribbon` : `${lliFastPeriod}/${lliSlowPeriod} EMA + ${lliAtrMult}×ATR${lliAtrPeriod}`}):
+                      gold runs CQM sizing, blue sells to cash, gray freezes trades.</>
                   )}
                 </>
               )}
@@ -1425,8 +2044,8 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
         </Paper>
       )}
 
-      {/* Chart 2: BTC Holdings */}
-      {chartData.length > 0 && (
+      {/* Chart 2: BTC Holdings (Compare / model tabs — not Lab Inspect) */}
+      {!isLabInspect && chartData.length > 0 && (
         <Paper sx={{ p: { xs: 2, sm: 3 } }}>
           <Box sx={{ mb: 2.5 }}>
             <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1707,7 +2326,7 @@ const Backtest: React.FC<Props> = ({ data, variant }) => {
       )}
 
       {/* Comparison Table — redundant on the CQM tab (covered by the tiles). */}
-      {results.length > 0 && !isCqm && (
+      {results.length > 0 && !isCqm && !isLabInspect && (
         <Paper sx={{ p: { xs: 2, sm: 3 } }}>
           <Box sx={{ mb: 2 }}>
             <Typography variant="h6" sx={{ fontWeight: 800 }}>

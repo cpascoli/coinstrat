@@ -4,11 +4,50 @@ import {
   CQM_DEFAULT_MAX_CASH_FRACTION,
   CQM_DEFAULT_SELL_THRESHOLD,
 } from '../utils/cqmSizing';
+import {
+  computeLliStates,
+  parseLliPeriods,
+  LLI_DEFAULT_MODE,
+  LLI_DEFAULT_PERIODS,
+  LLI_DEFAULT_FAST_PERIOD,
+  LLI_DEFAULT_SLOW_PERIOD,
+  LLI_DEFAULT_ATR_PERIOD,
+  LLI_DEFAULT_ATR_MULT,
+  type LliMode,
+  type LliState,
+} from '../utils/larssonLine';
+import {
+  computeCryptoTrendStates,
+  CRYPTO_TREND_DEFAULT_JAW,
+  CRYPTO_TREND_DEFAULT_LIPS,
+  CRYPTO_TREND_DEFAULT_BAND_MODE,
+  CRYPTO_TREND_DEFAULT_PCT,
+  CRYPTO_TREND_DEFAULT_ATR_PERIOD,
+  CRYPTO_TREND_DEFAULT_ATR_MULT,
+  type CryptoTrendBandMode,
+  type CryptoTrendState,
+} from '../utils/cryptoTrend';
 
 // --- Configuration ---
 
 export type DcaFrequency = 'daily' | 'weekly' | 'monthly';
 export type OffSignalMode = 'pause' | 'sell_matching' | 'sell_all';
+
+// Hybrid EMA trend strategy defaults. The paper suggests 12/26-day EMAs; a
+// grid sweep across six BTC cycle windows (scripts/ema-sweep.mts, 2026-07)
+// found 8/200 @ 1% saturation the most robust risk-adjusted combo: best
+// worst-window result vs Baseline DCA, lowest turnover, and positive in the
+// two most recent windows. 5/100 maximizes mean outperformance but with a
+// worse downside. 12/26 @ 5% underperformed Baseline DCA in 5 of 6 windows.
+export const EMA_DEFAULT_FAST_PERIOD = 8;
+export const EMA_DEFAULT_SLOW_PERIOD = 200;
+/**
+ * Signal magnitude |EMA_fast − EMA_slow| / price at which the allocation
+ * saturates (fully BTC when bullish, fully cash when bearish). Small values
+ * behave close to a crossover switch with a narrow proportional band around
+ * the cross; the sweep favored ≤2% across every timeframe tested.
+ */
+export const EMA_DEFAULT_SIGNAL_SCALE = 0.01;
 
 export interface BacktestConfig {
   startDate: string;          // YYYY-MM-DD
@@ -86,7 +125,101 @@ export interface BacktestConfig {
    * strategies aren't unfairly penalized vs T-bill reality. Default 0.
    */
   cashAnnualYieldPct?: number;
+  /**
+   * Enable the Hybrid EMA Trend strategy (from "A Trust-Minimized
+   * Multi-Oracle Architecture for Autonomous On-Chain Hedge Funds", §2.3).
+   *
+   * Two EMAs (fast/slow) are computed on daily closes. The trend signal is
+   *   s = (EMA_fast − EMA_slow) / price
+   * and the portfolio targets a BTC weight proportional to the signal:
+   *   w = clamp(0.5 + s / (2 × signalScale), 0, 1)
+   * Each period the strategy deposits `dcaAmount` (equal funding with the
+   * other strategies) and rebalances toward w. Because the allocation scales
+   * with signal strength instead of flipping all-or-nothing at the cross,
+   * weak sideways signals only cause small shifts (less whipsaw).
+   */
+  emaDca?: boolean;
+  /** Fast EMA period in days. Default 12 (paper). */
+  emaFastPeriod?: number;
+  /** Slow EMA period in days. Default 26 (paper). */
+  emaSlowPeriod?: number;
+  /**
+   * Signal magnitude at which the allocation saturates (w hits 0 or 1).
+   * Default 0.05 (EMA spread of 5% of price = full conviction).
+   */
+  emaSignalScale?: number;
+  /**
+   * Enable the LLI+CQM hybrid: a Larsson-Line-style three-state trend
+   * filter (gold / blue / gray) gates the CQM Risk DCA sizing rule.
+   *
+   *   Gold — clean bullish MA order → run CQM dynamic sizing (buy / trim)
+   *   Blue — clean bearish MA order → sell all BTC, stand aside in cash
+   *   Gray — MAs tangled → hold; deposits accumulate as cash, no trades
+   *
+   * Default series is walk-forward CQM Risk (the "EQM twist": same rule,
+   * valuation input instead of raw price). Set `lliSeries: 'price'` to
+   * classify on BTC closes instead. Requires `cqmRiskByDate` when the
+   * series is `'risk'`.
+   */
+  lliCqmDca?: boolean;
+  /** State engine: four-EMA ribbon (default) or EMA+ATR neutral band. */
+  lliMode?: LliMode;
+  /** Series the MAs are computed on. Default `'risk'`. */
+  lliSeries?: 'risk' | 'price';
+  /** Four EMA periods for `ribbon4` mode (fast → slow). Default 8/21/55/144. */
+  lliPeriods?: readonly [number, number, number, number];
+  /** Min adjacent-EMA gap (risk units or USD) for a clean ribbon order. */
+  lliMinGap?: number;
+  /** `emaAtr` mode: fast EMA period. Default 30. */
+  lliFastPeriod?: number;
+  /** `emaAtr` mode: slow EMA period. Default 60. */
+  lliSlowPeriod?: number;
+  /** `emaAtr` mode: ATR period. Default 60. */
+  lliAtrPeriod?: number;
+  /** `emaAtr` mode: neutral-band width in ATR units. Default 0.3. */
+  lliAtrMult?: number;
+  /**
+   * On a flip into gold, deploy the full cash reserve as a lump-sum
+   * re-entry (mirrors CORE's flip-on deploy). Default true.
+   */
+  lliDeployOnGold?: boolean;
+  /**
+   * Enable CryptoTrend DCA (port of the "CryptoTrend v2" Pine indicator):
+   * SMMA(29) "jaw" vs SMMA(16) "lips" on price with a neutral band.
+   *
+   *   Up      — DCA the deposit; on a flip into up, deploy the cash reserve
+   *   Down    — sell all BTC, stand aside in cash
+   *   Neutral — hold; deposits accumulate as cash, no trades
+   */
+  cryptoTrendDca?: boolean;
+  cryptoTrendJaw?: number;
+  cryptoTrendLips?: number;
+  /** Neutral band: fixed jaw/lips % (Pine original) or ATR-scaled. */
+  cryptoTrendBandMode?: CryptoTrendBandMode;
+  /** `pct` mode threshold as a fraction. Default 0.015. */
+  cryptoTrendPct?: number;
+  cryptoTrendAtrPeriod?: number;
+  cryptoTrendAtrMult?: number;
 }
+
+export {
+  LLI_DEFAULT_MODE,
+  LLI_DEFAULT_PERIODS,
+  LLI_DEFAULT_FAST_PERIOD,
+  LLI_DEFAULT_SLOW_PERIOD,
+  LLI_DEFAULT_ATR_PERIOD,
+  LLI_DEFAULT_ATR_MULT,
+};
+export type { LliMode, LliState };
+export {
+  CRYPTO_TREND_DEFAULT_JAW,
+  CRYPTO_TREND_DEFAULT_LIPS,
+  CRYPTO_TREND_DEFAULT_BAND_MODE,
+  CRYPTO_TREND_DEFAULT_PCT,
+  CRYPTO_TREND_DEFAULT_ATR_PERIOD,
+  CRYPTO_TREND_DEFAULT_ATR_MULT,
+};
+export type { CryptoTrendBandMode, CryptoTrendState };
 
 // --- Results ---
 
@@ -215,6 +348,65 @@ function computeMaxReturnDrawdown(series: SeriesPoint[]): number {
     .filter((s) => s.cashDeployed > 0)
     .map((s) => s.portfolioValue / s.cashDeployed);
   return computeMaxDrawdown(equity);
+}
+
+export interface EmaTrendPoint {
+  emaFast: number;
+  emaSlow: number;
+  weight: number;
+}
+
+/**
+ * Per-date EMAs + target BTC weight for the Hybrid EMA Trend strategy.
+ *
+ * Both EMAs are seeded on the first valid price and updated daily with
+ * α = 2/(period+1). The trend signal s = (EMA_fast − EMA_slow)/price maps to
+ * a target BTC weight w = 0.5 + s/(2 × signalScale), clamped to [0, 1] —
+ * neutral (50/50) when the EMAs touch, fully BTC when the fast EMA leads by
+ * signalScale of price, fully cash when it trails by the same amount.
+ *
+ * Computed on the full history (not the backtest window) so the EMAs are
+ * already warmed up on the start date. Exported for Lab Inspect charts.
+ */
+export function computeEmaTrendSeries(
+  data: SignalData[],
+  fastPeriod: number,
+  slowPeriod: number,
+  signalScale: number,
+): Map<string, EmaTrendPoint> {
+  const out = new Map<string, EmaTrendPoint>();
+  const alphaFast = 2 / (fastPeriod + 1);
+  const alphaSlow = 2 / (slowPeriod + 1);
+  let emaFast: number | null = null;
+  let emaSlow: number | null = null;
+
+  for (const d of data) {
+    const price = d.BTCUSD;
+    if (!Number.isFinite(price) || price <= 0) continue;
+    emaFast = emaFast === null ? price : alphaFast * price + (1 - alphaFast) * emaFast;
+    emaSlow = emaSlow === null ? price : alphaSlow * price + (1 - alphaSlow) * emaSlow;
+    const signal = (emaFast - emaSlow) / price;
+    const w = 0.5 + signal / (2 * signalScale);
+    out.set(d.Date, {
+      emaFast,
+      emaSlow,
+      weight: Math.max(0, Math.min(1, w)),
+    });
+  }
+
+  return out;
+}
+
+function computeEmaTrendWeights(
+  data: SignalData[],
+  fastPeriod: number,
+  slowPeriod: number,
+  signalScale: number,
+): Map<string, number> {
+  const series = computeEmaTrendSeries(data, fastPeriod, slowPeriod, signalScale);
+  const weights = new Map<string, number>();
+  for (const [date, pt] of series) weights.set(date, pt.weight);
+  return weights;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -711,6 +903,185 @@ export function runBacktest(
       Boolean(config.cqmAllowShort),
     );
     results.push(cqm);
+  }
+
+  // 7. Optionally run the Hybrid EMA Trend strategy (paper §2.3): rebalance
+  //    the whole portfolio toward a BTC weight proportional to the EMA-spread
+  //    signal, so weak sideways signals only cause small shifts (no
+  //    all-or-nothing flip at the crossover).
+  if (config.emaDca) {
+    const fastPeriod = Math.max(1, Math.round(config.emaFastPeriod ?? EMA_DEFAULT_FAST_PERIOD));
+    const slowPeriod = Math.max(1, Math.round(config.emaSlowPeriod ?? EMA_DEFAULT_SLOW_PERIOD));
+    const signalScale = Math.max(1e-6, config.emaSignalScale ?? EMA_DEFAULT_SIGNAL_SCALE);
+    // Warm the EMAs on the full history so signals are valid from day one.
+    const weightByDate = computeEmaTrendWeights(data, fastPeriod, slowPeriod, signalScale);
+
+    const emaTrend = runStrategy(
+      'EMA Trend DCA',
+      sampled,
+      filtered,
+      config,
+      (d, state) => {
+        const w = weightByDate.get(d.Date) ?? 0.5;
+        const btcValue = state.btcHeld * d.BTCUSD;
+        const total = btcValue + state.cashBalance;
+        const diff = w * total - btcValue; // USD to move into (+) or out of (−) BTC
+        const noTrade = { extraDeposit: 0, buyBtcUsd: 0, sellBtcUsd: 0, sellAll: false, deployReserves: false };
+        if (Math.abs(diff) < 0.01) return noTrade; // skip sub-cent dust trades
+        return diff > 0
+          ? { ...noTrade, buyBtcUsd: diff }
+          : { ...noTrade, sellBtcUsd: -diff };
+      },
+    );
+    results.push(emaTrend);
+  }
+
+  // 8. Optionally run LLI+CQM: Larsson-Line-style 3-state filter gates CQM
+  //    Risk DCA. Gold runs CQM sizing; blue sells to cash; gray freezes.
+  if (config.lliCqmDca) {
+    const seriesMode = config.lliSeries ?? 'risk';
+    const riskMap = config.cqmRiskByDate;
+    if (seriesMode === 'risk' && (!riskMap || riskMap.size === 0)) {
+      // Can't classify on Risk without a walk-forward map — skip silently
+      // (Lab UI only enables this toggle once the map is ready).
+    } else {
+      const mode: LliMode = config.lliMode ?? LLI_DEFAULT_MODE;
+      const seriesPoints =
+        seriesMode === 'risk'
+          ? data
+              .filter((d) => {
+                const r = riskMap!.get(d.Date);
+                return Number.isFinite(r);
+              })
+              .map((d) => ({ date: d.Date, value: riskMap!.get(d.Date) as number }))
+          : data
+              .filter((d) => Number.isFinite(d.BTCUSD) && d.BTCUSD > 0)
+              .map((d) => ({ date: d.Date, value: d.BTCUSD }));
+
+      const stateByDate =
+        mode === 'ribbon4'
+          ? computeLliStates(seriesPoints, {
+              mode: 'ribbon4',
+              periods: parseLliPeriods(config.lliPeriods ?? LLI_DEFAULT_PERIODS),
+              minGap: config.lliMinGap ?? (seriesMode === 'risk' ? 0.002 : 0),
+            })
+          : computeLliStates(seriesPoints, {
+              mode: 'emaAtr',
+              fastPeriod: config.lliFastPeriod ?? LLI_DEFAULT_FAST_PERIOD,
+              slowPeriod: config.lliSlowPeriod ?? LLI_DEFAULT_SLOW_PERIOD,
+              atrPeriod: config.lliAtrPeriod ?? LLI_DEFAULT_ATR_PERIOD,
+              atrMult: config.lliAtrMult ?? LLI_DEFAULT_ATR_MULT,
+            });
+
+      const maxCashFraction = config.cqmMaxCashFraction ?? CQM_DEFAULT_MAX_CASH_FRACTION;
+      const sellThreshold = config.cqmSellThreshold ?? CQM_DEFAULT_SELL_THRESHOLD;
+      const deployOnGold = config.lliDeployOnGold !== false;
+      let prevState: LliState = 'gray';
+
+      const lliCqm = runStrategy(
+        'LLI+CQM DCA',
+        sampled,
+        filtered,
+        config,
+        (d, state) => {
+          const lli: LliState = stateByDate.get(d.Date) ?? 'gray';
+          const justFlippedGold = lli === 'gold' && prevState !== 'gold';
+          prevState = lli;
+
+          const noTrade = {
+            extraDeposit: 0,
+            buyBtcUsd: 0,
+            sellBtcUsd: 0,
+            sellAll: false,
+            deployReserves: false,
+          };
+
+          switch (lli) {
+            case 'blue':
+              // Stand aside: convert the whole BTC book to cash.
+              return { ...noTrade, sellAll: state.btcHeld > 0 };
+            case 'gray':
+              // Tangled — keep whatever position we have; deposits pile as cash.
+              return noTrade;
+            case 'gold': {
+              // Ride: CQM sizes the trade; on the gold flip, dump the cash
+              // reserve that accumulated during blue/gray into BTC.
+              if (deployOnGold && justFlippedGold && state.cashBalance > 0) {
+                return { ...noTrade, deployReserves: true };
+              }
+              const risk = riskMap?.get(d.Date);
+              const r = Number.isFinite(risk)
+                ? Math.max(0, Math.min(1, risk as number))
+                : 0.5;
+              const sized = computeCqmDynamicTrade({
+                baseAmount: config.dcaAmount,
+                risk: r,
+                cashBalance: state.cashBalance,
+                btcHeld: state.btcHeld,
+                btcPrice: d.BTCUSD,
+                maxCashFraction,
+                sellThreshold,
+              });
+              return {
+                ...noTrade,
+                buyBtcUsd: sized.buyAmount,
+                sellBtcUsd: sized.sellAmount,
+              };
+            }
+            default: {
+              const _exhaustive: never = lli;
+              return _exhaustive;
+            }
+          }
+        },
+      );
+      results.push(lliCqm);
+    }
+  }
+
+  // 9. Optionally run CryptoTrend DCA: jaw/lips SMMA trend filter on price.
+  //    Up buys (deploying reserves on the flip), down sells to cash,
+  //    neutral freezes.
+  if (config.cryptoTrendDca) {
+    // Warm the SMMAs on the full history so signals are valid from day one.
+    const stateByDate = computeCryptoTrendStates(
+      data.map((d) => ({ date: d.Date, price: d.BTCUSD })),
+      {
+        jawLength: config.cryptoTrendJaw ?? CRYPTO_TREND_DEFAULT_JAW,
+        lipsLength: config.cryptoTrendLips ?? CRYPTO_TREND_DEFAULT_LIPS,
+        bandMode: config.cryptoTrendBandMode ?? CRYPTO_TREND_DEFAULT_BAND_MODE,
+        pct: config.cryptoTrendPct ?? CRYPTO_TREND_DEFAULT_PCT,
+        atrPeriod: config.cryptoTrendAtrPeriod ?? CRYPTO_TREND_DEFAULT_ATR_PERIOD,
+        atrMult: config.cryptoTrendAtrMult ?? CRYPTO_TREND_DEFAULT_ATR_MULT,
+      },
+    );
+    let prevState: CryptoTrendState = 'neutral';
+
+    const cryptoTrend = runStrategy(
+      'CryptoTrend DCA',
+      sampled,
+      filtered,
+      config,
+      (d, state) => {
+        const trend: CryptoTrendState = stateByDate.get(d.Date) ?? 'neutral';
+        const justFlippedUp = trend === 'up' && prevState !== 'up';
+        prevState = trend;
+        const noTrade = { extraDeposit: 0, buyBtcUsd: 0, sellBtcUsd: 0, sellAll: false, deployReserves: false };
+        switch (trend) {
+          case 'up':
+            return { ...noTrade, buyBtcUsd: config.dcaAmount, deployReserves: justFlippedUp };
+          case 'down':
+            return { ...noTrade, sellAll: state.btcHeld > 0 };
+          case 'neutral':
+            return noTrade;
+          default: {
+            const _exhaustive: never = trend;
+            return _exhaustive;
+          }
+        }
+      },
+    );
+    results.push(cryptoTrend);
   }
 
   return results;
