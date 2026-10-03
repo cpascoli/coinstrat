@@ -212,11 +212,17 @@ function buildRiskSpans(
   return spans;
 }
 
-const Backtest: React.FC<Props> = ({ data, variant }) => {
+const Backtest: React.FC<Props> = ({ data: rawData, variant }) => {
+  // Simulate on closed daily bars only. The live series carries today's
+  // intraday price, so the default end date is yesterday's UTC close.
+  const data = useMemo(() => {
+    const todayUtc = new Date().toISOString().slice(0, 10);
+    return rawData.filter((d) => d.Date < todayUtc);
+  }, [rawData]);
   // Optional URL overrides take priority over persisted state (and are written
   // back to it). When absent, the persisted value (or default) is used.
   //   ?start-date=YYYY-MM-DD   → simulation start date
-  //   ?end-date=YYYY-MM-DD     → simulation end date (defaults to today)
+  //   ?end-date=YYYY-MM-DD     → simulation end date (defaults to yesterday's close)
   //   ?dca-amount=100          → base DCA amount (USD)
   //   ?dca-frequency=daily     → daily | weekly | monthly
   const [searchParams] = useSearchParams();
