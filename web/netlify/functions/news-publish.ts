@@ -145,6 +145,16 @@ export const handler: Handler = async (event) => {
     publishedAt = d.toISOString();
   }
 
+  const sectionRaw = typeof body.section === 'string' ? body.section.trim() : '';
+  const allowedSections = new Set(['market', 'development', 'culture', 'opinion', 'legacy']);
+  if (sectionRaw && !allowedSections.has(sectionRaw)) {
+    return {
+      statusCode: 400,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: 'section must be market, development, culture, opinion, or legacy' }),
+    };
+  }
+
   const now = new Date().toISOString();
   const row = {
     slug,
@@ -153,6 +163,7 @@ export const handler: Handler = async (event) => {
     body: article,
     labels,
     source_links: sourceLinks,
+    ...(sectionRaw ? { section: sectionRaw } : {}),
     ...(publishedAt ? { published_at: publishedAt } : {}),
     updated_at: now,
   };

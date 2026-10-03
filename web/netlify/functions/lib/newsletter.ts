@@ -10,6 +10,23 @@ import {
   type CqmWeeklyBlock,
 } from './cqmSnapshot';
 import { generateAndStoreImage, removeStoredImage } from './aiImage';
+import {
+  fetchArticleExcerpt,
+  fetchNewsCandidates,
+  fetchWithTimeout,
+  normalizeWhitespace,
+  type ArticleExcerpt,
+  type NewsCandidate,
+} from './newsFetch';
+
+export {
+  extractPagePublishedAt,
+  fetchArticleExcerpt,
+  fetchNewsCandidates,
+  normalizeWhitespace,
+  type ArticleExcerpt,
+  type NewsCandidate,
+} from './newsFetch';
 
 export type NewsletterIssueStatus = 'draft' | 'scheduled' | 'sending' | 'sent' | 'failed';
 export type NewsletterAudienceMode = 'all' | 'newsletter_only' | 'paid_only';
@@ -157,19 +174,6 @@ export interface WeeklyContext {
   highlights: string[];
 }
 
-export interface NewsCandidate {
-  title: string;
-  url: string;
-  source: string;
-  summary: string;
-  publishedAt: string | null;
-}
-
-export interface ArticleExcerpt {
-  url: string;
-  excerpt: string;
-}
-
 interface NewsSourcePacket {
   title: string;
   source: string;
@@ -235,14 +239,19 @@ const newsLookbackDays = Number(process.env.NEWS_LOOKBACK_DAYS || 7);
  */
 export type NewsTopic = 'markets' | 'development' | 'culture';
 
-const NEWS_QUERY_SETS: Array<{ topic: NewsTopic; query: string }> = [
-  { topic: 'markets', query: `Bitcoin OR BTC (ETF OR treasury OR adoption OR mining OR regulation OR macro OR institution) when:${newsLookbackDays}d` },
-  { topic: 'markets', query: `(Bitcoin OR BTC) (site:coindesk.com OR site:cointelegraph.com OR site:decrypt.co OR site:theblock.co) when:${newsLookbackDays}d` },
-  { topic: 'development', query: `Bitcoin ("Bitcoin Core" OR BIP OR "soft fork" OR covenant OR "Lightning Network" OR mempool OR self-custody OR "open source" OR wallet OR node OR protocol) when:${newsLookbackDays}d` },
-  { topic: 'development', query: `(Bitcoin OR Lightning) developer (release OR upgrade OR privacy OR security OR software) when:${newsLookbackDays}d` },
-  { topic: 'culture', query: `Bitcoin (conference OR community OR education OR "human rights" OR "circular economy" OR Nostr OR meetup OR documentary OR grassroots) when:${newsLookbackDays}d` },
-  { topic: 'culture', query: `(Bitcoin OR BTC) site:bitcoinmagazine.com when:${newsLookbackDays}d` },
-];
+/** Topic-tagged Google News queries for a given lookback (shared with the daily news generator). */
+export function buildNewsQuerySets(lookbackDays: number): Array<{ topic: NewsTopic; query: string }> {
+  return [
+    { topic: 'markets', query: `Bitcoin OR BTC (ETF OR treasury OR adoption OR mining OR regulation OR macro OR institution) when:${lookbackDays}d` },
+    { topic: 'markets', query: `(Bitcoin OR BTC) (site:coindesk.com OR site:cointelegraph.com OR site:decrypt.co OR site:theblock.co) when:${lookbackDays}d` },
+    { topic: 'development', query: `Bitcoin ("Bitcoin Core" OR BIP OR "soft fork" OR covenant OR "Lightning Network" OR mempool OR self-custody OR "open source" OR wallet OR node OR protocol) when:${lookbackDays}d` },
+    { topic: 'development', query: `(Bitcoin OR Lightning) developer (release OR upgrade OR privacy OR security OR software) when:${lookbackDays}d` },
+    { topic: 'culture', query: `Bitcoin (conference OR community OR education OR "human rights" OR "circular economy" OR Nostr OR meetup OR documentary OR grassroots) when:${lookbackDays}d` },
+    { topic: 'culture', query: `(Bitcoin OR BTC) site:bitcoinmagazine.com when:${lookbackDays}d` },
+  ];
+}
+
+const NEWS_QUERY_SETS = buildNewsQuerySets(newsLookbackDays);
 
 /** How many stories each topic contributes to the final selection. */
 const NEWS_TOPIC_QUOTAS: Record<NewsTopic, number> = {
@@ -286,8 +295,6 @@ const TITLE_STOPWORDS = new Set([
 const NEAR_DUPLICATE_MIN_SHARED_TOKENS = 3;
 const NEAR_DUPLICATE_TITLE_OVERLAP = 0.5;
 const MAX_ENRICHED_STORIES = 6;
-const ARTICLE_FETCH_TIMEOUT_MS = 3500;
-const ARTICLE_EXCERPT_MAX_CHARS = 1800;
 const PROMPT_EXCERPT_MAX_CHARS = 700;
 // Client-side cap on the OpenAI draft call. Compose always runs inside a
 // background function (15-min budget), so this only needs to cover a slow
@@ -611,135 +618,12 @@ function escapeHtml(value: string): string {
     .replaceAll("'", '&#39;');
 }
 
-function decodeXml(value: string): string {
-  return value
-    .replaceAll('&amp;', '&')
-    .replaceAll('&quot;', '"')
-    .replaceAll('&#39;', "'")
-    .replaceAll('&lt;', '<')
-    .replaceAll('&gt;', '>');
-}
-
-function stripTags(value: string): string {
-  const decoded = decodeXml(value);
-  return decoded
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function cleanNewsSummary(title: string, summary: string, source: string): string {
-  const normalizedTitle = stripTags(title).trim();
-  const normalizedSource = stripTags(source).trim();
-  let cleaned = stripTags(summary)
-    .replace(/\u00a0/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  if (!cleaned) return '';
-
-  const loweredTitle = normalizedTitle.toLowerCase();
-  const loweredSource = normalizedSource.toLowerCase();
-  const loweredCleaned = cleaned.toLowerCase();
-
-  if (
-    loweredCleaned === loweredTitle ||
-    loweredCleaned === `${loweredTitle} - ${loweredSource}` ||
-    loweredCleaned.includes(`${loweredTitle} ${loweredSource}`) ||
-    loweredCleaned.includes(`${loweredTitle} - ${loweredSource}`)
-  ) {
-    return '';
-  }
-
-  cleaned = cleaned
-    .replace(new RegExp(`^${escapeRegExp(normalizedTitle)}\\s*[-–—]?\\s*`, 'i'), '')
-    .replace(new RegExp(`\\s*[-–—]?\\s*${escapeRegExp(normalizedSource)}$`, 'i'), '')
-    .trim();
-
-  return cleaned;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-export function normalizeWhitespace(value: string): string {
-  return value
-    .replace(/\u00a0/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
 
 function normalizeParagraphs(value: string): string[] {
   return value
     .split(/\n\s*\n/)
     .map((paragraph) => normalizeWhitespace(paragraph))
     .filter(Boolean);
-}
-
-function dedupeTextParts(parts: string[]): string[] {
-  const seen = new Set<string>();
-  const result: string[] = [];
-
-  for (const part of parts) {
-    const normalized = normalizeWhitespace(part);
-    if (!normalized) continue;
-    const key = normalized.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(normalized);
-  }
-
-  return result;
-}
-
-function extractMetaContent(html: string, pattern: RegExp): string {
-  const match = html.match(pattern);
-  return normalizeWhitespace(decodeXml(match?.[1] ?? ''));
-}
-
-function extractArticleParagraphs(html: string): string[] {
-  const withoutScripts = html
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ');
-
-  const paragraphs = withoutScripts.match(/<p\b[^>]*>[\s\S]*?<\/p>/gi) ?? [];
-
-  return dedupeTextParts(
-    paragraphs
-      .map((paragraph) => stripTags(paragraph))
-      .map((paragraph) => normalizeWhitespace(paragraph))
-      .filter((paragraph) => paragraph.length >= 80)
-      .filter((paragraph) => !/cookie|privacy|sign up|subscribe|advertis/i.test(paragraph)),
-  ).slice(0, 4);
-}
-
-export async function fetchArticleExcerpt(candidate: NewsCandidate): Promise<ArticleExcerpt | null> {
-  try {
-    const response = await fetchWithTimeout(candidate.url, {
-      method: 'GET',
-      headers: {
-        'User-Agent': 'CoinStrat Newsletter Bot/1.0',
-      },
-    }, ARTICLE_FETCH_TIMEOUT_MS);
-
-    if (!response.ok) return null;
-
-    const html = await response.text();
-    const finalUrl = response.url || candidate.url;
-    const metaDescription = extractMetaContent(
-      html,
-      /<meta[^>]+(?:name=["']description["']|property=["']og:description["'])[^>]+content=["']([\s\S]*?)["'][^>]*>/i,
-    );
-    const paragraphs = extractArticleParagraphs(html);
-    const excerpt = dedupeTextParts([metaDescription, ...paragraphs])
-      .join(' ')
-      .slice(0, ARTICLE_EXCERPT_MAX_CHARS);
-
-    return excerpt ? { url: finalUrl, excerpt } : null;
-  } catch {
-    return null;
-  }
 }
 
 function buildUnsubscribeUrl(email?: string | null): string {
@@ -869,17 +753,6 @@ function issueSlug(weekOf: string): string {
   return `newsletter-${weekOf}`;
 }
 
-async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
 function nextScheduledAt(settings: NewsletterSettings, weekOf: string): string | null {
   if (!settings.enabled) return null;
   const scheduled = new Date(`${weekOf}T00:00:00Z`);
@@ -951,46 +824,6 @@ async function loadIssueLinks(issueId: string): Promise<CuratedLinkInput[]> {
 
   if (error) throw new Error(error.message);
   return (data ?? []) as CuratedLinkInput[];
-}
-
-function parseRssItems(xml: string): NewsCandidate[] {
-  const items = xml.match(/<item[\s\S]*?<\/item>/g) ?? [];
-
-  return items.map((item) => {
-    const read = (pattern: RegExp) => {
-      const match = item.match(pattern);
-      return (match?.[1] ?? match?.[2] ?? '').trim();
-    };
-    const title = stripTags(read(/<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>|<title>([\s\S]*?)<\/title>/));
-    const link = decodeXml(read(/<link>([\s\S]*?)<\/link>/));
-    const description = stripTags(read(/<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>|<description>([\s\S]*?)<\/description>/));
-    const source = stripTags(read(/<source[^>]*>([\s\S]*?)<\/source>/)) || 'News';
-    const publishedAt = read(/<pubDate>([\s\S]*?)<\/pubDate>/) || null;
-
-    return {
-      title,
-      url: link,
-      source,
-      summary: cleanNewsSummary(title, description, source),
-      publishedAt,
-    };
-  }).filter((item) => item.title && item.url);
-}
-
-export async function fetchNewsCandidates(query: string): Promise<NewsCandidate[]> {
-  const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`;
-  const response = await fetchWithTimeout(url, {
-    method: 'GET',
-    headers: {
-      'User-Agent': 'CoinStrat Newsletter Bot/1.0',
-    },
-  }, 4500);
-  if (!response.ok) {
-    throw new Error(`News RSS fetch failed: HTTP ${response.status}`);
-  }
-
-  const xml = await response.text();
-  return parseRssItems(xml);
 }
 
 function buildNewsSourcePackets(curatedLinks: CuratedLinkInput[]): NewsSourcePacket[] {
@@ -1086,12 +919,13 @@ export function isNearDuplicateTitle(a: string, b: string): boolean {
   );
 }
 
-interface TopicCandidate extends NewsCandidate {
+export interface TopicCandidate extends NewsCandidate {
   topic: NewsTopic;
 }
 
 /**
- * Pick the weekly stories with per-topic quotas and near-duplicate filtering.
+ * Pick stories with per-topic quotas and near-duplicate filtering (shared by
+ * the weekly newsletter and the daily news generator).
  *
  * Candidates are sorted by score and admitted greedily: a story is skipped if
  * its title substantially overlaps one already picked (same story from another
@@ -1101,12 +935,16 @@ interface TopicCandidate extends NewsCandidate {
  * get article excerpts and drive the LLM narrative — span topics instead of
  * being finance-only.
  */
-export function selectWeeklyStories(candidates: TopicCandidate[], limit = MAX_WEEKLY_STORIES): TopicCandidate[] {
+export function selectWeeklyStories(
+  candidates: TopicCandidate[],
+  limit = MAX_WEEKLY_STORIES,
+  quotas: Record<NewsTopic, number> = NEWS_TOPIC_QUOTAS,
+): TopicCandidate[] {
   const byScore = [...candidates].sort((a, b) => scoreNewsCandidate(b) - scoreNewsCandidate(a));
 
   const picked: TopicCandidate[] = [];
   const overflow: TopicCandidate[] = [];
-  const remainingQuota: Record<NewsTopic, number> = { ...NEWS_TOPIC_QUOTAS };
+  const remainingQuota: Record<NewsTopic, number> = { ...quotas };
 
   const isNearDuplicate = (candidate: TopicCandidate): boolean =>
     picked.some((existing) => isNearDuplicateTitle(existing.title, candidate.title));
@@ -1173,10 +1011,13 @@ async function sourceWeeklyStories(
       if (!deduped.has(key)) deduped.set(key, candidate);
     }
 
-    const selected = selectWeeklyStories(Array.from(deduped.values()));
+    // Two spare picks so stories the page itself dates outside the lookback
+    // (Google re-indexing an old article with a fresh RSS pubDate) can be
+    // dropped without shrinking the headline list.
+    const selected = selectWeeklyStories(Array.from(deduped.values()), MAX_WEEKLY_STORIES + 2);
 
     const enrichedResults = await Promise.allSettled(
-      selected.slice(0, MAX_ENRICHED_STORIES).map((candidate) => fetchArticleExcerpt(candidate)),
+      selected.slice(0, MAX_ENRICHED_STORIES + 2).map((candidate) => fetchArticleExcerpt(candidate)),
     );
     const enrichedByTitle = new Map<string, ArticleExcerpt>();
 
@@ -1187,7 +1028,17 @@ async function sourceWeeklyStories(
       enrichedByTitle.set(candidate.title, result.value);
     });
 
-    const mapped = selected.map((candidate, index) => {
+    const staleCutoffMs = (newsLookbackDays + 2) * 24 * 60 * 60 * 1000;
+    const fresh = selected
+      .filter((candidate) => {
+        const pagePublishedAt = enrichedByTitle.get(candidate.title)?.publishedAt;
+        if (!pagePublishedAt) return true;
+        const ms = Date.parse(pagePublishedAt);
+        return Number.isNaN(ms) || Date.now() - ms <= staleCutoffMs;
+      })
+      .slice(0, MAX_WEEKLY_STORIES);
+
+    const mapped = fresh.map((candidate, index) => {
       const enriched = enrichedByTitle.get(candidate.title);
       return {
         title: candidate.title,

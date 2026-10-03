@@ -1,46 +1,61 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Box,
-  Button,
   Chip,
   CircularProgress,
   Divider,
   Grid,
-  InputAdornment,
+  Pagination,
   Paper,
   Stack,
-  TextField,
   Typography,
 } from '@mui/material';
-import SearchIcon from '@mui/icons-material/Search';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { format, parseISO } from 'date-fns';
 import { Newspaper } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import {
+  FRONT_PAGE_SECTIONS,
+  SECTION_LABELS,
+  groupFrontPage,
+  isFrontPageSection,
+  relativeAgeLabel,
+  type FrontPageArticle,
+  type FrontPageSection,
+} from '../utils/newsFrontPage';
 
-type NewsArticleListRow = {
-  id: string;
-  slug: string;
-  headline: string;
-  summary: string;
-  labels: string[] | null;
-  published_at: string;
-};
+const ARCHIVE_PAGE_SIZE = 6;
+const FRONT_PREVIEW_PARAS = 3;
+const FRONT_PREVIEW_MIN_HEIGHT = { xs: 220, sm: 280 };
 
-function articleMatchesSearch(row: NewsArticleListRow, rawQuery: string): boolean {
-  const q = rawQuery.trim().toLowerCase();
-  if (!q) return true;
-  const words = q.split(/\s+/).filter(Boolean);
-  const blob = [row.headline, row.summary, row.slug, ...(row.labels ?? [])].join(' ').toLowerCase();
-  return words.every((w) => blob.includes(w));
+type NewsRow = FrontPageArticle;
+
+function articleDate(publishedAt: string): string {
+  try {
+    return format(parseISO(publishedAt), 'MMMM d, yyyy');
+  } catch {
+    return publishedAt.slice(0, 10);
+  }
+}
+
+function previewText(article: FrontPageArticle, maxParagraphs: number): string {
+  const raw = (article.body || article.summary || '').trim();
+  if (!raw) return '';
+  const paragraphs = raw.split(/\n\s*\n/).map((part) => part.trim()).filter(Boolean);
+  if (paragraphs.length <= maxParagraphs) return paragraphs.join('\n\n');
+  return `${paragraphs.slice(0, maxParagraphs).join('\n\n')}…`;
 }
 
 const News: React.FC = () => {
-  const [rows, setRows] = useState<NewsArticleListRow[]>([]);
+  const [rows, setRows] = useState<NewsRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
-  const [topicFilter, setTopicFilter] = useState<Set<string>>(() => new Set());
+  const [sectionFilter, setSectionFilter] = useState<FrontPageSection | 'all'>('all');
+  const [archivePage, setArchivePage] = useState(1);
 
   const load = useCallback(async () => {
     if (!supabase) {
@@ -53,14 +68,15 @@ const News: React.FC = () => {
     setError(null);
     const { data, error: qErr } = await supabase
       .from('news_articles')
-      .select('id, slug, headline, summary, labels, published_at')
-      .order('published_at', { ascending: false });
+      .select('id, slug, headline, summary, body, labels, published_at, section, image_url, image_alt, sources')
+      .order('published_at', { ascending: false })
+      .limit(80);
 
     if (qErr) {
       setError(qErr.message);
       setRows([]);
     } else {
-      setRows((data ?? []) as NewsArticleListRow[]);
+      setRows((data ?? []) as NewsRow[]);
     }
     setLoading(false);
   }, []);
@@ -69,257 +85,323 @@ const News: React.FC = () => {
     void load();
   }, [load]);
 
-  const allTopics = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const r of rows) {
-      for (const raw of r.labels ?? []) {
-        const t = raw.trim();
-        if (!t) continue;
-        const key = t.toLowerCase();
-        if (!m.has(key)) m.set(key, t);
-      }
-    }
-    return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([, display]) => display);
-  }, [rows]);
+  const { lead, archive } = useMemo(() => groupFrontPage(rows), [rows]);
+  const editionDate = lead.market?.published_at ?? rows[0]?.published_at ?? null;
 
-  const filtered = useMemo(() => {
-    let list = [...rows];
-    if (search.trim()) {
-      list = list.filter((r) => articleMatchesSearch(r, search));
-    }
-    if (topicFilter.size > 0) {
-      const selected = new Set([...topicFilter].map((x) => x.toLowerCase()));
-      list = list.filter((r) =>
-        (r.labels ?? []).some((l) => selected.has(l.trim().toLowerCase())),
-      );
-    }
-    return list;
-  }, [rows, search, topicFilter]);
+  const filteredArchive = useMemo(() => {
+    if (sectionFilter === 'all') return archive;
+    return archive.filter((row) => row.section === sectionFilter);
+  }, [archive, sectionFilter]);
 
-  const featured = filtered[0];
-  const rest = filtered.slice(1);
+  useEffect(() => {
+    setArchivePage(1);
+  }, [sectionFilter]);
 
-  const toggleTopic = (label: string) => {
-    setTopicFilter((prev) => {
-      const next = new Set(prev);
-      if (next.has(label)) next.delete(label);
-      else next.add(label);
-      return next;
-    });
-  };
-
-  const clearFilters = () => {
-    setSearch('');
-    setTopicFilter(new Set());
-  };
-
-  const hasFilters = Boolean(search.trim() || topicFilter.size > 0);
-
-  const filtersSidebar = (
-    <Paper
-      sx={{
-        p: 2,
-        width: { xs: '100%', md: 220 },
-        flexShrink: 0,
-        alignSelf: { xs: 'stretch', md: 'flex-start' },
-        position: { md: 'sticky' },
-        top: { md: 88 },
-        border: '1px solid',
-        borderColor: 'divider',
-      }}
-    >
-      <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1.75, letterSpacing: 0.02 }}>
-        Filters
-      </Typography>
-      <Stack spacing={1.75}>
-        <TextField
-          label="Search"
-          placeholder="Headlines, topics…"
-          size="small"
-          fullWidth
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon sx={{ color: 'text.secondary', fontSize: 20 }} />
-              </InputAdornment>
-            ),
-          }}
-        />
-        {hasFilters && (
-          <Button variant="outlined" size="small" onClick={clearFilters} fullWidth sx={{ fontWeight: 700 }}>
-            Clear filters
-          </Button>
-        )}
-      </Stack>
-      {allTopics.length > 0 && (
-        <>
-          <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mt: 2.5, mb: 1, color: 'text.secondary' }}>
-            Topics
-          </Typography>
-          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 0.75 }}>
-            {allTopics.map((t) => (
-              <Chip
-                key={t}
-                label={t}
-                size="small"
-                onClick={() => toggleTopic(t)}
-                color={topicFilter.has(t) ? 'primary' : 'default'}
-                variant={topicFilter.has(t) ? 'filled' : 'outlined'}
-                sx={{
-                  fontWeight: 600,
-                  width: '100%',
-                  justifyContent: 'flex-start',
-                  '& .MuiChip-label': { width: '100%', textAlign: 'left', px: 1.25 },
-                }}
-              />
-            ))}
-          </Box>
-        </>
-      )}
-    </Paper>
+  const archivePageCount = Math.max(1, Math.ceil(filteredArchive.length / ARCHIVE_PAGE_SIZE));
+  const currentArchivePage = Math.min(archivePage, archivePageCount);
+  const pagedArchive = filteredArchive.slice(
+    (currentArchivePage - 1) * ARCHIVE_PAGE_SIZE,
+    currentArchivePage * ARCHIVE_PAGE_SIZE,
   );
+
+  const sourcesBySection = useMemo(() => {
+    const grouped: Record<FrontPageSection, FrontPageArticle['sources']> = {
+      market: [],
+      development: [],
+      culture: [],
+      opinion: [],
+    };
+    for (const section of FRONT_PAGE_SECTIONS) {
+      grouped[section] = lead[section]?.sources ?? [];
+    }
+    return grouped;
+  }, [lead]);
+
+  const sourceCount = FRONT_PAGE_SECTIONS.reduce(
+    (total, section) => total + (sourcesBySection[section]?.length ?? 0),
+    0,
+  );
+
+  const hasLead = FRONT_PAGE_SECTIONS.some((section) => lead[section]);
 
   return (
     <Box sx={{ maxWidth: 1180, mx: 'auto', py: { xs: 2, md: 3 } }}>
-      <Stack spacing={2.5} sx={{ mb: 3 }}>
+      <Stack spacing={0.5} sx={{ mb: 3, borderBottom: '3px solid', borderColor: 'primary.main', pb: 2 }}>
         <Stack direction="row" spacing={1.5} alignItems="center">
-          <Newspaper size={32} style={{ color: '#60a5fa' }} />
-          <Typography variant="h3" component="h1" sx={{ fontWeight: 900, fontSize: { xs: 28, sm: 36 } }}>
-            News
+          <Newspaper size={28} style={{ color: '#60a5fa' }} />
+          <Typography variant="h3" component="h1" sx={{ fontWeight: 900, fontSize: { xs: 28, sm: 36 }, letterSpacing: -0.5 }}>
+            CoinStrat Daily
           </Typography>
         </Stack>
-        <Typography sx={{ color: 'text.secondary', maxWidth: 720 }}>
-          Commentary and updates from CoinStrat. Search or filter by topic, or open an article to read the full piece.
+        <Typography sx={{ color: 'text.secondary' }}>
+          {editionDate ? articleDate(editionDate) : 'Bitcoin markets, development, culture, and analysis'}
         </Typography>
       </Stack>
 
-      <Box
-        sx={{
-          display: 'flex',
-          flexDirection: { xs: 'column', md: 'row' },
-          gap: { xs: 2.5, md: 3 },
-          alignItems: 'flex-start',
-        }}
-      >
-        {filtersSidebar}
+      {loading && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 4 }}>
+          <CircularProgress size={24} />
+          <Typography color="text.secondary">Loading the front page…</Typography>
+        </Box>
+      )}
 
-        <Stack spacing={3} sx={{ flex: 1, minWidth: 0, width: '100%' }}>
-        {loading && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 4 }}>
-            <CircularProgress size={24} />
-            <Typography color="text.secondary">Loading articles…</Typography>
-          </Box>
-        )}
+      {!loading && error && (
+        <Paper sx={{ p: 3 }}>
+          <Typography color="error" sx={{ fontWeight: 700 }}>{error}</Typography>
+        </Paper>
+      )}
 
-        {!loading && error && (
-          <Paper sx={{ p: 3 }}>
-            <Typography color="error" sx={{ fontWeight: 700 }}>{error}</Typography>
-          </Paper>
-        )}
+      {!loading && !error && !hasLead && (
+        <Paper sx={{ p: 4, textAlign: 'center' }}>
+          <Typography sx={{ fontWeight: 700 }}>No articles yet</Typography>
+          <Typography variant="body2" color="text.secondary">Check back after the next morning edition.</Typography>
+        </Paper>
+      )}
 
-        {!loading && !error && filtered.length === 0 && (
-          <Paper sx={{ p: 4, textAlign: 'center' }}>
-            <Typography sx={{ fontWeight: 700, mb: 1 }}>No articles match your search or filters</Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Try different keywords, clear filters, or check back soon for new posts.
-            </Typography>
-            {hasFilters && (
-              <Button variant="contained" onClick={clearFilters} sx={{ fontWeight: 700 }}>
-                Clear filters
-              </Button>
+      {!loading && !error && hasLead && (
+        <Stack spacing={3}>
+          {lead.market && (
+            <Paper
+              component={RouterLink}
+              to={`/news/${lead.market.slug}`}
+              sx={{
+                textDecoration: 'none',
+                color: 'inherit',
+                display: 'block',
+                overflow: 'hidden',
+                border: '1px solid',
+                borderColor: 'rgba(96, 165, 250, 0.35)',
+              }}
+            >
+              {lead.market.image_url && (
+                <Box
+                  component="img"
+                  src={lead.market.image_url}
+                  alt={lead.market.image_alt ?? lead.market.headline}
+                  sx={{ width: '100%', maxHeight: { xs: 240, sm: 380 }, objectFit: 'cover', display: 'block' }}
+                />
+              )}
+              <Box sx={{ p: { xs: 2.5, sm: 3.5 } }}>
+                <SectionKicker section="market" publishedAt={lead.market.published_at} />
+                <Typography variant="h4" component="h2" sx={{ fontWeight: 900, mt: 0.5, mb: 1.5, fontSize: { xs: 24, sm: 34 } }}>
+                  {lead.market.headline}
+                </Typography>
+                <PreviewCopy text={previewText(lead.market, FRONT_PREVIEW_PARAS)} prominent />
+              </Box>
+            </Paper>
+          )}
+
+          <Grid container spacing={2}>
+            {lead.development && (
+              <Grid item xs={12} md={6}>
+                <SectionCard article={lead.development} section="development" />
+              </Grid>
             )}
-          </Paper>
-        )}
+            {lead.culture && (
+              <Grid item xs={12} md={6}>
+                <SectionCard article={lead.culture} section="culture" />
+              </Grid>
+            )}
+          </Grid>
 
-        {!loading && !error && featured && (
-          <Paper
-            component={RouterLink}
-            to={`/news/${featured.slug}`}
-            sx={{
-              p: { xs: 2.5, sm: 3.5 },
-              textDecoration: 'none',
-              color: 'inherit',
-              display: 'block',
-              border: '1px solid',
-              borderColor: 'rgba(96, 165, 250, 0.35)',
-              background: 'linear-gradient(135deg, rgba(37, 99, 235, 0.12) 0%, rgba(12, 19, 34, 0.4) 100%)',
-              transition: 'transform 0.15s, box-shadow 0.15s',
-              '&:hover': {
-                boxShadow: '0 12px 40px -12px rgba(37, 99, 235, 0.35)',
-                transform: 'translateY(-2px)',
-              },
-            }}
-          >
-            <Typography variant="overline" sx={{ color: 'text.secondary', letterSpacing: 1 }}>
-              {format(parseISO(featured.published_at), 'MMMM d, yyyy')}
-            </Typography>
-            <Typography variant="h4" component="h2" sx={{ fontWeight: 900, mt: 0.5, mb: 1.5, fontSize: { xs: 22, sm: 28 } }}>
-              {featured.headline}
-            </Typography>
-            <Typography sx={{ color: 'text.secondary', mb: 2, lineHeight: 1.6 }}>
-              {featured.summary}
-            </Typography>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
-              {(featured.labels ?? []).map((l) => (
-                <Chip key={l} label={l} size="small" variant="outlined" sx={{ fontSize: 11 }} />
-              ))}
-            </Box>
-            <Typography sx={{ mt: 2, fontWeight: 800, color: 'primary.light' }}>Read full article →</Typography>
-          </Paper>
-        )}
+          {lead.opinion && (
+            <Paper
+              component={RouterLink}
+              to={`/news/${lead.opinion.slug}`}
+              sx={{
+                p: { xs: 2.5, sm: 3 },
+                textDecoration: 'none',
+                color: 'inherit',
+                display: 'block',
+                border: '2px solid',
+                borderColor: 'rgba(250, 204, 21, 0.35)',
+                background: 'linear-gradient(135deg, rgba(250, 204, 21, 0.08) 0%, rgba(12, 19, 34, 0.4) 100%)',
+              }}
+            >
+              <SectionKicker section="opinion" publishedAt={lead.opinion.published_at} />
+              <Typography variant="h5" component="h2" sx={{ fontWeight: 900, mt: 0.5, mb: 1 }}>
+                {lead.opinion.headline}
+              </Typography>
+              <PreviewCopy text={previewText(lead.opinion, FRONT_PREVIEW_PARAS)} prominent />
+            </Paper>
+          )}
 
-        {!loading && !error && rest.length > 0 && (
-          <>
-            <Divider sx={{ my: 1 }} />
-            <Typography variant="h6" sx={{ fontWeight: 800 }}>
-              Earlier articles
-            </Typography>
-            <Grid container spacing={2}>
-              {rest.map((r) => (
-                <Grid item xs={12} sm={6} key={r.id}>
-                  <Paper
-                    component={RouterLink}
-                    to={`/news/${r.slug}`}
-                    sx={{
-                      p: 2.25,
-                      height: '100%',
-                      textDecoration: 'none',
-                      color: 'inherit',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      border: '1px solid',
-                      borderColor: 'divider',
-                      transition: 'border-color 0.15s, background 0.15s',
-                      '&:hover': {
-                        borderColor: 'primary.main',
-                        bgcolor: 'action.hover',
-                      },
-                    }}
-                  >
-                    <Typography variant="caption" sx={{ color: 'text.secondary', mb: 0.5 }}>
-                      {format(parseISO(r.published_at), 'MMM d, yyyy')}
-                    </Typography>
-                    <Typography sx={{ fontWeight: 800, mb: 1, lineHeight: 1.35 }}>{r.headline}</Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ flex: 1, lineHeight: 1.5 }}>
-                      {r.summary.length > 160 ? `${r.summary.slice(0, 157)}…` : r.summary}
-                    </Typography>
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 1.5 }}>
-                      {(r.labels ?? []).slice(0, 4).map((l) => (
-                        <Chip key={l} label={l} size="small" variant="outlined" sx={{ height: 22, fontSize: 10 }} />
-                      ))}
-                    </Box>
-                  </Paper>
+          {sourceCount > 0 && (
+            <Accordion
+              disableGutters
+              elevation={0}
+              sx={{
+                borderRadius: '12px !important',
+                border: '1px solid',
+                borderColor: 'divider',
+                bgcolor: 'background.paper',
+                '&:before': { display: 'none' },
+                overflow: 'hidden',
+              }}
+            >
+              <AccordionSummary
+                expandIcon={<ExpandMoreIcon />}
+                sx={{
+                  px: { xs: 2, sm: 2.5 },
+                  '& .MuiAccordionSummary-content': { my: 1.25, alignItems: 'center', gap: 1 },
+                }}
+              >
+                <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>Sources</Typography>
+                <Chip size="small" label={sourceCount} variant="outlined" sx={{ fontWeight: 700 }} />
+              </AccordionSummary>
+              <AccordionDetails sx={{ px: { xs: 2, sm: 2.5 }, pb: 2.5, pt: 0 }}>
+                <Grid container spacing={2}>
+                  {FRONT_PAGE_SECTIONS.map((section) => {
+                    const sources = sourcesBySection[section] ?? [];
+                    if (!sources || sources.length === 0) return null;
+                    return (
+                      <Grid item xs={12} sm={6} key={section}>
+                        <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: 0.8, textTransform: 'uppercase', color: 'text.secondary' }}>
+                          {SECTION_LABELS[section]}
+                        </Typography>
+                        <Stack spacing={0.75} sx={{ mt: 0.75 }}>
+                          {sources.map((source, index) => (
+                            <Typography
+                              key={`${source?.url ?? ''}-${index}`}
+                              component="a"
+                              href={source?.url ?? '#'}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              variant="body2"
+                              sx={{ color: 'primary.light', textDecoration: 'none', fontWeight: 600, wordBreak: 'break-word' }}
+                            >
+                              {source?.title || source?.url}
+                              {source?.source ? ` — ${source.source}` : ''}
+                            </Typography>
+                          ))}
+                        </Stack>
+                      </Grid>
+                    );
+                  })}
                 </Grid>
-              ))}
-            </Grid>
-          </>
-        )}
+              </AccordionDetails>
+            </Accordion>
+          )}
+
+          {archive.length > 0 && (
+            <>
+              <Divider />
+              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                <Typography variant="h6" sx={{ fontWeight: 800, mr: 1 }}>Archive</Typography>
+                <Chip
+                  label="All"
+                  size="small"
+                  onClick={() => setSectionFilter('all')}
+                  color={sectionFilter === 'all' ? 'primary' : 'default'}
+                  variant={sectionFilter === 'all' ? 'filled' : 'outlined'}
+                />
+                {FRONT_PAGE_SECTIONS.map((section) => (
+                  <Chip
+                    key={section}
+                    label={SECTION_LABELS[section]}
+                    size="small"
+                    onClick={() => setSectionFilter(section)}
+                    color={sectionFilter === section ? 'primary' : 'default'}
+                    variant={sectionFilter === section ? 'filled' : 'outlined'}
+                  />
+                ))}
+              </Stack>
+              <Grid container spacing={2}>
+                {pagedArchive.map((row) => (
+                  <Grid item xs={12} sm={6} key={row.id}>
+                    <SectionCard
+                      article={row}
+                      section={isFrontPageSection(row.section) ? row.section : 'market'}
+                      compact
+                    />
+                  </Grid>
+                ))}
+              </Grid>
+              {archivePageCount > 1 && (
+                <Box sx={{ display: 'flex', justifyContent: 'center' }}>
+                  <Pagination
+                    count={archivePageCount}
+                    page={currentArchivePage}
+                    onChange={(_, page) => setArchivePage(page)}
+                    color="primary"
+                    shape="rounded"
+                  />
+                </Box>
+              )}
+            </>
+          )}
         </Stack>
-      </Box>
+      )}
     </Box>
   );
 };
+
+function SectionKicker({ section, publishedAt }: { section: FrontPageSection; publishedAt: string }) {
+  return (
+    <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+      <Typography variant="overline" sx={{ color: 'primary.light', letterSpacing: 1.2, fontWeight: 800 }}>
+        {SECTION_LABELS[section]}
+      </Typography>
+      <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+        {articleDate(publishedAt)} · {relativeAgeLabel(publishedAt)}
+      </Typography>
+    </Stack>
+  );
+}
+
+function PreviewCopy({ text, prominent = false }: { text: string; prominent?: boolean }) {
+  return (
+    <Typography
+      sx={{
+        color: 'text.secondary',
+        lineHeight: 1.7,
+        whiteSpace: 'pre-wrap',
+        minHeight: prominent ? FRONT_PREVIEW_MIN_HEIGHT : { xs: 200, sm: 260 },
+      }}
+    >
+      {text}
+    </Typography>
+  );
+}
+
+function SectionCard({
+  article,
+  section,
+  compact = false,
+}: {
+  article: NewsRow;
+  section: FrontPageSection;
+  compact?: boolean;
+}) {
+  return (
+    <Paper
+      component={RouterLink}
+      to={`/news/${article.slug}`}
+      sx={{
+        p: compact ? 2.25 : 2.5,
+        height: '100%',
+        textDecoration: 'none',
+        color: 'inherit',
+        display: 'flex',
+        flexDirection: 'column',
+        border: '1px solid',
+        borderColor: 'divider',
+        '&:hover': { borderColor: 'primary.main', bgcolor: 'action.hover' },
+      }}
+    >
+      <SectionKicker section={section} publishedAt={article.published_at} />
+      <Typography sx={{ fontWeight: 800, mb: 1, lineHeight: 1.35, fontSize: compact ? 16 : 18 }}>
+        {article.headline}
+      </Typography>
+      {compact ? (
+        <Typography variant="body2" color="text.secondary" sx={{ flex: 1, lineHeight: 1.55 }}>
+          {article.summary.length > 180 ? `${article.summary.slice(0, 177)}…` : article.summary}
+        </Typography>
+      ) : (
+        <PreviewCopy text={previewText(article, FRONT_PREVIEW_PARAS)} />
+      )}
+    </Paper>
+  );
+}
 
 export default News;

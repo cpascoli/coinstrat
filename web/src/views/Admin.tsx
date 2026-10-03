@@ -85,6 +85,7 @@ interface DailyNewsResult {
   slug: string | null;
   date: string;
   sourceCount: number;
+  sections?: DailyNewsSectionOutcome[];
   article?: {
     headline: string;
     summary: string;
@@ -99,8 +100,18 @@ interface DailyNewsResult {
 
 type DailyNewsArticle = NonNullable<DailyNewsResult['article']>;
 
-function todaysDailyNewsSlug(): string {
-  return `bitcoin-news-${new Date().toISOString().slice(0, 10)}`;
+type DailyNewsSectionStatus = 'published' | 'kept' | 'failed';
+
+interface DailyNewsSectionOutcome {
+  section: string;
+  status: DailyNewsSectionStatus;
+  reason: string;
+  slug: string | null;
+  headline: string | null;
+}
+
+function todaysNewsDate(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 type NewsletterAudienceMode = 'all' | 'newsletter_only' | 'paid_only';
@@ -937,8 +948,7 @@ const Admin: React.FC = () => {
     setDailyNewsMessage(null);
     setDailyNewsResult(null);
 
-    const slug = todaysDailyNewsSlug();
-    const date = slug.replace('bitcoin-news-', '');
+    const date = todaysNewsDate();
 
     const mapRow = (row: any): DailyNewsArticle => ({
       headline: row.headline,
@@ -951,20 +961,9 @@ const Admin: React.FC = () => {
       imageAlt: row.image_alt ?? null,
     });
 
-    const showArticle = (article: DailyNewsArticle) => {
-      setDailyNewsResult({ ok: true, skipped: false, reason: '', slug, date, sourceCount: article.sources.length, article });
-    };
-
     try {
-      // Capture current state so we can detect a fresh (re)generation and a NEW
-      // image (the row keeps its previous image_url until the new one attaches).
-      const before = await sb.from('news_articles').select('updated_at, image_url').eq('slug', slug).maybeSingle();
-      const beforeUpdatedAt: string | null = before.data?.updated_at ?? null;
-      const beforeImageUrl: string | null = before.data?.image_url ?? null;
+      const startedAfter = new Date(Date.now() - 2000).toISOString();
 
-      // Background function returns 202 immediately; the work continues server-side.
-      // Invoke the function path directly (background mode is driven by the
-      // -background suffix; calling it directly avoids any redirect ambiguity).
       const res = await fetch('/.netlify/functions/daily-news-background', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
@@ -976,60 +975,60 @@ const Admin: React.FC = () => {
 
       setDailyNewsMessage({
         severity: 'success',
-        text: 'Generation started in the background — this can take up to a minute. Waiting for the article…',
+        text: 'Front-page generation started — this can take a few minutes. Waiting for the run to finish…',
       });
 
-      // Poll the database for the freshly published article + image.
-      const overallDeadline = Date.now() + 150_000;
-      let textArticle: DailyNewsArticle | null = null;
-      let imageDeadline = Number.POSITIVE_INFINITY;
-
-      while (Date.now() < overallDeadline && Date.now() < imageDeadline) {
+      const overallDeadline = Date.now() + 240_000;
+      while (Date.now() < overallDeadline) {
         await new Promise((r) => setTimeout(r, 4000));
 
-        const { data } = await sb
-          .from('news_articles')
-          .select('headline, summary, body, labels, sources, image_url, image_alt, published_at, updated_at')
-          .eq('slug', slug)
+        const { data: run } = await sb
+          .from('news_runs')
+          .select('id, status, sections, error, finished_at, started_at')
+          .eq('run_date', date)
+          .gte('started_at', startedAfter)
+          .order('started_at', { ascending: false })
+          .limit(1)
           .maybeSingle();
 
-        if (!data || !data.updated_at || data.updated_at === beforeUpdatedAt) continue;
+        if (!run || run.status === 'running') continue;
 
-        const article = mapRow(data);
-        // Only the freshly generated image counts — a leftover URL from a prior
-        // run must not end the wait, or we'd show the old image.
-        const imageIsNew = !!article.imageUrl && article.imageUrl !== beforeImageUrl;
-        const displayArticle: DailyNewsArticle = imageIsNew
-          ? article
-          : { ...article, imageUrl: null, imageAlt: null };
-
-        if (!textArticle) {
-          textArticle = displayArticle;
-          showArticle(displayArticle);
-          setDailyNewsMessage({ severity: 'success', text: 'Article published — generating image…' });
-          // Wait up to ~90s more specifically for the new image to attach.
-          imageDeadline = Date.now() + 90_000;
-        } else {
-          showArticle(displayArticle);
+        const sections = Object.values((run.sections ?? {}) as Record<string, DailyNewsSectionOutcome>);
+        const market = sections.find((section) => section.section === 'market' && section.slug);
+        let article: DailyNewsArticle | undefined;
+        if (market?.slug) {
+          const { data: row } = await sb
+            .from('news_articles')
+            .select('headline, summary, body, labels, sources, image_url, image_alt, published_at')
+            .eq('slug', market.slug)
+            .maybeSingle();
+          if (row) article = mapRow(row);
         }
 
-        if (imageIsNew) {
-          setDailyNewsMessage({ severity: 'success', text: 'Article and image generated and published.' });
-          return;
-        }
-      }
+        setDailyNewsResult({
+          ok: run.status === 'finished',
+          skipped: false,
+          reason: run.error ?? '',
+          slug: market?.slug ?? null,
+          date,
+          sourceCount: article?.sources.length ?? 0,
+          sections,
+          article,
+        });
 
-      if (textArticle) {
+        const published = sections.filter((section) => section.status === 'published').length;
+        const kept = sections.filter((section) => section.status === 'kept').length;
+        const failed = sections.filter((section) => section.status === 'failed').length;
         setDailyNewsMessage({
-          severity: 'error',
-          text: 'Article published, but no new image was attached (the image step may have failed or timed out). Check the Netlify function logs for the image request, then try again.',
+          severity: failed > 0 || run.status === 'failed' ? 'error' : 'success',
+          text: `Run ${run.status}: ${published} published, ${kept} kept previous, ${failed} failed.`,
         });
         return;
       }
 
       setDailyNewsMessage({
         severity: 'error',
-        text: 'Timed out waiting for the article. It may have been skipped (too few sources in the last 24h) or generation failed — check the Netlify function logs, then try again.',
+        text: 'Timed out waiting for the front-page run. Check the Netlify function logs, then try again.',
       });
     } catch (err: any) {
       setDailyNewsResult(null);
@@ -1653,11 +1652,11 @@ const Admin: React.FC = () => {
             <Stack spacing={1.75}>
               <Stack direction="row" alignItems="center" spacing={1}>
                 <Newspaper size={18} />
-                <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>Daily News Article</Typography>
+                <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>Daily News Front Page</Typography>
               </Stack>
 
               <Typography variant="body2" color="text.secondary">
-                The scheduler runs automatically every day at 06:00 UTC: it gathers Bitcoin headlines from the last 24 hours, writes one original, cohesive story, generates a pop-art illustration, and publishes it to the public News page with an attributed source list. Use the button below to generate (or regenerate) today&apos;s article now — it overwrites the same day&apos;s post. Generation runs in the background and can take up to a minute; the preview appears here automatically when it&apos;s ready.
+                The scheduler runs every day at 06:00 UTC and writes up to four section articles (Markets, Development, Culture, Analysis). A section only republishes when it has enough sources first published in the previous 24 hours; otherwise the previous article stays up. Use the button to run the job now. Generation can take a few minutes; this page polls the run record for each section&apos;s outcome.
               </Typography>
 
               <Box>
@@ -1668,11 +1667,46 @@ const Admin: React.FC = () => {
                   startIcon={dailyNewsBusy ? <CircularProgress size={14} color="inherit" /> : <RefreshCw size={14} />}
                   sx={{ textTransform: 'none', fontWeight: 700 }}
                 >
-                  {dailyNewsBusy ? 'Generating…' : "Generate & preview today's article"}
+                  {dailyNewsBusy ? 'Generating…' : "Generate today's front page"}
                 </Button>
               </Box>
             </Stack>
           </Paper>
+
+          {dailyNewsResult?.sections && dailyNewsResult.sections.length > 0 && (
+            <Paper sx={{ p: 2.5 }}>
+              <Stack spacing={1.25}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>Section outcomes</Typography>
+                {dailyNewsResult.sections.map((section) => (
+                  <Stack key={section.section} direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
+                    <Chip
+                      size="small"
+                      label={section.status}
+                      color={section.status === 'published' ? 'success' : section.status === 'kept' ? 'warning' : 'error'}
+                    />
+                    <Typography sx={{ fontWeight: 700, textTransform: 'capitalize', minWidth: 110 }}>
+                      {section.section}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {section.reason}
+                    </Typography>
+                    {section.slug && (
+                      <Button
+                        component="a"
+                        href={`/news/${section.slug}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        size="small"
+                        sx={{ textTransform: 'none', fontWeight: 700 }}
+                      >
+                        Open
+                      </Button>
+                    )}
+                  </Stack>
+                ))}
+              </Stack>
+            </Paper>
+          )}
 
           {dailyNewsResult?.article && !dailyNewsResult.skipped && (
             <Paper sx={{ p: 2.5 }}>

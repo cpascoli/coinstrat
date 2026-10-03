@@ -1,12 +1,11 @@
 import type { Handler } from '@netlify/functions';
 import { authorizeAdminOrCron } from './lib/auth';
-import { runDailyNewsGeneration } from './lib/dailyNews';
+import { runFrontPageGeneration } from './lib/frontPage';
 
 /**
- * Background function (15-minute limit). Article + AI image generation routinely
- * exceeds the 60s synchronous and 30s scheduled function limits, so the heavy
- * work runs here. The client receives an immediate 202 and polls the database
- * for the published article.
+ * Background function (15-minute limit). Four section writers plus an editor
+ * pass and the market hero image routinely exceed the 60s gateway, so the
+ * scheduled trigger kicks this function and the Admin UI polls `news_runs`.
  *
  * Auth: Bearer CRON_SECRET (scheduled trigger) or admin Supabase JWT (Admin UI).
  */
@@ -18,7 +17,7 @@ export const handler: Handler = async (event) => {
   }
 
   try {
-    const result = await runDailyNewsGeneration();
+    const result = await runFrontPageGeneration({ trigger: auth.kind === 'cron' ? 'scheduled' : 'admin' });
     console.log('[daily-news-background]', JSON.stringify(result));
   } catch (err) {
     console.error('[daily-news-background]', err);

@@ -9,7 +9,7 @@ process.env.VITE_SUPABASE_URL ??= 'https://stub.supabase.co';
 process.env.VITE_SUPABASE_ANON_KEY ??= 'stub-anon-key';
 process.env.RESEND_API_KEY ??= 'stub-resend-key';
 
-const { classifyNewsTopic, selectWeeklyStories, isNearDuplicateTitle } = await import(
+const { classifyNewsTopic, selectWeeklyStories, isNearDuplicateTitle, extractPagePublishedAt } = await import(
   '../netlify/functions/lib/newsletter'
 );
 
@@ -50,6 +50,32 @@ describe('isNearDuplicateTitle', () => {
     const a = 'Bitcoin Core 30 release adds mempool policy changes';
     const b = 'Spot ETF inflows hit a monthly record as macro eases';
     expect(isNearDuplicateTitle(a, b)).toBe(false);
+  });
+});
+
+describe('extractPagePublishedAt', () => {
+  it('reads OpenGraph article:published_time', () => {
+    const html = '<head><meta property="article:published_time" content="2026-04-28T13:52:00Z"></head>';
+    expect(extractPagePublishedAt(html)).toBe('2026-04-28T13:52:00.000Z');
+  });
+
+  it('reads JSON-LD datePublished', () => {
+    const html = '<script type="application/ld+json">{"@type":"NewsArticle","datePublished":"2026-07-18T06:00:00+00:00"}</script>';
+    expect(extractPagePublishedAt(html)).toBe('2026-07-18T06:00:00.000Z');
+  });
+
+  it('reads datePublished from meta itemprop and time elements', () => {
+    expect(
+      extractPagePublishedAt('<meta itemprop="datePublished" content="2026-05-01T00:00:00Z">'),
+    ).toBe('2026-05-01T00:00:00.000Z');
+    expect(
+      extractPagePublishedAt('<time itemprop="datePublished" datetime="2026-05-02T12:00:00Z">May 2</time>'),
+    ).toBe('2026-05-02T12:00:00.000Z');
+  });
+
+  it('returns null when no usable date is present', () => {
+    expect(extractPagePublishedAt('<html><body>no metadata here</body></html>')).toBeNull();
+    expect(extractPagePublishedAt('<meta property="article:published_time" content="not-a-date">')).toBeNull();
   });
 });
 
@@ -110,5 +136,30 @@ describe('selectWeeklyStories', () => {
 
     expect(picked).toHaveLength(10);
     expect(picked.every((s) => s.topic === 'markets')).toBe(true);
+  });
+
+  it('honors custom limit and quotas (daily news profile)', () => {
+    const markets = DISTINCT_MARKET_TITLES.slice(0, 6).map((title) => candidate(title, 'markets'));
+    const dev = [
+      candidate('Bitcoin Core ships new mempool policy release', 'development'),
+      candidate('Covenant soft fork proposal enters developer review', 'development'),
+      candidate('Lightning wallet adds privacy-preserving payment routing', 'development'),
+    ];
+    const culture = [
+      candidate('Grassroots circular economy grows in coastal town', 'culture'),
+      candidate('Documentary on mining communities premieres at festival', 'culture'),
+      candidate('Human rights foundation funds education workshops abroad', 'culture'),
+    ];
+
+    const picked = selectWeeklyStories(
+      [...markets, ...dev, ...culture],
+      8,
+      { markets: 4, development: 2, culture: 2 },
+    );
+
+    expect(picked).toHaveLength(8);
+    expect(picked.filter((s) => s.topic === 'markets')).toHaveLength(4);
+    expect(picked.filter((s) => s.topic === 'development')).toHaveLength(2);
+    expect(picked.filter((s) => s.topic === 'culture')).toHaveLength(2);
   });
 });
