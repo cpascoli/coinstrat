@@ -1,13 +1,18 @@
 import type { Config } from '@netlify/functions';
-import { runScheduledAlertsWorkflow } from './lib/scheduledAlertsWorkflow';
+
+/**
+ * Scheduled trigger (every 4 hours). Scheduled functions are hard-capped at 30s,
+ * which is too short for incremental signal refresh + alert delivery (~25s+),
+ * so this only fires the background function (15-minute limit) and returns
+ * immediately — same pattern as scheduled-newsletter / scheduled-daily-news.
+ */
+export const config: Config = {
+  schedule: '0 */4 * * *',
+};
 
 interface ScheduledInvocationBody {
   next_run?: string;
 }
-
-export const config: Config = {
-  schedule: '0 */4 * * *',
-};
 
 async function readScheduledBody(request: Request): Promise<ScheduledInvocationBody> {
   try {
@@ -18,20 +23,41 @@ async function readScheduledBody(request: Request): Promise<ScheduledInvocationB
 }
 
 export default async (request: Request): Promise<Response> => {
+  const base = process.env.URL || process.env.DEPLOY_PRIME_URL || process.env.VITE_APP_URL || '';
+  const cronSecret = process.env.CRON_SECRET || '';
+
   try {
+    if (!base) {
+      throw new Error('Site URL (process.env.URL) is unavailable; cannot invoke background function.');
+    }
+
     const body = await readScheduledBody(request);
-    const result = await runScheduledAlertsWorkflow(50);
-    const payload = {
-      ...result,
-      scheduled_for: body.next_run ?? null,
-    };
-
-    console.log('[scheduled-alerts]', JSON.stringify(payload));
-
-    return new Response(JSON.stringify(payload), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
+    const res = await fetch(`${base}/.netlify/functions/scheduled-alerts-background`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${cronSecret}`,
+      },
+      body: JSON.stringify({
+        trigger: 'scheduled',
+        next_run: body.next_run ?? null,
+      }),
     });
+
+    console.log('[scheduled-alerts] triggered background function', res.status);
+
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        triggered: true,
+        status: res.status,
+        scheduled_for: body.next_run ?? null,
+      }),
+      {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      },
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error('[scheduled-alerts]', error);

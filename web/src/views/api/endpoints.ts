@@ -183,7 +183,7 @@ export const endpointGroups: EndpointGroup[] = [
         path: '/api/admin/alerts',
         summary: 'Run scheduled alert workflow',
         description:
-          'Admin-only manual trigger for the same workflow used by the 4-hour scheduled alert job: refresh the signal cache, create any new fixed/strategy alert events, and deliver up to 50 pending alert emails.',
+          'Admin-only manual trigger for the same workflow used by the 4-hour scheduled alert job: refresh the signal cache, create any new fixed/strategy alert events, and deliver up to 50 pending alert emails. The cron path runs this via scheduled-alerts-background (15-minute limit) because Netlify caps scheduled functions at 30s.',
         auth: 'admin_jwt',
       },
       {

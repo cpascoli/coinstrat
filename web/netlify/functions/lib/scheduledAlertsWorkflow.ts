@@ -41,6 +41,11 @@ export async function getScheduledAlertsStatus(limit = 50): Promise<ScheduledAle
   };
 }
 
+/**
+ * Heavy path: incremental signal refresh + up to `limit` alert deliveries.
+ * Invoked from `scheduled-alerts-background` (15 min). Do not call this
+ * directly from the 30s `scheduled-alerts` cron trigger.
+ */
 export async function runScheduledAlertsWorkflow(limit = 50): Promise<ScheduledAlertsWorkflowResult> {
   const refresh = await runSignalRefresh('incremental');
   const deliveries = await processPendingAlertDeliveries(limit);

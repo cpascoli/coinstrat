@@ -28,8 +28,11 @@
 [functions."signal-refresh"]
   timeout = 60
 
+# scheduled-alerts only kicks scheduled-alerts-background (30s scheduled cap).
+# The background function inherits Netlify's 15-minute background limit via the
+# `-background` filename suffix — do not rely on timeout here for the heavy work.
 [functions."scheduled-alerts"]
-  timeout = 60
+  timeout = 26
 
 # scheduled-cqm-bot only kicks scheduled-cqm-bot-background. Cold start plus
 # fitCQM() does not fit in the 30s scheduled cap.
