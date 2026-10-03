@@ -48,6 +48,11 @@ import {
   CQM_DEFAULT_SELL_THRESHOLD,
   CQM_FAIR_RISK,
 } from '../../utils/cqmSizing';
+import {
+  assessCoinbaseGbp,
+  coinbaseGbpWarningText,
+} from '../../utils/cqmBotCashCheck';
+import { CoinbaseGbpWarningAlert } from './CoinbaseGbpWarningAlert';
 
 /**
  * CQM Risk DCA Bot admin panel (`/bot`).
@@ -479,6 +484,17 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
     return `${tgt.side} £${tgt.amount_gbp.toFixed(2)}`;
   }, [status]);
 
+  const gbpCheck = useMemo(
+    () => assessCoinbaseGbp({
+      gbp: status?.balances?.gbp,
+      targetSide: status?.target?.side,
+      targetAmountGbp: status?.target?.amount_gbp,
+      baseAmountGbp: status?.settings.base_amount_gbp,
+    }),
+    [status],
+  );
+  const gbpWarning = coinbaseGbpWarningText(gbpCheck);
+
   if (loading) {
     return (
       <Paper sx={{ p: 4, textAlign: 'center' }}>
@@ -496,6 +512,7 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
           Some live data could not be fetched from Coinbase: {Object.entries(status.partial_errors).map(([k, v]) => `${k}: ${v}`).join(' · ')}
         </Alert>
       )}
+      {gbpWarning && <CoinbaseGbpWarningAlert check={gbpCheck} />}
 
       {/* --- Cumulative Stats -------------------------------------------- */}
       <Paper sx={{ p: 2.5 }}>
@@ -571,6 +588,19 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
                 color: status?.settings.enabled ? '#22c55e' : '#f59e0b',
               }}
             />
+            {gbpWarning && (
+              <Chip
+                size="small"
+                label="GBP too low"
+                sx={{
+                  fontWeight: 700,
+                  bgcolor: gbpCheck.status === 'short_for_buy'
+                    ? 'rgba(239,68,68,0.14)'
+                    : 'rgba(245,158,11,0.14)',
+                  color: gbpCheck.status === 'short_for_buy' ? '#ef4444' : '#f59e0b',
+                }}
+              />
+            )}
           </Stack>
           <Stack direction="row" alignItems="center" spacing={1}>
             <Button
@@ -633,7 +663,18 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
         </Stack>
 
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={3} useFlexGap flexWrap="wrap" sx={{ mb: 2 }}>
-          <KV label="GBP balance" value={balances?.gbp != null ? `£${balances.gbp.toFixed(2)}` : '—'} />
+          <KV
+            label="GBP balance"
+            value={balances?.gbp != null ? `£${balances.gbp.toFixed(2)}` : '—'}
+            color={gbpWarning ? (gbpCheck.status === 'short_for_buy' ? '#ef4444' : '#f59e0b') : undefined}
+            sub={
+              gbpWarning
+                ? 'below next buy — top up Advanced Trade cash'
+                : balances?.gbp != null
+                  ? 'Coinbase Advanced Trade cash, not strategy ledger'
+                  : undefined
+            }
+          />
           <KV
             label="BTC balance"
             value={balances?.btc != null
@@ -731,7 +772,9 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
               {status?.target?.side === 'NONE' ? 'No trade due' : `Execute ${status?.target?.side ?? ''} trade`}
             </Button>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-              {status?.frequency_guard?.guard_reason ?? 'Ready for trade.'}
+              {gbpWarning ? 'Coinbase GBP is too low for this order. ' : null}
+              {status?.frequency_guard?.guard_reason
+                ?? (gbpWarning ? null : 'Ready for trade.')}
               {status?.frequency_guard?.next_slot_at && !status.frequency_guard.can_execute && (
                 <> Next slot: {new Date(status.frequency_guard.next_slot_at).toLocaleString()}.</>
               )}
@@ -1002,6 +1045,12 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
               mono
             />
             <KV
+              label="Coinbase GBP"
+              value={balances?.gbp != null ? `£${balances.gbp.toFixed(2)}` : '—'}
+              color={gbpWarning ? (gbpCheck.status === 'short_for_buy' ? '#ef4444' : '#f59e0b') : undefined}
+              mono
+            />
+            <KV
               label="Reference BTC-GBP"
               value={btcGbp != null ? `£${btcGbp.toLocaleString()}` : '—'}
               mono
@@ -1028,6 +1077,7 @@ const CqmBotTab: React.FC<CqmBotTabProps> = ({ authHeaders }) => {
               value={status?.risk?.signal_date ?? '—'}
               mono
             />
+            {gbpWarning && <CoinbaseGbpWarningAlert check={gbpCheck} />}
           </Stack>
         </DialogContent>
         <DialogActions>
@@ -1288,11 +1338,12 @@ const RoiTooltip: React.FC<any> = ({ active, payload }) => {
   );
 };
 
-const KV: React.FC<{ label: string; value: string; sub?: string; mono?: boolean }> = ({
+const KV: React.FC<{ label: string; value: string; sub?: string; mono?: boolean; color?: string }> = ({
   label,
   value,
   sub,
   mono,
+  color,
 }) => (
   <Box>
     <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
@@ -1300,7 +1351,7 @@ const KV: React.FC<{ label: string; value: string; sub?: string; mono?: boolean 
     </Typography>
     <Typography
       variant="body1"
-      sx={{ fontWeight: 700, fontFamily: mono ? 'monospace' : undefined }}
+      sx={{ fontWeight: 700, fontFamily: mono ? 'monospace' : undefined, color }}
     >
       {value}
     </Typography>
