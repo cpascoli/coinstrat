@@ -211,6 +211,10 @@ fall back to the older "invert the EQM Risk envelope at risks `0%`, `50%`,
 
 ## Setup
 
+Requires Python 3.10 or newer (`requests>=2.33.0` does not support older
+versions; the macOS system `python3` is 3.9, so use a Homebrew or pyenv
+interpreter, e.g. `python3.12 -m venv ...`).
+
 From the repository root:
 
 ```bash
